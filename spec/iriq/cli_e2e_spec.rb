@@ -99,4 +99,45 @@ describe "iriq CLI (end-to-end)" do
     expect(status.exitstatus).to eq(2)
     expect(err).to include("parse error")
   end
+
+  describe "IriGenerator stream → CLI" do
+    let(:corpus_path) do
+      f = Tempfile.new(["iriq-e2e-gen", ".json"])
+      f.close
+      File.delete(f.path)
+      f.path
+    end
+    after { File.delete(corpus_path) if File.exist?(corpus_path) }
+
+    let(:url_stream) { IriGenerator.urls(count: 3000, seed: 1234).join("\n") + "\n" }
+
+    it "ingests a 3k-URL stream and produces stable stats" do
+      out, _err, st = iriq("--corpus", corpus_path, "--stats", "--json", stdin: url_stream)
+      expect(st.exitstatus).to eq(0)
+
+      data = JSON.parse(out)
+      expect(data["observations"]).to eq(3000)
+      expect(data["hosts"].keys).to contain_exactly(*IriGenerator::HOSTS)
+      expect(data["shapes"]).to include("/users/{user_id}", "/sessions/{session_uuid}")
+    end
+
+    it "persists the corpus across invocations (re-reads identical stats)" do
+      out1, _, _ = iriq("--corpus", corpus_path, "--stats", "--json", stdin: url_stream)
+      out2, _, _ = iriq("--corpus", corpus_path, "--stats", "--json")
+      expect(JSON.parse(out2)).to eq(JSON.parse(out1))
+    end
+
+    it "corpus-informed normalize learns workspace patterns from the stream" do
+      _, _, st = iriq("--corpus", corpus_path, stdin: url_stream)
+      expect(st.exitstatus).to eq(0)
+
+      # Popular workspace stays literal
+      pop, _, _ = iriq("-n", "--corpus", corpus_path, "https://app.example.com/workspaces/primary")
+      expect(pop.strip).to eq("https://app.example.com/workspaces/primary")
+
+      # One-shot vocab word gets promoted to {workspace}
+      one, _, _ = iriq("-n", "--corpus", corpus_path, "https://app.example.com/workspaces/sigma")
+      expect(one.strip).to eq("https://app.example.com/workspaces/{workspace}")
+    end
+  end
 end
