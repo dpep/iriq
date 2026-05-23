@@ -2,6 +2,7 @@ require "debug"
 require "rspec"
 require "rspec/debugging"
 require "simplecov"
+require "tempfile"
 
 SimpleCov.start do
   add_filter "/spec/"

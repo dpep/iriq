@@ -1,0 +1,4 @@
+#!/usr/bin/env ruby
+require "iriq"
+
+exit Iriq::CLI.new.run(ARGV)

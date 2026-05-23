@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    MY_NEW_GEM (0.0.0)
+    iriq (0.0.0)
 
 GEM
   remote: https://rubygems.org/
@@ -60,14 +60,13 @@ PLATFORMS
   ruby
 
 DEPENDENCIES
-  MY_NEW_GEM!
   debug (>= 1)
+  iriq!
   rspec (>= 3.10)
   rspec-debugging
   simplecov (>= 0.22)
 
 CHECKSUMS
-  MY_NEW_GEM (0.0.0)
   date (3.5.1) sha256=750d06384d7b9c15d562c76291407d89e368dda4d4fff957eb94962d325a0dc0
   debug (1.11.1) sha256=2e0b0ac6119f2207a6f8ac7d4a73ca8eb4e440f64da0a3136c30343146e952b6
   diff-lcs (1.6.2) sha256=9ae0d2cba7d4df3075fe8cd8602a8604993efc0dfa934cff568969efb1909962
@@ -75,6 +74,7 @@ CHECKSUMS
   erb (6.0.4) sha256=38e3803694be357fe2bfe312487c74beaf9fb4e5beb3e22498952fe1645b95d9
   io-console (0.8.2) sha256=d6e3ae7a7cc7574f4b8893b4fca2162e57a825b223a177b7afa236c5ef9814cc
   irb (1.17.0) sha256=168c4ddb93d8a361a045c41d92b2952c7a118fa73f23fe14e55609eb7a863aae
+  iriq (0.0.0)
   pp (0.6.3) sha256=2951d514450b93ccfeb1df7d021cae0da16e0a7f95ee1e2273719669d0ab9df6
   prettyprint (0.2.0) sha256=2bc9e15581a94742064a3cc8b0fb9d45aae3d03a1baa6ef80922627a0766f193
   prism (1.9.0) sha256=7b530c6a9f92c24300014919c9dcbc055bf4cdf51ec30aed099b06cd6674ef85
