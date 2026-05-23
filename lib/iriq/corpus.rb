@@ -12,8 +12,15 @@ module Iriq
     VARIABLE_DOMINANCE_THRESHOLD = 0.8
 
     # Cardinality-based: position has mostly distinct literal values, so the
-    # literal "type" is misleading — it's really a variable slot.
-    LITERAL_UNIQUENESS_THRESHOLD = 0.8
+    # literal "type" is misleading — it's really a variable slot. We trigger
+    # on either:
+    #   - very high cardinality fraction (most observations are singletons), OR
+    #   - moderate cardinality fraction AND high absolute distinct count
+    # The second branch catches realistic streams where popular outliers
+    # bring the frac down but the long tail is clearly variable.
+    LITERAL_UNIQUENESS_THRESHOLD          = 0.8
+    LITERAL_UNIQUENESS_MODERATE_THRESHOLD = 0.5
+    MIN_CARDINALITY_FOR_INFERENCE         = 20
 
     # Don't apply corpus heuristics until we have at least this many
     # observations at a position — too easy to be wrong with tiny samples.
@@ -22,6 +29,14 @@ module Iriq
     # Value-fraction at or above which a literal is considered the stable
     # occupant of its position.
     STABLE_LITERAL_THRESHOLD = 0.5
+
+    # Within a high-cardinality literal position (mostly singletons), a
+    # specific value qualifies as a "popular outlier" — and gets preserved
+    # as :stable_literal instead of being lumped into :corpus_inferred_variable
+    # — when its count is at least POPULAR_MIN_COUNT and its frequency is at
+    # least POPULAR_BASELINE_MULTIPLE × the uniform baseline (1/cardinality).
+    POPULAR_MIN_COUNT         = 5
+    POPULAR_BASELINE_MULTIPLE = 3
 
     attr_reader :host_counts, :path_length_counts, :raw_shape_counts,
                 :fingerprint_counts, :position_stats
@@ -158,9 +173,12 @@ module Iriq
         # This specific value dominates — preserve it regardless of how
         # diverse the rest of the position is.
         :stable_literal
-      elsif enough_data && cardinality_frac >= LITERAL_UNIQUENESS_THRESHOLD
-        # Lots of distinct literals — looks like a variable slot.
-        :corpus_inferred_variable
+      elsif enough_data && high_cardinality_literal_position?(stats, cardinality_frac)
+        # High-cardinality literal position — usually a variable slot, but
+        # recognize values that dramatically exceed the uniform baseline as
+        # "popular outliers" (e.g. /workspaces/mainspace surviving in a slot
+        # full of one-shot user-created workspace names).
+        popular_outlier?(stats, value) ? :stable_literal : :corpus_inferred_variable
       elsif stats.cardinality == 1
         :stable_literal
       elsif stats.value_counts.key?(value)
@@ -168,6 +186,21 @@ module Iriq
       else
         :ambiguous
       end
+    end
+
+    def high_cardinality_literal_position?(stats, cardinality_frac)
+      return true if cardinality_frac >= LITERAL_UNIQUENESS_THRESHOLD
+
+      cardinality_frac >= LITERAL_UNIQUENESS_MODERATE_THRESHOLD &&
+        stats.cardinality >= MIN_CARDINALITY_FOR_INFERENCE
+    end
+
+    def popular_outlier?(stats, value)
+      count = stats.value_counts[value] || 0
+      return false if count < POPULAR_MIN_COUNT
+
+      baseline = 1.0 / stats.cardinality
+      stats.value_fraction(value) >= POPULAR_BASELINE_MULTIPLE * baseline
     end
 
     def corpus_token(entry)
