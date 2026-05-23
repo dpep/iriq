@@ -1,14 +1,14 @@
-require_relative "lib/MY_NEW_GEM/version"
+require_relative "lib/iriq/version"
 
 Gem::Specification.new do |s|
-  s.name        = "MY_NEW_GEM"
-  s.version     = MY_NEW_MODULE::VERSION
+  s.name        = "iriq"
+  s.version     = Iriq::VERSION
   s.authors     = ["Daniel Pepper"]
   s.description = "..."
   s.files       = `git ls-files * ':!:spec'`.split("\n")
-  s.homepage    = "https://github.com/dpep/MY_NEW_REPO"
+  s.homepage    = "https://github.com/dpep/iriq"
   s.license     = "MIT"
-  s.summary     = "MY_NEW_MODULE"
+  s.summary     = "Iriq"
 
   s.required_ruby_version = ">= 3.2"
 

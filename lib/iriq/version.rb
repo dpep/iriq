@@ -1,3 +1,3 @@
-module MY_NEW_MODULE
+module Iriq
   VERSION = "0.0.0"
 end

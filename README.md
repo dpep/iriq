@@ -1,13 +1,13 @@
-MY_NEW_GEM
+Iriq
 ======
-![Gem](https://img.shields.io/gem/dt/MY_NEW_GEM?style=plastic)
-[![codecov](https://codecov.io/gh/dpep/MY_NEW_REPO/branch/main/graph/badge.svg)](https://codecov.io/gh/dpep/MY_NEW_REPO)
+![Gem](https://img.shields.io/gem/dt/iriq?style=plastic)
+[![codecov](https://codecov.io/gh/dpep/iriq/branch/main/graph/badge.svg)](https://codecov.io/gh/dpep/iriq)
 
 ...
 
 
 ```ruby
-require "MY_NEW_GEM"
+require "iriq"
 ```
 
 
