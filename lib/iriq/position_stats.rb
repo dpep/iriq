@@ -41,5 +41,24 @@ module Iriq
 
       (@value_counts[value] || 0).to_f / @total
     end
+
+    def dump
+      {
+        "value_counts" => @value_counts,
+        "type_counts"  => @type_counts.transform_keys(&:to_s),
+        "total"        => @total,
+        "max_values"   => @max_values,
+      }
+    end
+
+    def self.from_dump(h)
+      stats = new(max_values: h["max_values"])
+      stats.instance_variable_set(:@total, h["total"])
+      vc = Hash.new(0).merge(h["value_counts"])
+      tc = Hash.new(0).merge(h["type_counts"].transform_keys(&:to_sym))
+      stats.instance_variable_set(:@value_counts, vc)
+      stats.instance_variable_set(:@type_counts, tc)
+      stats
+    end
   end
 end

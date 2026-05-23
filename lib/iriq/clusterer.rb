@@ -75,5 +75,18 @@ module Iriq
 
       "{#{entry[:hint] || entry[:type]}}"
     end
+
+    public
+
+    def dump
+      { "clusters" => @clusters.transform_values(&:dump) }
+    end
+
+    def self.from_dump(h, classifier: SegmentClassifier.new)
+      c = new(classifier: classifier)
+      restored = h["clusters"].transform_values { |cdump| Cluster.from_dump(cdump) }
+      c.instance_variable_set(:@clusters, restored)
+      c
+    end
   end
 end

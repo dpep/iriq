@@ -1,3 +1,5 @@
+require "json"
+
 module Iriq
   # Streaming-friendly observer over a (potentially unbounded) corpus of IRIs.
   # Maintains rolling aggregates and per-(host, prefix) frequency stats so
@@ -186,6 +188,47 @@ module Iriq
       last_literal = entry[:prefix].split("/").reject(&:empty?).reject { |s| s.start_with?("{") }.last
       base = last_literal ? Inflector.singularize(last_literal) : nil
       base ? "{#{base}}" : "{value}"
+    end
+
+    public
+
+    def dump
+      {
+        "host_counts"             => @host_counts,
+        "path_length_counts"      => @path_length_counts.transform_keys(&:to_s),
+        "raw_shape_counts"        => @raw_shape_counts,
+        "fingerprint_counts"      => @fingerprint_counts,
+        "max_values_per_position" => @max_values_per_position,
+        "position_stats"          => @position_stats.map { |(host, prefix), s| [host, prefix, s.dump] },
+        "clusterer"               => @clusterer.dump,
+      }
+    end
+
+    def save(path)
+      tmp = "#{path}.tmp"
+      File.write(tmp, JSON.generate(dump))
+      File.rename(tmp, path)
+    end
+
+    def self.from_dump(h, classifier: SegmentClassifier.new)
+      c = new(
+        classifier: classifier,
+        max_values_per_position: h.fetch("max_values_per_position", PositionStats::DEFAULT_MAX_VALUES),
+      )
+      c.instance_variable_set(:@host_counts,        Hash.new(0).merge(h["host_counts"]))
+      c.instance_variable_set(:@path_length_counts, Hash.new(0).merge(h["path_length_counts"].transform_keys(&:to_i)))
+      c.instance_variable_set(:@raw_shape_counts,   Hash.new(0).merge(h["raw_shape_counts"]))
+      c.instance_variable_set(:@fingerprint_counts, Hash.new(0).merge(h["fingerprint_counts"]))
+      stats = h["position_stats"].each_with_object({}) do |(host, prefix, sdump), acc|
+        acc[[host, prefix]] = PositionStats.from_dump(sdump)
+      end
+      c.instance_variable_set(:@position_stats, stats)
+      c.instance_variable_set(:@clusterer, Clusterer.from_dump(h["clusterer"], classifier: classifier))
+      c
+    end
+
+    def self.load(path, classifier: SegmentClassifier.new)
+      from_dump(JSON.parse(File.read(path)), classifier: classifier)
     end
   end
 end

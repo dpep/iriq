@@ -116,6 +116,109 @@ describe Iriq::CLI do
     end
   end
 
+  describe "pipe (batch) mode" do
+    it "treats piped stdin with no positional as batch and prints clusters" do
+      stdin.string = <<~LINES
+        https://foo.com/users/1
+        https://foo.com/users/2
+        https://foo.com/posts/abc-123/edit
+      LINES
+
+      expect(run).to eq(0)
+      out = stdout.string
+      expect(out).to include("[2] foo.com  /users/{user_id}")
+      expect(out).to include("/posts/{post_id}/edit")
+    end
+
+    it "skips bad lines but keeps going" do
+      stdin.string = "https://foo.com/users/1\nnot-a-url\nhttps://foo.com/users/2\n"
+      expect(run).to eq(0)
+      expect(stderr.string).to include("skipped")
+      expect(stdout.string).to include("[2] foo.com  /users/{user_id}")
+    end
+
+    it "prints --stats instead of clusters when requested" do
+      stdin.string = "https://foo.com/users/1\nhttps://foo.com/users/2\nhttps://bar.com/x\n"
+      expect(run("--stats")).to eq(0)
+      out = stdout.string
+      expect(out).to include("observations: 3")
+      expect(out).to include("top hosts:")
+      expect(out).to match(/2\s+foo\.com/)
+      expect(out).to match(/1\s+bar\.com/)
+    end
+
+    it "emits JSON stats when --stats and --json combine" do
+      stdin.string = "https://foo.com/users/1\n"
+      expect(run("--stats", "--json")).to eq(0)
+      data = JSON.parse(stdout.string)
+      expect(data["observations"]).to eq(1)
+      expect(data["hosts"]).to eq("foo.com" => 1)
+    end
+  end
+
+  describe "--corpus" do
+    let(:corpus_path) do
+      f = Tempfile.new(["iriq-corpus", ".json"])
+      f.close
+      File.delete(f.path) # start fresh
+      f.path
+    end
+
+    after do
+      File.delete(corpus_path) if File.exist?(corpus_path)
+    end
+
+    it "creates a new corpus when the file doesn't exist" do
+      expect(run("--corpus", corpus_path, "https://foo.com/users/1")).to eq(0)
+      expect(File.exist?(corpus_path)).to be true
+      data = JSON.parse(File.read(corpus_path))
+      expect(data["host_counts"]).to eq("foo.com" => 1)
+    end
+
+    it "persists observations across invocations" do
+      run("--corpus", corpus_path, "https://foo.com/users/1")
+
+      # Second invocation — separate CLI instance, same file
+      stdout.truncate(0); stdout.rewind
+      stderr.truncate(0); stderr.rewind
+      expect(run("--corpus", corpus_path, "https://foo.com/users/2")).to eq(0)
+
+      data = JSON.parse(File.read(corpus_path))
+      expect(data["host_counts"]).to eq("foo.com" => 2)
+    end
+
+    it "uses corpus-informed normalize when --corpus is set" do
+      # Seed with many distinct names — corpus should promote /users/<name>
+      # to a variable in the next invocation.
+      %w[alice bob carol dave erin frank gina hank ivan jane].each do |n|
+        run("--corpus", corpus_path, "https://foo.com/users/#{n}/profile")
+        stdout.truncate(0); stdout.rewind
+      end
+
+      expect(run("-n", "--corpus", corpus_path, "https://foo.com/users/zoe/profile")).to eq(0)
+      expect(stdout.string.strip).to eq("https://foo.com/users/{user}/profile")
+    end
+
+    it "deterministic normalize is unchanged without --corpus" do
+      expect(run("-n", "https://foo.com/users/123/profile")).to eq(0)
+      expect(stdout.string.strip).to eq("https://foo.com/users/{user_id}/profile")
+    end
+
+    it "batch + --corpus accumulates observations from stdin" do
+      stdin.string = "https://foo.com/users/1\nhttps://foo.com/users/2\n"
+      expect(run("--corpus", corpus_path)).to eq(0)
+
+      data = JSON.parse(File.read(corpus_path))
+      expect(data["host_counts"]).to eq("foo.com" => 2)
+    end
+
+    it "explain shows the corpus classification under --corpus" do
+      5.times { run("--corpus", corpus_path, "https://foo.com/users/me"); stdout.truncate(0); stdout.rewind }
+      expect(run("-e", "--corpus", corpus_path, "https://foo.com/users/me")).to eq(0)
+      expect(stdout.string).to include("stable_literal")
+    end
+  end
+
   describe "cluster" do
     it "clusters identifiers from stdin" do
       stdin.string = <<~LINES

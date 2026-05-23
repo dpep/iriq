@@ -1,5 +1,6 @@
 require "json"
 require "optparse"
+require "stringio"
 
 module Iriq
   # Flag-driven CLI. The default action for an input is a combined parse +
@@ -9,32 +10,46 @@ module Iriq
   # can run it without shelling out.
   class CLI
     SECTION_FLAGS = %i[parse normalize explain].freeze
+    TOP_N_STATS   = 10
 
     USAGE = <<~TXT
       Usage: iriq [options] <input>
+             iriq [options] < urls.txt
              iriq cluster [options] [file]
 
-      With no section flag, prints all three sections for <input>.
+      With a positional input: prints parse + normalize + explain (or just the
+      sections you select with -p/-n/-e). With piped stdin and no positional:
+      processes each line as an input (batch mode) and prints clusters at the
+      end (or stats with --stats).
 
       Section flags (combine freely):
         -p, --parse           Show parsed fields
         -n, --normalize       Show the shape-normalized form
         -e, --explain         Show per-segment annotations
 
+      Corpus + streaming:
+            --corpus PATH     Load/create a JSON-backed corpus at PATH. Each
+                              observed IRI updates it; the file is rewritten
+                              atomically on exit. With --corpus, normalize and
+                              explain are corpus-informed.
+            --stats           Print rolling aggregates instead of clusters
+
       Other options:
         -j, --json            Emit JSON instead of human-readable output
-            --no-hints        Use mechanical placeholders ({integer_id}) instead of {user_id}
+            --no-hints        Use mechanical placeholders ({integer_id})
         -h, --help            Show this message
         -V, --version         Print version
 
-      Cluster command:
-        iriq cluster [file]   Cluster identifiers from FILE or stdin (one per line)
+      Subcommands:
+        iriq cluster [file]   Cluster identifiers from FILE or stdin (alias for
+                              piped batch mode)
 
       Examples:
         iriq foo.com/users/456
         iriq -n https://foo.com/users/123
-        iriq -pe foo.com/posts/2024-05-23/hello
-        cat urls.txt | iriq cluster --json
+        cat urls.txt | iriq
+        cat urls.txt | iriq --corpus mycorpus.json --stats
+        iriq --corpus mycorpus.json https://foo.com/users/1
     TXT
 
     attr_reader :stdin, :stdout, :stderr
@@ -51,14 +66,26 @@ module Iriq
 
       return print_usage(stdout, 0) if opts[:help]
       return print_version          if opts[:version]
-      return print_usage(stdout, 0) if args.empty? && opts[:sections].empty?
 
-      if args.first == "cluster"
-        args.shift
-        cmd_cluster(args, opts)
+      explicit_cluster = (args.first == "cluster")
+      args.shift if explicit_cluster
+
+      batch_mode = explicit_cluster || (args.empty? && piped_stdin?)
+
+      return print_usage(stdout, 0) if args.empty? && !batch_mode
+
+      corpus = opts[:corpus] ? load_corpus(opts[:corpus]) : nil
+
+      code = if batch_mode
+        cmd_batch(args, opts, corpus)
+      elsif opts[:stats]
+        cmd_stats(corpus, opts)
       else
-        cmd_summary(args, opts)
+        cmd_summary(args, opts, corpus)
       end
+
+      corpus.save(opts[:corpus]) if corpus && opts[:corpus]
+      code
     rescue Iriq::ParseError => e
       stderr.puts "iriq: parse error: #{e.message}"
       2
@@ -70,18 +97,46 @@ module Iriq
     private
 
     def parse_options(argv)
-      opts = { json: false, help: false, version: false, hints: true, sections: [] }
+      opts = {
+        json:     false,
+        help:     false,
+        version:  false,
+        hints:    true,
+        sections: [],
+        corpus:   nil,
+        stats:    false,
+      }
       parser = OptionParser.new do |o|
         o.on("-p", "--parse")     { opts[:sections] << :parse }
         o.on("-n", "--normalize") { opts[:sections] << :normalize }
         o.on("-e", "--explain")   { opts[:sections] << :explain }
         o.on("-j", "--json")      { opts[:json]    = true }
         o.on("--[no-]hints")      { |v| opts[:hints] = v }
+        o.on("--corpus PATH")     { |v| opts[:corpus] = v }
+        o.on("--stats")           { opts[:stats]   = true }
         o.on("-h", "--help")      { opts[:help]    = true }
         o.on("-V", "--version")   { opts[:version] = true }
       end
       args = parser.parse(argv)
       [args, opts]
+    end
+
+    def piped_stdin?
+      # StringIO is the test injection point; treat it as "piped" only when
+      # it actually has content. Real stdin: tty? tells us.
+      if stdin.is_a?(StringIO)
+        stdin.size.positive?
+      elsif stdin.respond_to?(:tty?)
+        !stdin.tty?
+      else
+        true
+      end
+    end
+
+    def load_corpus(path)
+      return Corpus.load(path) if File.exist?(path)
+
+      Corpus.new
     end
 
     def print_usage(io, code)
@@ -94,15 +149,16 @@ module Iriq
       0
     end
 
-    def cmd_summary(args, opts)
-      input = args.first or return missing(:input)
-      iri   = Iriq.parse(input)
+    def cmd_summary(args, opts, corpus)
+      input    = args.first or return missing(:input)
+      iri      = Iriq.parse(input)
+      obs      = corpus&.observe(iri)
       sections = opts[:sections].empty? ? SECTION_FLAGS : opts[:sections]
 
       data = {}
-      data[:parse]     = identifier_hash(iri)                         if sections.include?(:parse)
-      data[:normalize] = Normalizer.normalize_identifier(iri, hints: opts[:hints]) if sections.include?(:normalize)
-      data[:explain]   = Explanation.explain(iri)                      if sections.include?(:explain)
+      data[:parse]     = identifier_hash(iri)                                                if sections.include?(:parse)
+      data[:normalize] = (corpus ? corpus.normalize(iri) : Normalizer.normalize_identifier(iri, hints: opts[:hints])) if sections.include?(:normalize)
+      data[:explain]   = (obs ? obs.explanation : Explanation.explain(iri))                  if sections.include?(:explain)
 
       if opts[:json]
         payload = sections.size == 1 ? data.values.first : data
@@ -113,20 +169,32 @@ module Iriq
       0
     end
 
-    def cmd_cluster(args, opts)
-      lines     = read_input(args.first)
-      clusterer = Clusterer.new
+    def cmd_batch(args, opts, corpus)
+      corpus ||= Corpus.new
+      lines = read_input(args.first)
       lines.each do |line|
         line = line.strip
         next if line.empty?
 
         begin
-          clusterer.add(line)
+          corpus.observe(line)
         rescue Iriq::ParseError => e
           stderr.puts "iriq: skipped #{line.inspect}: #{e.message}"
         end
       end
-      emit_clusters(clusterer.clusters, opts)
+
+      if opts[:stats]
+        emit_stats(corpus, opts)
+      else
+        emit_clusters(corpus.clusters, opts)
+      end
+      0
+    end
+
+    def cmd_stats(corpus, opts)
+      return missing("--corpus") unless corpus
+
+      emit_stats(corpus, opts)
       0
     end
 
@@ -188,7 +256,10 @@ module Iriq
       rows.each do |r|
         mark        = r[:variable] ? "*" : " "
         placeholder = r[:hint] || r[:type]
-        stdout.printf("%s %-12s %-12s %s\n", mark, r[:type], placeholder, r[:value])
+        extras      = []
+        extras << r[:classification] if r[:classification]
+        suffix = extras.empty? ? "" : "  [#{extras.join(', ')}]"
+        stdout.printf("%s %-12s %-12s %s%s\n", mark, r[:type], placeholder, r[:value], suffix)
       end
     end
 
@@ -205,6 +276,37 @@ module Iriq
           stdout.puts "    + #{c.count - 3} more" if c.count > 3
         end
       end
+    end
+
+    def emit_stats(corpus, opts)
+      payload = {
+        observations:  corpus.host_counts.values.sum,
+        clusters:      corpus.size,
+        hosts:         top(corpus.host_counts),
+        path_lengths:  corpus.path_length_counts.sort.to_h,
+        shapes:        top(corpus.fingerprint_counts),
+        raw_shapes:    top(corpus.raw_shape_counts),
+      }
+
+      if opts[:json]
+        stdout.puts JSON.generate(payload)
+      else
+        stdout.puts "observations: #{payload[:observations]}"
+        stdout.puts "clusters:     #{payload[:clusters]}"
+        stdout.puts
+        stdout.puts "top hosts:"
+        payload[:hosts].each { |h, n| stdout.puts "  #{n.to_s.rjust(6)}  #{h}" }
+        stdout.puts
+        stdout.puts "path lengths:"
+        payload[:path_lengths].each { |len, n| stdout.puts "  #{n.to_s.rjust(6)}  #{len}" }
+        stdout.puts
+        stdout.puts "top shapes:"
+        payload[:shapes].each { |s, n| stdout.puts "  #{n.to_s.rjust(6)}  #{s}" }
+      end
+    end
+
+    def top(hash)
+      hash.sort_by { |_, n| -n }.first(TOP_N_STATS).to_h
     end
   end
 end

@@ -54,5 +54,28 @@ module Iriq
         segments: segment_stats,
       }
     end
+
+    # JSON-friendly dump for persistence (distinct from #to_h which is a
+    # display form). Examples are dumped as canonical strings and re-parsed
+    # on load.
+    def dump
+      {
+        "key"            => key,
+        "host"           => host,
+        "scheme"         => scheme,
+        "shape"          => shape,
+        "count"          => count,
+        "examples"       => examples.map(&:canonical),
+        "segment_counts" => @segment_counts.map { |h| h || {} },
+      }
+    end
+
+    def self.from_dump(h)
+      cluster = new(key: h["key"], host: h["host"], scheme: h["scheme"], shape: h["shape"])
+      cluster.instance_variable_set(:@count, h["count"])
+      cluster.instance_variable_set(:@examples, h["examples"].map { |s| Parser.parse(s) })
+      cluster.instance_variable_set(:@segment_counts, h["segment_counts"].map { |sub| Hash.new(0).merge(sub) })
+      cluster
+    end
   end
 end

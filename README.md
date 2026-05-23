@@ -236,7 +236,7 @@ https://foo.com/posts/{post_id}/{slug}
 * date         post_id      2024-05-23
 * slug         slug         hello-world
 
-$ cat urls.txt | iriq cluster
+$ cat urls.txt | iriq
 [2] foo.com  /users/{user_id}
     https://foo.com/users/1
     https://foo.com/users/2
@@ -253,11 +253,43 @@ Flags:
 | `-e, --explain`  | Show per-segment annotations                            |
 | `-j, --json`     | Emit JSON; with one section flag, just that payload     |
 | `--no-hints`     | Use `{integer_id}` etc. instead of `{user_id}`          |
+| `--corpus PATH`  | Load/create a JSON corpus at PATH; observe and save     |
+| `--stats`        | Print rolling aggregates (with --corpus or in pipe mode)|
 | `-V, --version`  | Print version                                           |
 
-`iriq cluster` is the lone subcommand (it takes many inputs, not one). It
-reads identifiers one per line from a file argument or stdin; lines that
-fail to parse are skipped with a warning on stderr.
+**Pipe (batch) mode.** When stdin is piped and no positional input is given,
+each line is observed and clusters are printed at the end:
+
+```
+$ cat urls.txt | iriq
+$ cat urls.txt | iriq --stats
+```
+
+`iriq cluster [file]` is an explicit alias for batch mode (still supported).
+
+**Persistent corpus.** `--corpus PATH` makes the corpus survive across
+invocations. The first run creates the file; subsequent runs load, observe,
+and rewrite it atomically. Once a corpus has enough data, `-n` / `-e` use
+corpus-informed classifications:
+
+```
+$ for n in alice bob carol dave erin frank gina hank ivan jane; do
+    iriq --corpus mycorpus.json https://foo.com/users/$n/profile >/dev/null
+  done
+
+$ iriq -n --corpus mycorpus.json https://foo.com/users/zoe/profile
+https://foo.com/users/{user}/profile
+
+$ iriq --corpus mycorpus.json --stats
+observations: 10
+clusters:     10
+...
+
+$ cat more_urls.txt | iriq --corpus mycorpus.json --stats
+```
+
+Without `--corpus`, the same `-n` would print `https://foo.com/users/zoe/profile`
+unchanged (mechanical normalize keeps literals).
 
 Exit codes: `0` success, `1` usage error, `2` parse error.
 

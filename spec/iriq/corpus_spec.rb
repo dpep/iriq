@@ -200,6 +200,43 @@ describe Iriq::Corpus do
     end
   end
 
+  describe "save / load round-trip" do
+    it "preserves aggregates, position stats, and clusters" do
+      corpus.observe("https://foo.com/users/1")
+      corpus.observe("https://foo.com/users/2")
+      corpus.observe("https://foo.com/posts/abc-123")
+
+      Tempfile.open("iriq-corpus") do |f|
+        corpus.save(f.path)
+        restored = described_class.load(f.path)
+
+        expect(restored.host_counts).to eq(corpus.host_counts)
+        expect(restored.path_length_counts).to eq(corpus.path_length_counts)
+        expect(restored.raw_shape_counts).to eq(corpus.raw_shape_counts)
+        expect(restored.fingerprint_counts).to eq(corpus.fingerprint_counts)
+
+        original_stats = corpus.stats_for("foo.com", "/users")
+        restored_stats = restored.stats_for("foo.com", "/users")
+        expect(restored_stats.total).to eq(original_stats.total)
+        expect(restored_stats.value_counts).to eq(original_stats.value_counts)
+        expect(restored_stats.type_counts).to eq(original_stats.type_counts)
+
+        expect(restored.clusters.map(&:shape).sort).to eq(corpus.clusters.map(&:shape).sort)
+      end
+    end
+
+    it "lets you keep observing after loading" do
+      corpus.observe("https://foo.com/users/1")
+      Tempfile.open("iriq-corpus") do |f|
+        corpus.save(f.path)
+        restored = described_class.load(f.path)
+        restored.observe("https://foo.com/users/2")
+        expect(restored.host_counts["foo.com"]).to eq(2)
+        expect(restored.stats_for("foo.com", "/users").total).to eq(2)
+      end
+    end
+  end
+
   describe "improvement over time" do
     it "the explain classification for a literal can shift as more data comes in" do
       # Start with a single literal observation — looks stable.
