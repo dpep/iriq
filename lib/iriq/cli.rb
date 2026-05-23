@@ -2,31 +2,39 @@ require "json"
 require "optparse"
 
 module Iriq
-  # Tiny CLI wrapper around the public API. Construct with explicit IO so
-  # specs can run it without shelling out.
+  # Flag-driven CLI. The default action for an input is a combined parse +
+  # normalize + explain summary; the -p/-n/-e flags select individual
+  # sections. The only subcommand is `cluster`, which is structurally
+  # different (many inputs, not one). Construct with explicit IO so specs
+  # can run it without shelling out.
   class CLI
-    COMMANDS = %w[parse normalize explain classify cluster help version].freeze
+    SECTION_FLAGS = %i[parse normalize explain].freeze
 
     USAGE = <<~TXT
-      Usage: iriq <command> [options] [args]
+      Usage: iriq [options] <input>
+             iriq cluster [options] [file]
 
-      Commands:
-        parse <input>          Parse an identifier and print its fields
-        normalize <input>      Print the shape-normalized form
-        explain <input>        Annotate each path segment
-        classify <segment>     Classify a single segment
-        cluster [file]         Cluster identifiers from FILE or stdin (one per line)
-        help                   Show this message
-        version                Print version
+      With no section flag, prints all three sections for <input>.
 
-      Options:
-        -j, --json             Emit JSON instead of human-readable output
-        -h, --help             Show this message
+      Section flags (combine freely):
+        -p, --parse           Show parsed fields
+        -n, --normalize       Show the shape-normalized form
+        -e, --explain         Show per-segment annotations
+
+      Other options:
+        -j, --json            Emit JSON instead of human-readable output
+            --no-hints        Use mechanical placeholders ({integer_id}) instead of {user_id}
+        -h, --help            Show this message
+        -V, --version         Print version
+
+      Cluster command:
+        iriq cluster [file]   Cluster identifiers from FILE or stdin (one per line)
 
       Examples:
-        iriq parse https://foo.com/users/123
-        iriq normalize foo.com/users/456
-        echo "https://foo.com/users/1\\nhttps://foo.com/users/2" | iriq cluster
+        iriq foo.com/users/456
+        iriq -n https://foo.com/users/123
+        iriq -pe foo.com/posts/2024-05-23/hello
+        cat urls.txt | iriq cluster --json
     TXT
 
     attr_reader :stdin, :stdout, :stderr
@@ -41,16 +49,16 @@ module Iriq
     def run(argv)
       args, opts = parse_options(argv)
 
-      cmd = args.shift
-      return print_usage(stdout, 0) if cmd.nil? || cmd == "help" || opts[:help]
+      return print_usage(stdout, 0) if opts[:help]
+      return print_version          if opts[:version]
+      return print_usage(stdout, 0) if args.empty? && opts[:sections].empty?
 
-      unless COMMANDS.include?(cmd)
-        stderr.puts "iriq: unknown command #{cmd.inspect}"
-        print_usage(stderr, 1)
-        return 1
+      if args.first == "cluster"
+        args.shift
+        cmd_cluster(args, opts)
+      else
+        cmd_summary(args, opts)
       end
-
-      send("cmd_#{cmd}", args, opts)
     rescue Iriq::ParseError => e
       stderr.puts "iriq: parse error: #{e.message}"
       2
@@ -62,10 +70,15 @@ module Iriq
     private
 
     def parse_options(argv)
-      opts = { json: false, help: false }
+      opts = { json: false, help: false, version: false, hints: true, sections: [] }
       parser = OptionParser.new do |o|
-        o.on("-j", "--json") { opts[:json] = true }
-        o.on("-h", "--help") { opts[:help] = true }
+        o.on("-p", "--parse")     { opts[:sections] << :parse }
+        o.on("-n", "--normalize") { opts[:sections] << :normalize }
+        o.on("-e", "--explain")   { opts[:sections] << :explain }
+        o.on("-j", "--json")      { opts[:json]    = true }
+        o.on("--[no-]hints")      { |v| opts[:hints] = v }
+        o.on("-h", "--help")      { opts[:help]    = true }
+        o.on("-V", "--version")   { opts[:version] = true }
       end
       args = parser.parse(argv)
       [args, opts]
@@ -76,55 +89,32 @@ module Iriq
       code
     end
 
-    def require_arg!(args, name)
-      return args.first if args.first
-
-      stderr.puts "iriq: missing argument <#{name}>"
-      throw :missing_arg, 1
-    end
-
-    def cmd_version(_args, _opts)
+    def print_version
       stdout.puts Iriq::VERSION
       0
     end
 
-    def cmd_parse(args, opts)
+    def cmd_summary(args, opts)
       input = args.first or return missing(:input)
       iri   = Iriq.parse(input)
-      emit_parse(iri, opts)
-      0
-    end
+      sections = opts[:sections].empty? ? SECTION_FLAGS : opts[:sections]
 
-    def cmd_normalize(args, opts)
-      input = args.first or return missing(:input)
-      out   = Iriq.normalize(input)
-      opts[:json] ? stdout.puts(JSON.generate(normalized: out)) : stdout.puts(out)
-      0
-    end
+      data = {}
+      data[:parse]     = identifier_hash(iri)                         if sections.include?(:parse)
+      data[:normalize] = Normalizer.normalize_identifier(iri, hints: opts[:hints]) if sections.include?(:normalize)
+      data[:explain]   = Explanation.explain(iri)                      if sections.include?(:explain)
 
-    def cmd_explain(args, opts)
-      input = args.first or return missing(:input)
-      rows  = Iriq.explain(input)
       if opts[:json]
-        stdout.puts JSON.generate(rows)
+        payload = sections.size == 1 ? data.values.first : data
+        stdout.puts JSON.generate(payload)
       else
-        rows.each do |r|
-          mark = r[:variable] ? "*" : " "
-          stdout.printf("%s %-12s %s\n", mark, r[:type], r[:value])
-        end
+        emit_sections(data, sections)
       end
       0
     end
 
-    def cmd_classify(args, opts)
-      seg  = args.first or return missing(:segment)
-      type = SegmentClassifier.new.classify(seg)
-      opts[:json] ? stdout.puts(JSON.generate(value: seg, type: type)) : stdout.puts(type)
-      0
-    end
-
     def cmd_cluster(args, opts)
-      lines = read_input(args.first)
+      lines     = read_input(args.first)
       clusterer = Clusterer.new
       lines.each do |line|
         line = line.strip
@@ -140,10 +130,6 @@ module Iriq
       0
     end
 
-    def cmd_help(_args, _opts)
-      print_usage(stdout, 0)
-    end
-
     def missing(name)
       stderr.puts "iriq: missing argument <#{name}>"
       1
@@ -157,33 +143,52 @@ module Iriq
       end
     end
 
-    def emit_parse(iri, opts)
-      if opts[:json]
-        stdout.puts JSON.generate(
-          original:      iri.original,
-          kind:          iri.kind,
-          scheme:        iri.scheme,
-          host:          iri.host,
-          port:          iri.port,
-          path_segments: iri.path_segments,
-          query_params:  iri.query_params,
-          fragment:      iri.fragment,
-          nss:           iri.nss,
-          canonical:     iri.canonical,
-        )
-      else
-        stdout.puts "original:      #{iri.original}"
-        stdout.puts "kind:          #{iri.kind}"
-        stdout.puts "scheme:        #{iri.scheme}" if iri.scheme
-        stdout.puts "host:          #{iri.host}"   if iri.host
-        stdout.puts "port:          #{iri.port}"   if iri.port
-        stdout.puts "path_segments: #{iri.path_segments.inspect}" if iri.url?
-        unless iri.query_params.empty?
-          stdout.puts "query_params:  #{iri.query_params.inspect}"
+    def identifier_hash(iri)
+      {
+        original:      iri.original,
+        kind:          iri.kind,
+        scheme:        iri.scheme,
+        host:          iri.host,
+        port:          iri.port,
+        path_segments: iri.path_segments,
+        query_params:  iri.query_params,
+        fragment:      iri.fragment,
+        nss:           iri.nss,
+        canonical:     iri.canonical,
+      }
+    end
+
+    def emit_sections(data, sections)
+      multi = sections.size > 1
+      sections.each_with_index do |sec, i|
+        stdout.puts if i > 0
+        stdout.puts "# #{sec}" if multi
+        case sec
+        when :parse     then emit_parse_human(data[:parse])
+        when :normalize then stdout.puts data[:normalize]
+        when :explain   then emit_explain_human(data[:explain])
         end
-        stdout.puts "fragment:      #{iri.fragment}" if iri.fragment
-        stdout.puts "nss:           #{iri.nss}"      if iri.nss
-        stdout.puts "canonical:     #{iri.canonical}"
+      end
+    end
+
+    def emit_parse_human(h)
+      stdout.puts "original:      #{h[:original]}"
+      stdout.puts "kind:          #{h[:kind]}"
+      stdout.puts "scheme:        #{h[:scheme]}" if h[:scheme]
+      stdout.puts "host:          #{h[:host]}"   if h[:host]
+      stdout.puts "port:          #{h[:port]}"   if h[:port]
+      stdout.puts "path_segments: #{h[:path_segments].inspect}" if h[:kind] == :url
+      stdout.puts "query_params:  #{h[:query_params].inspect}" if h[:query_params] && !h[:query_params].empty?
+      stdout.puts "fragment:      #{h[:fragment]}" if h[:fragment]
+      stdout.puts "nss:           #{h[:nss]}"      if h[:nss]
+      stdout.puts "canonical:     #{h[:canonical]}"
+    end
+
+    def emit_explain_human(rows)
+      rows.each do |r|
+        mark        = r[:variable] ? "*" : " "
+        placeholder = r[:hint] || r[:type]
+        stdout.printf("%s %-12s %-12s %s\n", mark, r[:type], placeholder, r[:value])
       end
     end
 

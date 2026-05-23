@@ -39,16 +39,14 @@ module Iriq
       key, * = cluster_key(iri)
       cluster = @clusters[key]
       stats   = cluster ? cluster.segment_stats : []
+      hinted  = SegmentHints.derive(iri.path_segments, @classifier)
 
-      iri.path_segments.each_with_index.map do |seg, i|
-        type   = @classifier.classify(seg)
+      hinted.each_with_index.map do |entry, i|
         stable = stats[i] && stats[i][:stable]
-        {
-          value:    seg,
-          type:     type,
-          variable: !stable && @classifier.variable?(type),
+        entry.merge(
+          variable: !stable && entry[:variable],
           stable:   !!stable,
-        }
+        )
       end
     end
 
@@ -61,17 +59,21 @@ module Iriq
     def cluster_key(iri)
       if iri.urn?
         ns, value = (iri.nss || "").split(":", 2)
-        shape = if value
-          type = @classifier.classify(value)
-          @classifier.variable?(type) ? "{#{type}}" : value
-        end
-        key = "urn:#{ns}:#{shape}"
+        shape = value ? urn_value_shape(ns, value) : nil
+        key   = "urn:#{ns}:#{shape}"
         [key, nil, "urn", key]
       else
         shape = PathShape.new(classifier: @classifier).for(iri.path_segments)
         key   = "#{iri.scheme}://#{iri.host}#{shape}"
         [key, iri.host, iri.scheme, shape]
       end
+    end
+
+    def urn_value_shape(ns, value)
+      entry = SegmentHints.derive([ns, value], @classifier).last
+      return entry[:value] unless entry[:variable]
+
+      "{#{entry[:hint] || entry[:type]}}"
     end
   end
 end

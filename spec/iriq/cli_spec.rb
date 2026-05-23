@@ -11,7 +11,7 @@ describe Iriq::CLI do
     cli.run(args)
   end
 
-  describe "help / usage" do
+  describe "help / usage / version" do
     it "prints usage with no args" do
       expect(run).to eq(0)
       expect(stdout.string).to include("Usage: iriq")
@@ -22,95 +22,97 @@ describe Iriq::CLI do
       expect(stdout.string).to include("Usage: iriq")
     end
 
-    it "prints usage on `help`" do
-      expect(run("help")).to eq(0)
-      expect(stdout.string).to include("Usage: iriq")
-    end
-
-    it "errors on unknown command" do
-      expect(run("frobnicate")).to eq(1)
-      expect(stderr.string).to include("unknown command")
-    end
-  end
-
-  describe "version" do
-    it "prints the version" do
-      expect(run("version")).to eq(0)
+    it "prints the version on --version" do
+      expect(run("--version")).to eq(0)
       expect(stdout.string.strip).to eq(Iriq::VERSION)
     end
-  end
 
-  describe "parse" do
-    it "prints structured fields" do
-      expect(run("parse", "https://foo.com/users/123")).to eq(0)
-      out = stdout.string
-      expect(out).to include("scheme:        https")
-      expect(out).to include("host:          foo.com")
-      expect(out).to include('["users", "123"]')
-      expect(out).to include("canonical:     https://foo.com/users/123")
-    end
-
-    it "emits JSON with --json" do
-      expect(run("parse", "--json", "https://foo.com/users/123")).to eq(0)
-      data = JSON.parse(stdout.string)
-      expect(data).to include(
-        "scheme"        => "https",
-        "host"          => "foo.com",
-        "path_segments" => ["users", "123"],
-        "canonical"     => "https://foo.com/users/123",
-      )
-    end
-
-    it "returns exit 2 with a parse error message" do
-      expect(run("parse", "just-some-token")).to eq(2)
+    it "errors on parse failure with exit code 2" do
+      expect(run("just-some-token")).to eq(2)
       expect(stderr.string).to include("parse error")
     end
 
-    it "errors on missing argument" do
-      expect(run("parse")).to eq(1)
-      expect(stderr.string).to include("missing argument")
+    it "errors on unknown option with exit code 1" do
+      expect(run("--frobnicate")).to eq(1)
+      expect(stderr.string).to include("invalid option")
     end
   end
 
-  describe "normalize" do
-    it "prints the shape-normalized form" do
-      expect(run("normalize", "https://foo.com/users/123")).to eq(0)
-      expect(stdout.string.strip).to eq("https://foo.com/users/{integer_id}")
+  describe "default (no section flag)" do
+    it "runs parse + normalize + explain for a URL-ish input" do
+      expect(run("foo.com/users/123")).to eq(0)
+      out = stdout.string
+      expect(out).to include("# parse")
+      expect(out).to include("scheme:        https")
+      expect(out).to include("host:          foo.com")
+      expect(out).to include("# normalize")
+      expect(out).to include("https://foo.com/users/{user_id}")
+      expect(out).to include("# explain")
+      expect(out).to match(/\* integer_id\s+user_id\s+123/)
     end
 
-    it "emits JSON with --json" do
-      expect(run("normalize", "-j", "foo.com/users/1")).to eq(0)
-      expect(JSON.parse(stdout.string)).to eq("normalized" => "https://foo.com/users/{integer_id}")
-    end
-  end
-
-  describe "explain" do
-    it "prints one row per segment" do
-      expect(run("explain", "https://foo.com/users/123")).to eq(0)
-      lines = stdout.string.lines.map(&:rstrip)
-      expect(lines[0]).to match(/  literal\s+users/)
-      expect(lines[1]).to match(/\* integer_id\s+123/)
-    end
-
-    it "emits JSON with --json" do
-      expect(run("explain", "--json", "https://foo.com/users/123")).to eq(0)
+    it "emits a single combined JSON object with --json" do
+      expect(run("--json", "https://foo.com/users/123")).to eq(0)
       data = JSON.parse(stdout.string)
-      expect(data).to eq([
-        { "value" => "users", "type" => "literal",    "variable" => false },
-        { "value" => "123",   "type" => "integer_id", "variable" => true  },
-      ])
+      expect(data.keys).to contain_exactly("parse", "normalize", "explain")
+      expect(data["parse"]).to include("host" => "foo.com")
+      expect(data["normalize"]).to eq("https://foo.com/users/{user_id}")
+      expect(data["explain"].last).to include("hint" => "user_id")
+    end
+
+    it "works for URNs" do
+      expect(run("urn:isbn:0451450523")).to eq(0)
+      out = stdout.string
+      expect(out).to include("kind:          urn")
+      expect(out).to include("urn:isbn:{isbn_id}")
     end
   end
 
-  describe "classify" do
-    it "prints the classification" do
-      expect(run("classify", "abc-123-def")).to eq(0)
-      expect(stdout.string.strip).to eq("slug")
+  describe "section flags" do
+    it "prints only the parse section with -p" do
+      expect(run("-p", "https://foo.com/users/123")).to eq(0)
+      out = stdout.string
+      expect(out).to include("scheme:        https")
+      expect(out).not_to include("# normalize")
+      expect(out).not_to include("# explain")
     end
 
-    it "emits JSON with --json" do
-      expect(run("classify", "--json", "123")).to eq(0)
-      expect(JSON.parse(stdout.string)).to eq("value" => "123", "type" => "integer_id")
+    it "prints only the normalize section with -n" do
+      expect(run("-n", "foo.com/users/123")).to eq(0)
+      expect(stdout.string.strip).to eq("https://foo.com/users/{user_id}")
+    end
+
+    it "prints only the explain section with -e" do
+      expect(run("-e", "https://foo.com/users/123")).to eq(0)
+      out = stdout.string
+      expect(out).to match(/\* integer_id\s+user_id\s+123/)
+      expect(out).not_to include("# parse")
+    end
+
+    it "combines flags (-pe) and shows section headers" do
+      expect(run("-pe", "https://foo.com/users/123")).to eq(0)
+      out = stdout.string
+      expect(out).to include("# parse")
+      expect(out).to include("# explain")
+      expect(out).not_to include("# normalize")
+    end
+
+    it "with --json and a single section, returns just that section's payload" do
+      expect(run("-n", "--json", "foo.com/users/123")).to eq(0)
+      expect(JSON.parse(stdout.string)).to eq("https://foo.com/users/{user_id}")
+    end
+
+    it "with --json and multiple sections, bundles them" do
+      expect(run("-pn", "--json", "foo.com/users/123")).to eq(0)
+      data = JSON.parse(stdout.string)
+      expect(data.keys).to contain_exactly("parse", "normalize")
+    end
+  end
+
+  describe "--no-hints" do
+    it "uses mechanical placeholders" do
+      expect(run("-n", "--no-hints", "foo.com/users/123")).to eq(0)
+      expect(stdout.string.strip).to eq("https://foo.com/users/{integer_id}")
     end
   end
 
@@ -124,8 +126,8 @@ describe Iriq::CLI do
 
       expect(run("cluster")).to eq(0)
       out = stdout.string
-      expect(out).to include("[2] foo.com  /users/{integer_id}")
-      expect(out).to include("/posts/{slug}/edit")
+      expect(out).to include("[2] foo.com  /users/{user_id}")
+      expect(out).to include("/posts/{post_id}/edit")
     end
 
     it "skips lines that fail to parse but keeps going" do
@@ -133,7 +135,7 @@ describe Iriq::CLI do
 
       expect(run("cluster")).to eq(0)
       expect(stderr.string).to include("skipped")
-      expect(stdout.string).to include("[2] foo.com  /users/{integer_id}")
+      expect(stdout.string).to include("[2] foo.com  /users/{user_id}")
     end
 
     it "reads from a file when given a path" do
@@ -143,7 +145,7 @@ describe Iriq::CLI do
         f.flush
 
         expect(run("cluster", f.path)).to eq(0)
-        expect(stdout.string).to include("[2] foo.com  /x/{integer_id}")
+        expect(stdout.string).to include("[2] foo.com  /x/{x_id}")
       end
     end
 
@@ -153,7 +155,7 @@ describe Iriq::CLI do
       data = JSON.parse(stdout.string)
       expect(data.size).to eq(1)
       expect(data.first).to include(
-        "shape" => "/users/{integer_id}",
+        "shape" => "/users/{user_id}",
         "host"  => "foo.com",
         "count" => 2,
       )

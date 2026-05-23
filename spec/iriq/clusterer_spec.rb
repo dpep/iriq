@@ -11,8 +11,8 @@ describe Iriq::Clusterer do
 
       shapes = clusterer.clusters.map(&:shape)
       expect(shapes).to contain_exactly(
-        "/users/{integer_id}",
-        "/users/{integer_id}/orders/{integer_id}",
+        "/users/{user_id}",
+        "/users/{user_id}/orders/{order_id}",
       )
     end
 
@@ -63,8 +63,8 @@ describe Iriq::Clusterer do
       clusterer.add("https://foo.com/users/3")
 
       result = clusterer.explain("https://foo.com/users/999")
-      expect(result[0]).to eq(value: "users", type: :literal,    variable: false, stable: true)
-      expect(result[1]).to eq(value: "999",   type: :integer_id, variable: true,  stable: false)
+      expect(result[0]).to eq(value: "users", type: :literal,    variable: false, hint: nil,       stable: true)
+      expect(result[1]).to eq(value: "999",   type: :integer_id, variable: true,  hint: "user_id", stable: false)
     end
 
     it "returns variable=false when the position turns out to be stable in cluster" do
@@ -80,8 +80,8 @@ describe Iriq::Clusterer do
     it "works for unseen inputs (no cluster yet)" do
       result = clusterer.explain("https://foo.com/users/1")
       expect(result).to eq([
-        { value: "users", type: :literal,    variable: false, stable: false },
-        { value: "1",     type: :integer_id, variable: true,  stable: false },
+        { value: "users", type: :literal,    variable: false, hint: nil,       stable: false },
+        { value: "1",     type: :integer_id, variable: true,  hint: "user_id", stable: false },
       ])
     end
   end
