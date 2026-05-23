@@ -1,0 +1,191 @@
+module Iriq
+  # Streaming-friendly observer over a (potentially unbounded) corpus of IRIs.
+  # Maintains rolling aggregates and per-(host, prefix) frequency stats so
+  # that classification can improve as more data flows in.
+  #
+  # The deterministic, single-IRI API (Iriq.normalize/explain) is unchanged —
+  # Corpus#normalize and Corpus#explain are the corpus-informed variants.
+  class Corpus
+    # Type-based: position is "mostly variable" (UUIDs/integers/etc.).
+    VARIABLE_DOMINANCE_THRESHOLD = 0.8
+
+    # Cardinality-based: position has mostly distinct literal values, so the
+    # literal "type" is misleading — it's really a variable slot.
+    LITERAL_UNIQUENESS_THRESHOLD = 0.8
+
+    # Don't apply corpus heuristics until we have at least this many
+    # observations at a position — too easy to be wrong with tiny samples.
+    MIN_OBSERVATIONS_FOR_INFERENCE = 5
+
+    # Value-fraction at or above which a literal is considered the stable
+    # occupant of its position.
+    STABLE_LITERAL_THRESHOLD = 0.5
+
+    attr_reader :host_counts, :path_length_counts, :raw_shape_counts,
+                :fingerprint_counts, :position_stats
+
+    def initialize(classifier: SegmentClassifier.new,
+                   max_values_per_position: PositionStats::DEFAULT_MAX_VALUES)
+      @classifier              = classifier
+      @max_values_per_position = max_values_per_position
+      @host_counts             = Hash.new(0)
+      @path_length_counts      = Hash.new(0)
+      @raw_shape_counts        = Hash.new(0)
+      @fingerprint_counts      = Hash.new(0)
+      @position_stats          = {}
+      @clusterer               = Clusterer.new(classifier: classifier)
+    end
+
+    # Observe a single IRI. Returns an Observation.
+    def observe(input)
+      iri = coerce(input)
+      record_aggregates(iri)
+      cluster = @clusterer.add(iri)
+      Observation.new(corpus: self, identifier: iri, cluster: cluster)
+    end
+
+    # Corpus-informed normalization. Falls back to mechanical normalization
+    # when the corpus has no signal for a position.
+    def normalize(input)
+      iri = coerce(input)
+      return Normalizer.normalize_identifier(iri) if iri.urn? || iri.path_segments.empty?
+
+      tokens = annotate_segments(iri).map { |entry| corpus_token(entry) }
+      out = +""
+      out << "#{iri.scheme}://" if iri.scheme
+      out << iri.host if iri.host
+      out << ":#{iri.port}" if iri.port
+      out << "/" << tokens.join("/")
+      out
+    end
+
+    # Per-segment explanation with corpus-informed `classification`.
+    # Returns an array of entries shaped like the Explanation rows plus
+    # `classification:` ∈ :stable_literal, :variable_identifier,
+    # :rare_literal, :ambiguous, :corpus_inferred_variable.
+    def explain(input)
+      iri = coerce(input)
+      annotate_segments(iri).map do |entry|
+        entry.reject { |k, _| k == :prefix }
+      end
+    end
+
+    def clusters
+      @clusterer.clusters
+    end
+
+    def size
+      @clusterer.size
+    end
+
+    # Stats for a given (host, prefix_shape) — useful for tests and
+    # debugging. Returns nil if nothing has been observed there.
+    def stats_for(host, prefix)
+      @position_stats[[host, prefix]]
+    end
+
+    private
+
+    def coerce(input)
+      input.is_a?(Identifier) ? input : Parser.parse(input)
+    end
+
+    def record_aggregates(iri)
+      @host_counts[iri.host] += 1 if iri.host
+      @path_length_counts[iri.path_segments.size] += 1
+
+      raw = PathShape.new(classifier: @classifier, hints: false).for(iri.path_segments)
+      fp  = PathShape.new(classifier: @classifier, hints: true).for(iri.path_segments)
+      @raw_shape_counts[raw] += 1
+      @fingerprint_counts[fp] += 1
+
+      record_position_stats(iri)
+    end
+
+    def record_position_stats(iri)
+      hinted = SegmentHints.derive(iri.path_segments, @classifier)
+      prefix = ""
+      hinted.each do |entry|
+        key   = [iri.host, prefix]
+        stats = @position_stats[key] ||= PositionStats.new(max_values: @max_values_per_position)
+        stats.observe(entry[:value], entry[:type])
+        prefix = "#{prefix}/#{placeholder(entry)}"
+      end
+    end
+
+    # Walks the IRI's segments and returns hint-derived entries enriched with
+    # the (host, prefix) PositionStats reference and a :classification symbol.
+    def annotate_segments(iri)
+      hinted = SegmentHints.derive(iri.path_segments, @classifier)
+      prefix = ""
+      hinted.map do |entry|
+        stats = @position_stats[[iri.host, prefix]]
+        out = entry.merge(
+          prefix:         prefix,
+          classification: classify(entry, stats),
+        )
+        prefix = "#{prefix}/#{placeholder(entry)}"
+        out
+      end
+    end
+
+    def placeholder(entry)
+      return entry[:value] unless entry[:variable]
+
+      "{#{entry[:hint] || entry[:type]}}"
+    end
+
+    def classify(entry, stats)
+      variable = entry[:variable]
+
+      return variable ? :variable_identifier : :ambiguous if stats.nil? || stats.total.zero?
+      return :variable_identifier if variable
+
+      value            = entry[:value]
+      total            = stats.total
+      variable_frac    = stats.variable_fraction(@classifier)
+      cardinality_frac = stats.cardinality.to_f / total
+      enough_data      = total >= MIN_OBSERVATIONS_FOR_INFERENCE
+      value_frac       = stats.value_fraction(value)
+
+      if enough_data && variable_frac >= VARIABLE_DOMINANCE_THRESHOLD
+        # Position is dominated by variable types (UUIDs, integers, etc.).
+        # A literal here is a special-case outlier (e.g. /users/me).
+        stats.value_counts.key?(value) ? :rare_literal : :ambiguous
+      elsif value_frac >= STABLE_LITERAL_THRESHOLD
+        # This specific value dominates — preserve it regardless of how
+        # diverse the rest of the position is.
+        :stable_literal
+      elsif enough_data && cardinality_frac >= LITERAL_UNIQUENESS_THRESHOLD
+        # Lots of distinct literals — looks like a variable slot.
+        :corpus_inferred_variable
+      elsif stats.cardinality == 1
+        :stable_literal
+      elsif stats.value_counts.key?(value)
+        :rare_literal
+      else
+        :ambiguous
+      end
+    end
+
+    def corpus_token(entry)
+      case entry[:classification]
+      when :variable_identifier, :corpus_inferred_variable
+        placeholder_for_variable(entry)
+      else
+        entry[:value]
+      end
+    end
+
+    def placeholder_for_variable(entry)
+      return "{#{entry[:hint] || entry[:type]}}" if entry[:variable]
+
+      # corpus-inferred variable: classifier said literal, corpus says
+      # otherwise. Derive a hint from the prefix's last literal segment if
+      # we can.
+      last_literal = entry[:prefix].split("/").reject(&:empty?).reject { |s| s.start_with?("{") }.last
+      base = last_literal ? Inflector.singularize(last_literal) : nil
+      base ? "{#{base}}" : "{value}"
+    end
+  end
+end

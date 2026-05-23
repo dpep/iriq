@@ -10,6 +10,9 @@ require "iriq/normalizer"
 require "iriq/explanation"
 require "iriq/cluster"
 require "iriq/clusterer"
+require "iriq/position_stats"
+require "iriq/observation"
+require "iriq/corpus"
 require "iriq/cli"
 
 module Iriq

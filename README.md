@@ -112,6 +112,78 @@ a position the classifier *would* call variable but that is empirically
 constant across all members of the cluster will be reported with
 `stable: true, variable: false`.
 
+## Corpus (streaming + learning)
+
+For processing many identifiers — possibly an unbounded stream — use
+`Iriq::Corpus`. It maintains rolling aggregates and per-(host, prefix)
+frequency stats so classification improves as more data comes in.
+
+```ruby
+corpus = Iriq::Corpus.new
+
+iris.each do |iri|
+  obs = corpus.observe(iri)
+  obs.fingerprint   # deterministic shape: "https://foo.com/users/{user_id}"
+  obs.cluster       # the Iriq::Cluster this fell into
+  obs.explanation   # per-segment annotations with corpus-informed classification
+end
+
+corpus.host_counts          # { "foo.com" => 1234, "bar.com" => 7 }
+corpus.path_length_counts   # { 2 => 800, 3 => 434 }
+corpus.fingerprint_counts   # shape → count
+corpus.raw_shape_counts     # hint-free shape → count
+corpus.clusters             # Iriq::Cluster instances
+```
+
+### Deterministic vs. corpus-informed normalization
+
+```ruby
+Iriq.normalize("https://foo.com/users/me")
+# => "https://foo.com/users/me"   # mechanical: "me" is a literal
+
+corpus.normalize("https://foo.com/users/me")
+# => depends on what the corpus has seen
+```
+
+If many `/users/{integer_id}` paths flow in alongside a handful of
+`/users/me`, the cluster `/users/me` is preserved (mechanical clustering
+keeps literal routes distinct). If many *distinct literal handles*
+(`/users/alice`, `/users/bob`, `/users/carol`, ...) flow in, the corpus
+promotes that position to a `{user}` placeholder:
+
+```ruby
+%w[alice bob carol dave erin frank gina hank ivan jane].each do |name|
+  corpus.observe("https://foo.com/users/#{name}/profile")
+end
+
+corpus.normalize("https://foo.com/users/alice/profile")
+# => "https://foo.com/users/{user}/profile"
+```
+
+### Explainability
+
+Each row of `corpus.explain(...)` (and `observation.explanation`) carries a
+`classification:` symbol on top of the deterministic fields:
+
+| Classification              | Meaning                                              |
+| --------------------------- | ---------------------------------------------------- |
+| `:stable_literal`           | Literal value dominates this position                |
+| `:variable_identifier`      | Classifier said variable (uuid, integer, etc.)       |
+| `:rare_literal`             | Literal seen here, but not dominant                  |
+| `:corpus_inferred_variable` | Classifier said literal, but position has high entropy |
+| `:ambiguous`                | Insufficient signal — never seen, or mixed           |
+
+### Memory bounds
+
+- Per-position `value_counts` is capped (`max_values_per_position`, default
+  1000) — once full, `total` keeps growing but only existing keys count up.
+- Cluster examples are capped at `Iriq::Cluster::MAX_EXAMPLES`.
+- No raw IRI strings are retained outside the bounded cluster examples.
+
+```ruby
+Iriq::Corpus.new(max_values_per_position: 200)
+```
+
 ## Object model
 
 | Class                       | Responsibility                                       |
@@ -126,6 +198,9 @@ constant across all members of the cluster will be reported with
 | `Iriq::Explanation`         | Per-segment `{value, type, variable, hint}` rows     |
 | `Iriq::Cluster`             | One host + shape group, with examples & stats        |
 | `Iriq::Clusterer`           | Many identifiers → `Cluster` set + explain          |
+| `Iriq::PositionStats`       | Capped value/type frequencies for one position       |
+| `Iriq::Observation`         | What `Corpus#observe` returns                        |
+| `Iriq::Corpus`              | Streaming observer with rolling aggregates + learning |
 
 ## CLI
 
