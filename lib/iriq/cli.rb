@@ -344,12 +344,11 @@ module Iriq
 
     def emit_stats(corpus, opts)
       payload = {
-        observations:  corpus.host_counts.values.sum,
-        clusters:      corpus.size,
-        hosts:         top(corpus.host_counts),
-        path_lengths:  corpus.path_length_counts.sort.to_h,
-        shapes:        top(corpus.fingerprint_counts),
-        raw_shapes:    top(corpus.raw_shape_counts),
+        observations: corpus.host_counts.values.sum,
+        clusters:     corpus.size,
+        hosts:        top(corpus.host_counts),
+        shapes:       top(corpus.fingerprint_counts),
+        raw_shapes:   top(corpus.raw_shape_counts),
       }
 
       if opts[:json]
@@ -360,9 +359,6 @@ module Iriq
         stdout.puts
         stdout.puts "top hosts:"
         payload[:hosts].each { |h, n| stdout.puts "  #{n.to_s.rjust(6)}  #{h}" }
-        stdout.puts
-        stdout.puts "path lengths:"
-        payload[:path_lengths].each { |len, n| stdout.puts "  #{n.to_s.rjust(6)}  #{len}" }
         stdout.puts
         stdout.puts "top shapes:"
         payload[:shapes].each { |s, n| stdout.puts "  #{n.to_s.rjust(6)}  #{s}" }
