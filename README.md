@@ -261,8 +261,10 @@ Iriq::Corpus.new(max_values_per_position: 200)
 
 ## CLI
 
-Installing the gem also installs an `iriq` executable. The default action is
-a combined summary; section flags trim it.
+Installing the gem installs an `iriq` executable. Two main modes:
+
+**Single input** — combined parse + normalize + explain summary; trim with
+section flags (`-p`, `-n`, `-e`).
 
 ```
 $ iriq foo.com/users/456
@@ -283,72 +285,81 @@ https://foo.com/users/{user_id}
 
 $ iriq -n https://foo.com/users/123
 https://foo.com/users/{user_id}
+```
 
-$ iriq -ne foo.com/posts/2024-05-23/hello-world
-# normalize
-https://foo.com/posts/{post_id}/{slug}
+**Piped stdin** — extraction runs by default. Output auto-switches: small
+inputs get a deduplicated URL list, larger inputs (≥ 10 IRIs) get the
+cluster view via an ephemeral corpus.
 
-# explain
-  literal      literal      posts
-* date         post_id      2024-05-23
-* slug         slug         hello-world
+```
+$ cat short.txt | iriq
+[2] https://github.com/dpep/iriq
+[1] https://foo.com/users
 
-$ cat urls.txt | iriq
-[2] foo.com  /users/{user_id}
-    https://foo.com/users/1
-    https://foo.com/users/2
-[1] foo.com  /posts/{post_id}/edit
-    https://foo.com/posts/abc-123/edit
+$ cat access.log | iriq                       # ≥ 10 IRIs → cluster view
+[190] docs.example.com  /users/{user_id}
+[186] app.example.com   /users/{user_id}
+...
+
+$ cat README.md | iriq --stats                # rolling aggregates
+$ cat README.md | iriq cluster                # force cluster view
+$ cat README.md | iriq --corpus c.json        # persist into a corpus
+```
+
+`--corpus PATH` makes the corpus survive across invocations (atomic JSON
+file). Once it has data, `-n` / `-e` become corpus-informed:
+
+```
+$ for n in alice bob carol dave erin frank gina hank ivan jane; do
+    iriq --corpus c.json https://foo.com/users/$n/profile >/dev/null
+  done
+
+$ iriq -n --corpus c.json https://foo.com/users/zoe/profile
+https://foo.com/users/{user}/profile         # mechanical would keep "zoe"
 ```
 
 Flags:
 
-| Flag             | Effect                                                  |
-| ---------------- | ------------------------------------------------------- |
-| `-p, --parse`    | Show parsed fields                                      |
-| `-n, --normalize`| Show the shape-normalized form                          |
-| `-e, --explain`  | Show per-segment annotations                            |
-| `-j, --json`     | Emit JSON; with one section flag, just that payload     |
-| `--no-hints`     | Use `{integer_id}` etc. instead of `{user_id}`          |
-| `--corpus PATH`  | Load/create a JSON corpus at PATH; observe and save     |
-| `--stats`        | Print rolling aggregates (with --corpus or in pipe mode)|
-| `-V, --version`  | Print version                                           |
-
-**Pipe (batch) mode.** When stdin is piped and no positional input is given,
-each line is observed and clusters are printed at the end:
-
-```
-$ cat urls.txt | iriq
-$ cat urls.txt | iriq --stats
-```
-
-`iriq cluster [file]` is an explicit alias for batch mode (still supported).
-
-**Persistent corpus.** `--corpus PATH` makes the corpus survive across
-invocations. The first run creates the file; subsequent runs load, observe,
-and rewrite it atomically. Once a corpus has enough data, `-n` / `-e` use
-corpus-informed classifications:
-
-```
-$ for n in alice bob carol dave erin frank gina hank ivan jane; do
-    iriq --corpus mycorpus.json https://foo.com/users/$n/profile >/dev/null
-  done
-
-$ iriq -n --corpus mycorpus.json https://foo.com/users/zoe/profile
-https://foo.com/users/{user}/profile
-
-$ iriq --corpus mycorpus.json --stats
-observations: 10
-clusters:     10
-...
-
-$ cat more_urls.txt | iriq --corpus mycorpus.json --stats
-```
-
-Without `--corpus`, the same `-n` would print `https://foo.com/users/zoe/profile`
-unchanged (mechanical normalize keeps literals).
+| Flag                | Effect                                                  |
+| ------------------- | ------------------------------------------------------- |
+| `-p, --parse`       | Show parsed fields                                      |
+| `-n, --normalize`   | Show the shape-normalized form                          |
+| `-e, --explain`     | Show per-segment annotations                            |
+| `-j, --json`        | Emit JSON                                               |
+| `--extract`         | Treat input as prose; pull URLs out                     |
+| `--no-scheme-less`  | Skip `foo.com/path`-style extraction (explicit-scheme only) |
+| `--no-hints`        | Use `{integer_id}` etc. instead of `{user_id}`          |
+| `--corpus PATH`     | Load/create a JSON corpus at PATH; observe and save     |
+| `--stats`           | Print rolling aggregates                                |
+| `-V, --version`     | Print version                                           |
 
 Exit codes: `0` success, `1` usage error, `2` parse error.
+
+## Performance
+
+Measured on the deterministic `IriGenerator` fixture (Ruby 3.4.9, single
+thread):
+
+| Operation                | Throughput   |
+| ------------------------ | ------------ |
+| `Iriq.parse`             | ~260k URLs/s |
+| `Iriq.normalize`         | ~148k URLs/s |
+| `Iriq.explain`           | ~205k URLs/s |
+| `Iriq.extract` (prose)   | ~9.6 MB/s    |
+| `Corpus#observe`         | ~80k URLs/s  |
+| Corpus save/load (10k)   | ~135 ms      |
+
+Linear scaling holds through 100k observations; per-observation retained
+memory amortizes to ~100 bytes at that scale. Memoization caches are
+bounded by `CACHE_MAX = 10_000` (cleared when full) — overhead is a few
+hundred KB regardless of corpus size.
+
+Re-run anytime with:
+
+```
+bundle exec script/benchmark.rb       # throughput
+bundle exec script/memory.rb          # retained memory + cache footprints
+```
 
 ## Limitations (intentional)
 
