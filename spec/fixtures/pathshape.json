@@ -1,0 +1,60 @@
+{
+  "cases": [
+    {
+      "segments": [
+
+      ],
+      "hints": true,
+      "shape": "/"
+    },
+    {
+      "segments": [
+        "users",
+        "123"
+      ],
+      "hints": true,
+      "shape": "/users/{user_id}"
+    },
+    {
+      "segments": [
+        "users",
+        "123"
+      ],
+      "hints": false,
+      "shape": "/users/{integer_id}"
+    },
+    {
+      "segments": [
+        "users",
+        "123",
+        "orders",
+        "456"
+      ],
+      "hints": true,
+      "shape": "/users/{user_id}/orders/{order_id}"
+    },
+    {
+      "segments": [
+        "posts",
+        "abc-123"
+      ],
+      "hints": true,
+      "shape": "/posts/{post_id}"
+    },
+    {
+      "segments": [
+        "events",
+        "2024-05-23"
+      ],
+      "hints": true,
+      "shape": "/events/{event_id}"
+    },
+    {
+      "segments": [
+        "login"
+      ],
+      "hints": true,
+      "shape": "/login"
+    }
+  ]
+}

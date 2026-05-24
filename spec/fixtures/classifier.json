@@ -1,0 +1,72 @@
+{
+  "cases": [
+    {
+      "input": "users",
+      "type": "literal"
+    },
+    {
+      "input": "Profile",
+      "type": "literal"
+    },
+    {
+      "input": "123",
+      "type": "integer_id"
+    },
+    {
+      "input": "0",
+      "type": "integer_id"
+    },
+    {
+      "input": "9999999",
+      "type": "integer_id"
+    },
+    {
+      "input": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "type": "uuid"
+    },
+    {
+      "input": "2024-05-23",
+      "type": "date"
+    },
+    {
+      "input": "2024-05-23T10:30:00Z",
+      "type": "timestamp"
+    },
+    {
+      "input": "2024-05-23 10:30:00",
+      "type": "timestamp"
+    },
+    {
+      "input": "1716470400",
+      "type": "timestamp"
+    },
+    {
+      "input": "1716470400000",
+      "type": "timestamp"
+    },
+    {
+      "input": "d41d8cd98f00b204e9800998ecf8427e",
+      "type": "hash"
+    },
+    {
+      "input": "my-cool-post",
+      "type": "slug"
+    },
+    {
+      "input": "my_cool_post",
+      "type": "slug"
+    },
+    {
+      "input": "abc123XYZ",
+      "type": "opaque_id"
+    },
+    {
+      "input": "こんにちは",
+      "type": "literal"
+    },
+    {
+      "input": "",
+      "type": "literal"
+    }
+  ]
+}

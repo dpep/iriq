@@ -1,0 +1,77 @@
+name: Go
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    types: [ opened, edited, synchronize ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: [ "1.22", "1.23" ]
+
+    name: Go ${{ matrix.go-version }}
+
+    steps:
+      - name: clone ${{ github.repository }}
+        uses: actions/checkout@v6
+
+      - name: setup Go ${{ matrix.go-version }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache-dependency-path: go/go.sum
+
+      - name: build
+        working-directory: go
+        run: go build ./...
+
+      - name: vet
+        working-directory: go
+        run: go vet ./...
+
+      - name: test
+        working-directory: go
+        run: go test ./... -race
+
+  parity:
+    name: Ruby ↔ Go parity
+    runs-on: ubuntu-latest
+    env:
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: go/go.sum
+
+      # Regenerate fixtures from Ruby, then run the Go fixture tests against
+      # them. Any drift between implementations fails the job.
+      - name: regenerate fixtures
+        run: bundle exec ruby script/generate_fixtures.rb
+
+      - name: assert fixtures unchanged
+        run: |
+          if ! git diff --quiet spec/fixtures; then
+            echo "::error::Fixtures are stale — run script/generate_fixtures.rb and commit."
+            git --no-pager diff spec/fixtures
+            exit 1
+          fi
+
+      - name: Go fixture tests
+        working-directory: go
+        run: go test ./iriq -run Fixture -v
+
+      - name: CLI parity
+        run: script/cli_parity.sh

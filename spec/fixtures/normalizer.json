@@ -1,0 +1,54 @@
+{
+  "cases": [
+    {
+      "input": "https://foo.com/users/123",
+      "hints": true,
+      "output": "https://foo.com/users/{user_id}"
+    },
+    {
+      "input": "https://foo.com/users/123/orders/456",
+      "hints": true,
+      "output": "https://foo.com/users/{user_id}/orders/{order_id}"
+    },
+    {
+      "input": "https://foo.com/users/123",
+      "hints": false,
+      "output": "https://foo.com/users/{integer_id}"
+    },
+    {
+      "input": "HTTPS://FOO.COM:443/Bar",
+      "hints": true,
+      "output": "https://foo.com/Bar"
+    },
+    {
+      "input": "https://foo.com/posts/abc-123",
+      "hints": true,
+      "output": "https://foo.com/posts/{post_id}"
+    },
+    {
+      "input": "https://foo.com/search?q=hi&page=2",
+      "hints": true,
+      "output": "https://foo.com/search?page={integer_id}&q=hi"
+    },
+    {
+      "input": "urn:isbn:0451450523",
+      "hints": true,
+      "output": "urn:isbn:{isbn_id}"
+    },
+    {
+      "input": "urn:uuid:f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "hints": true,
+      "output": "urn:uuid:{uuid_uuid}"
+    },
+    {
+      "input": "https://foo.com/2024-05-23/events",
+      "hints": true,
+      "output": "https://foo.com/{date}/events"
+    },
+    {
+      "input": "https://foo.com/files/d41d8cd98f00b204e9800998ecf8427e",
+      "hints": true,
+      "output": "https://foo.com/files/{file_id}"
+    }
+  ]
+}
