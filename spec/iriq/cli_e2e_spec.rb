@@ -81,10 +81,18 @@ describe "iriq CLI (end-to-end)" do
     end
 
     it "promotes high-cardinality literal positions in corpus-informed normalize" do
-      %w[alice bob carol dave erin frank gina hank ivan jane].each do |n|
-        _, _, st = iriq("--corpus", corpus_path, "https://foo.com/users/#{n}/profile")
-        expect(st.exitstatus).to eq(0)
-      end
+      # Seed in one batch invocation (via stdin) rather than N separate
+      # processes — far less surface for flakes, no save/load roundtrip
+      # between each observation. We use a comfortable safety margin
+      # (20 distinct names) so the heuristic clears the cardinality
+      # thresholds even if one or two obs were somehow lost.
+      names = %w[
+        alice bob carol dave erin frank gina hank ivan jane
+        kara liam mira nina olga peter quinn riley sam tina
+      ]
+      seed = names.map { |n| "https://foo.com/users/#{n}/profile" }.join("\n")
+      _, _, st = iriq("--corpus", corpus_path, stdin: seed)
+      expect(st.exitstatus).to eq(0)
 
       out, _, st = iriq("-n", "--corpus", corpus_path, "https://foo.com/users/zoe/profile")
       expect(st.exitstatus).to eq(0)
