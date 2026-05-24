@@ -67,9 +67,6 @@ module Iriq
       return print_usage(stdout, 0) if opts[:help]
       return print_version          if opts[:version]
 
-      # -N / --no-hints alone implies -n (normalize, mechanical placeholders).
-      opts[:sections] = [:normalize] if opts[:sections].empty? && !opts[:hints]
-
       explicit_cluster = (args.first == "cluster")
       args.shift if explicit_cluster
 
@@ -347,13 +344,22 @@ module Iriq
       if opts[:json]
         stdout.puts JSON.generate(sorted.map(&:to_h))
       else
-        sorted.each do |c|
-          host = c.host || "(urn)"
-          stdout.puts "[#{c.count}] #{host}  #{c.shape}"
+        sorted.each_with_index do |c, i|
+          stdout.puts if i > 0
+          host  = c.host || "(urn)"
+          shape = opts[:hints] ? c.shape : raw_shape_for(c)
+          stdout.puts "[#{c.count}] #{host}  #{shape}"
           c.examples.first(3).each { |e| stdout.puts "    #{e.canonical}" }
           stdout.puts "    + #{c.count - 3} more" if c.count > 3
         end
       end
+    end
+
+    def raw_shape_for(cluster)
+      example = cluster.examples.first
+      return cluster.shape unless example
+
+      PathShape.for(example.path_segments, hints: false)
     end
 
     def emit_stats(corpus, opts)
@@ -375,7 +381,8 @@ module Iriq
         payload[:hosts].each { |h, n| stdout.puts "  #{n.to_s.rjust(6)}  #{h}" }
         stdout.puts
         stdout.puts "top shapes:"
-        payload[:shapes].each { |s, n| stdout.puts "  #{n.to_s.rjust(6)}  #{s}" }
+        shapes = opts[:hints] ? payload[:shapes] : payload[:raw_shapes]
+        shapes.each { |s, n| stdout.puts "  #{n.to_s.rjust(6)}  #{s}" }
       end
     end
 

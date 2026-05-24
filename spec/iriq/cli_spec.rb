@@ -224,12 +224,6 @@ describe Iriq::CLI do
         expect(stdout.string.strip).to eq("https://foo.com/users/{integer_id}")
       end
 
-      it "-N alone implies -n (no need for -n -N)" do
-        stdin.string = "see https://foo.com/users/1"
-        expect(run("-N")).to eq(0)
-        expect(stdout.string.strip).to eq("https://foo.com/users/{integer_id}")
-      end
-
       it "-pn shows a blank line between sections per IRI" do
         stdin.string = "see https://foo.com/users/1"
         expect(run("-pn")).to eq(0)
@@ -259,6 +253,31 @@ describe Iriq::CLI do
       stdin.string = (1..10).map { |i| "https://foo.com/users/#{i}" }.join("\n")
       expect(run).to eq(0)
       expect(stdout.string).to include("[10] foo.com  /users/{user_id}")
+    end
+
+    it "-N renders cluster shapes with mechanical placeholders" do
+      stdin.string = (1..10).map { |i| "https://foo.com/users/#{i}" }.join("\n")
+      expect(run("-N")).to eq(0)
+      expect(stdout.string).to include("[10] foo.com  /users/{integer_id}")
+      expect(stdout.string).not_to include("{user_id}")
+    end
+
+    it "cluster output has a blank line between cluster entries" do
+      stdin.string = (1..6).map { |i| "https://foo.com/users/#{i}" }.join("\n") +
+                     "\n" + (1..4).map { |i| "https://bar.com/x/#{i}" }.join("\n")
+      expect(run).to eq(0)
+      # Two cluster blocks separated by a blank line.
+      blocks = stdout.string.split(/\n\n+/)
+      expect(blocks.size).to eq(2)
+      expect(blocks[0]).to start_with("[6] foo.com")
+      expect(blocks[1]).to start_with("[4] bar.com")
+    end
+
+    it "--stats with -N shows raw (hint-free) top shapes" do
+      stdin.string = (1..5).map { |i| "https://foo.com/users/#{i}" }.join("\n")
+      expect(run("--stats", "-N")).to eq(0)
+      expect(stdout.string).to include("/users/{integer_id}")
+      expect(stdout.string).not_to include("{user_id}")
     end
 
     it "still shows URL list for small inputs" do
