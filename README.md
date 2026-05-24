@@ -205,10 +205,10 @@ $ cat short.txt | iriq
 [2] https://github.com/dpep/iriq
 [1] https://foo.com/users
 
-$ cat big_log.txt | iriq
-[1247] api.example.com  /users/{user_id}
-[423]  api.example.com  /users/{user_id}/orders/{order_id}
-[88]   docs.example.com /v2/{v2_id}
+$ cat access.log | iriq                # large input → cluster view
+[190] docs.example.com  /users/{user_id}
+[186] app.example.com   /users/{user_id}
+[140] api.example.com   /users/{user_id}/orders/{order_id}
 ...
 ```
 
