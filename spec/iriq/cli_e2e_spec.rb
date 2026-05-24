@@ -26,7 +26,6 @@ describe "iriq CLI (end-to-end)" do
     expect(status.exitstatus).to eq(0)
     expect(out).to include("# parse")
     expect(out).to include("# normalize")
-    expect(out).to include("# explain")
     expect(out).to include("https://foo.com/users/{user_id}")
   end
 

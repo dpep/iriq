@@ -9,7 +9,7 @@ module Iriq
   # different (many inputs, not one). Construct with explicit IO so specs
   # can run it without shelling out.
   class CLI
-    SECTION_FLAGS = %i[parse normalize explain].freeze
+    SECTION_FLAGS = %i[parse normalize].freeze
     TOP_N_STATS   = 10
 
     # When extraction yields this many or more IRIs, the default pipe
@@ -23,22 +23,21 @@ module Iriq
              iriq cluster [options] [file]
 
       <input> may be an IRI, a file path (extracted automatically), or piped
-      text via stdin. Default output adapts to the input shape — see Examples.
+      text via stdin.
 
       Sections (combine freely):
-        -e, --explain         Per-segment annotations
         -n, --normalize       Shape-normalized form
         -p, --parse           Parsed fields
 
       Corpus + stats:
             --corpus PATH     Load/create a JSON corpus; observe and save atomically.
-                              -n/-e become corpus-informed once it has data.
+                              -n becomes corpus-informed once it has data.
             --stats           Print rolling aggregates
 
       Other:
         -h, --help            Show this message
         -j, --json            Emit JSON instead of human-readable output
-            --no-hints        Use {integer_id} placeholders instead of {user_id}
+        -N, --no-hints        Use {integer_id} placeholders instead of {user_id}
             --no-scheme-less  Skip foo.com/path extraction (explicit-scheme only)
         -V, --version         Print version
 
@@ -125,9 +124,9 @@ module Iriq
       parser = OptionParser.new do |o|
         o.on("-p", "--parse")        { opts[:sections] << :parse }
         o.on("-n", "--normalize")    { opts[:sections] << :normalize }
-        o.on("-e", "--explain")      { opts[:sections] << :explain }
         o.on("-j", "--json")         { opts[:json]    = true }
         o.on("--[no-]hints")         { |v| opts[:hints] = v }
+        o.on("-N")                   { opts[:hints] = false }
         o.on("--corpus PATH")        { |v| opts[:corpus] = v }
         o.on("--stats")              { opts[:stats]   = true }
         o.on("--[no-]scheme-less")   { |v| opts[:scheme_less] = v }
@@ -169,13 +168,14 @@ module Iriq
     def cmd_summary(args, opts, corpus)
       input    = args.first or return missing(:input)
       iri      = Iriq.parse(input)
-      obs      = corpus&.observe(iri)
+      corpus&.observe(iri)
       sections = opts[:sections].empty? ? SECTION_FLAGS : opts[:sections]
 
       data = {}
-      data[:parse]     = identifier_hash(iri)                                                if sections.include?(:parse)
-      data[:normalize] = (corpus ? corpus.normalize(iri) : Normalizer.normalize_identifier(iri, hints: opts[:hints])) if sections.include?(:normalize)
-      data[:explain]   = (obs ? obs.explanation : Explanation.explain(iri))                  if sections.include?(:explain)
+      data[:parse]     = identifier_hash(iri) if sections.include?(:parse)
+      if sections.include?(:normalize)
+        data[:normalize] = corpus ? corpus.normalize(iri) : Normalizer.normalize_identifier(iri, hints: opts[:hints])
+      end
 
       if opts[:json]
         payload = sections.size == 1 ? data.values.first : data
@@ -229,7 +229,6 @@ module Iriq
             case sec
             when :parse     then emit_parse_human(p[:parse])
             when :normalize then stdout.puts p[:normalize]
-            when :explain   then emit_explain_human(p[:explain])
             end
           end
         end
@@ -238,9 +237,8 @@ module Iriq
 
     def section_payload(iri, sections, opts)
       data = {}
-      data[:parse]     = identifier_hash(iri)                                                 if sections.include?(:parse)
-      data[:normalize] = Normalizer.normalize_identifier(iri, hints: opts[:hints])            if sections.include?(:normalize)
-      data[:explain]   = Explanation.explain(iri)                                             if sections.include?(:explain)
+      data[:parse]     = identifier_hash(iri)                                       if sections.include?(:parse)
+      data[:normalize] = Normalizer.normalize_identifier(iri, hints: opts[:hints])  if sections.include?(:normalize)
       data
     end
 
@@ -320,7 +318,6 @@ module Iriq
         case sec
         when :parse     then emit_parse_human(data[:parse])
         when :normalize then stdout.puts data[:normalize]
-        when :explain   then emit_explain_human(data[:explain])
         end
       end
     end
@@ -336,17 +333,6 @@ module Iriq
       stdout.puts "fragment:      #{h[:fragment]}" if h[:fragment]
       stdout.puts "nss:           #{h[:nss]}"      if h[:nss]
       stdout.puts "canonical:     #{h[:canonical]}"
-    end
-
-    def emit_explain_human(rows)
-      rows.each do |r|
-        mark        = r[:variable] ? "*" : " "
-        placeholder = r[:hint] || r[:type]
-        extras      = []
-        extras << r[:classification] if r[:classification]
-        suffix = extras.empty? ? "" : "  [#{extras.join(', ')}]"
-        stdout.printf("%s %-12s %-12s %s%s\n", mark, r[:type], placeholder, r[:value], suffix)
-      end
     end
 
     def emit_clusters(clusters, opts)

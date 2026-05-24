@@ -233,8 +233,8 @@ Iriq::Corpus.new(max_values_per_position: 200)
 
 Installing the gem installs an `iriq` executable. Two main modes:
 
-**Single input** — combined parse + normalize + explain summary; trim with
-section flags (`-p`, `-n`, `-e`).
+**Single input** — combined parse + normalize summary; trim with section
+flags (`-p`, `-n`).
 
 ```
 $ iriq foo.com/users/456
@@ -249,10 +249,6 @@ canonical:     https://foo.com/users/456
 # normalize
 https://foo.com/users/{user_id}
 
-# explain
-  literal      literal      users
-* integer_id   user_id      456
-
 $ iriq -n https://foo.com/users/123
 https://foo.com/users/{user_id}
 ```
@@ -260,7 +256,7 @@ https://foo.com/users/{user_id}
 **Piped stdin** — extraction runs by default. Output auto-switches: small
 inputs get a deduplicated URL list, larger inputs (≥ 10 IRIs) get the
 cluster view via an ephemeral corpus. Section flags work too — emit one
-normalized URL / parsed record / explanation per extracted IRI.
+normalized URL / parsed record per extracted IRI.
 
 ```
 $ cat short.txt | iriq
@@ -282,7 +278,7 @@ $ cat README.md | iriq --corpus c.json        # persist into a corpus
 ```
 
 `--corpus PATH` makes the corpus survive across invocations (atomic JSON
-file). Once it has data, `-n` / `-e` become corpus-informed:
+file). Once it has data, `-n` becomes corpus-informed:
 
 ```
 $ for n in alice bob carol dave erin frank gina hank ivan jane; do
@@ -299,10 +295,9 @@ Flags:
 | ------------------- | ------------------------------------------------------- |
 | `-p, --parse`       | Show parsed fields                                      |
 | `-n, --normalize`   | Show the shape-normalized form                          |
-| `-e, --explain`     | Show per-segment annotations                            |
 | `-j, --json`        | Emit JSON                                               |
+| `-N, --no-hints`    | Use `{integer_id}` etc. instead of `{user_id}`          |
 | `--no-scheme-less`  | Skip `foo.com/path`-style extraction (explicit-scheme only) |
-| `--no-hints`        | Use `{integer_id}` etc. instead of `{user_id}`          |
 | `--corpus PATH`     | Load/create a JSON corpus at PATH; observe and save     |
 | `--stats`           | Print rolling aggregates                                |
 | `-V, --version`     | Print version                                           |

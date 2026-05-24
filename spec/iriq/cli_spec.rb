@@ -39,7 +39,7 @@ describe Iriq::CLI do
   end
 
   describe "default (no section flag)" do
-    it "runs parse + normalize + explain for a URL-ish input" do
+    it "runs parse + normalize for a URL-ish input" do
       expect(run("foo.com/users/123")).to eq(0)
       out = stdout.string
       expect(out).to include("# parse")
@@ -47,17 +47,14 @@ describe Iriq::CLI do
       expect(out).to include("host:          foo.com")
       expect(out).to include("# normalize")
       expect(out).to include("https://foo.com/users/{user_id}")
-      expect(out).to include("# explain")
-      expect(out).to match(/\* integer_id\s+user_id\s+123/)
     end
 
     it "emits a single combined JSON object with --json" do
       expect(run("--json", "https://foo.com/users/123")).to eq(0)
       data = JSON.parse(stdout.string)
-      expect(data.keys).to contain_exactly("parse", "normalize", "explain")
+      expect(data.keys).to contain_exactly("parse", "normalize")
       expect(data["parse"]).to include("host" => "foo.com")
       expect(data["normalize"]).to eq("https://foo.com/users/{user_id}")
-      expect(data["explain"].last).to include("hint" => "user_id")
     end
 
     it "works for URNs" do
@@ -74,7 +71,6 @@ describe Iriq::CLI do
       out = stdout.string
       expect(out).to include("scheme:        https")
       expect(out).not_to include("# normalize")
-      expect(out).not_to include("# explain")
     end
 
     it "prints only the normalize section with -n" do
@@ -82,19 +78,11 @@ describe Iriq::CLI do
       expect(stdout.string.strip).to eq("https://foo.com/users/{user_id}")
     end
 
-    it "prints only the explain section with -e" do
-      expect(run("-e", "https://foo.com/users/123")).to eq(0)
-      out = stdout.string
-      expect(out).to match(/\* integer_id\s+user_id\s+123/)
-      expect(out).not_to include("# parse")
-    end
-
-    it "combines flags (-pe) and shows section headers" do
-      expect(run("-pe", "https://foo.com/users/123")).to eq(0)
+    it "combines flags (-pn) and shows section headers" do
+      expect(run("-pn", "https://foo.com/users/123")).to eq(0)
       out = stdout.string
       expect(out).to include("# parse")
-      expect(out).to include("# explain")
-      expect(out).not_to include("# normalize")
+      expect(out).to include("# normalize")
     end
 
     it "with --json and a single section, returns just that section's payload" do
@@ -212,12 +200,19 @@ describe Iriq::CLI do
         expect(out).to include("host:          foo.com")
       end
 
-      it "-e prints explanation rows per IRI" do
-        stdin.string = "see https://foo.com/users/123"
-        expect(run("-e")).to eq(0)
+      it "-p prints parsed details per IRI with a header" do
+        stdin.string = "see https://foo.com/users/123 and https://bar.com/x"
+        expect(run("-p")).to eq(0)
         out = stdout.string
         expect(out).to include("# https://foo.com/users/123")
-        expect(out).to match(/\* integer_id\s+user_id\s+123/)
+        expect(out).to include("# https://bar.com/x")
+        expect(out).to include("scheme:        https")
+      end
+
+      it "-N (no-hints) gives mechanical placeholders in pipe -n output" do
+        stdin.string = "see https://foo.com/users/1"
+        expect(run("-n", "-N")).to eq(0)
+        expect(stdout.string.strip).to eq("https://foo.com/users/{integer_id}")
       end
 
       it "multiple section flags bundle per IRI in JSON" do
@@ -307,11 +302,6 @@ describe Iriq::CLI do
       expect(data["host_counts"]).to eq("foo.com" => 2)
     end
 
-    it "explain shows the corpus classification under --corpus" do
-      5.times { run("--corpus", corpus_path, "https://foo.com/users/me"); stdout.truncate(0); stdout.rewind }
-      expect(run("-e", "--corpus", corpus_path, "https://foo.com/users/me")).to eq(0)
-      expect(stdout.string).to include("stable_literal")
-    end
   end
 
   describe "file-arg auto-detection (replaces --extract)" do
