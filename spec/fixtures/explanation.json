@@ -1,0 +1,101 @@
+{
+  "cases": [
+    {
+      "input": "https://foo.com/users/123/orders/456",
+      "entries": [
+        {
+          "value": "users",
+          "type": "literal",
+          "variable": false,
+          "hint": null
+        },
+        {
+          "value": "123",
+          "type": "integer_id",
+          "variable": true,
+          "hint": "user_id"
+        },
+        {
+          "value": "orders",
+          "type": "literal",
+          "variable": false,
+          "hint": null
+        },
+        {
+          "value": "456",
+          "type": "integer_id",
+          "variable": true,
+          "hint": "order_id"
+        }
+      ]
+    },
+    {
+      "input": "https://foo.com/posts/abc-123",
+      "entries": [
+        {
+          "value": "posts",
+          "type": "literal",
+          "variable": false,
+          "hint": null
+        },
+        {
+          "value": "abc-123",
+          "type": "slug",
+          "variable": true,
+          "hint": "post_id"
+        }
+      ]
+    },
+    {
+      "input": "urn:isbn:0451450523",
+      "entries": [
+        {
+          "value": "isbn",
+          "type": "literal",
+          "variable": false,
+          "hint": null
+        },
+        {
+          "value": "0451450523",
+          "type": "integer_id",
+          "variable": true,
+          "hint": "isbn_id"
+        }
+      ]
+    },
+    {
+      "input": "urn:uuid:f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "entries": [
+        {
+          "value": "uuid",
+          "type": "literal",
+          "variable": false,
+          "hint": null
+        },
+        {
+          "value": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+          "type": "uuid",
+          "variable": true,
+          "hint": "uuid_uuid"
+        }
+      ]
+    },
+    {
+      "input": "https://foo.com/2024-05-23/events",
+      "entries": [
+        {
+          "value": "2024-05-23",
+          "type": "date",
+          "variable": true,
+          "hint": null
+        },
+        {
+          "value": "events",
+          "type": "literal",
+          "variable": false,
+          "hint": null
+        }
+      ]
+    }
+  ]
+}

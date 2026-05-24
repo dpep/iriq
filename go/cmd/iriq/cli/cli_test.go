@@ -1,0 +1,252 @@
+package cli
+
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// stringReader satisfies emptyReporter so the CLI's pipedStdin check works
+// without needing a real fd.
+type stringReader struct {
+	*strings.Reader
+	empty bool
+}
+
+func (r *stringReader) IsEmpty() bool { return r.empty }
+
+func newStdin(s string) io.Reader {
+	return &stringReader{Reader: strings.NewReader(s), empty: s == ""}
+}
+
+type runResult struct {
+	code   int
+	stdout string
+	stderr string
+}
+
+func runCLI(t *testing.T, stdin string, argv ...string) runResult {
+	t.Helper()
+	var out, errOut bytes.Buffer
+	code := Run(newStdin(stdin), &out, &errOut, argv)
+	return runResult{code, out.String(), errOut.String()}
+}
+
+func TestHelp(t *testing.T) {
+	r := runCLI(t, "")
+	if r.code != 0 {
+		t.Errorf("code = %d", r.code)
+	}
+	if !strings.Contains(r.stdout, "Usage: iriq") {
+		t.Errorf("missing usage: %q", r.stdout)
+	}
+}
+
+func TestVersion(t *testing.T) {
+	r := runCLI(t, "", "--version")
+	if r.code != 0 || strings.TrimSpace(r.stdout) != "0.1.0" {
+		t.Errorf("got code=%d stdout=%q", r.code, r.stdout)
+	}
+}
+
+func TestParseError(t *testing.T) {
+	r := runCLI(t, "", "just-some-token")
+	if r.code != 2 {
+		t.Errorf("code = %d", r.code)
+	}
+	if !strings.Contains(r.stderr, "parse error") {
+		t.Errorf("stderr = %q", r.stderr)
+	}
+}
+
+func TestUnknownOption(t *testing.T) {
+	r := runCLI(t, "", "--frobnicate")
+	if r.code != 1 {
+		t.Errorf("code = %d", r.code)
+	}
+}
+
+func TestDefaultParseAndNormalize(t *testing.T) {
+	r := runCLI(t, "", "foo.com/users/123")
+	if r.code != 0 {
+		t.Fatalf("code = %d: %s", r.code, r.stderr)
+	}
+	for _, want := range []string{
+		"# parse", "scheme:        https", "host:          foo.com",
+		"# normalize", "https://foo.com/users/{user_id}",
+	} {
+		if !strings.Contains(r.stdout, want) {
+			t.Errorf("missing %q in %q", want, r.stdout)
+		}
+	}
+}
+
+func TestJSONSingleSection(t *testing.T) {
+	r := runCLI(t, "", "-n", "--json", "foo.com/users/123")
+	if r.code != 0 {
+		t.Fatalf("code = %d", r.code)
+	}
+	var v interface{}
+	if err := json.Unmarshal([]byte(r.stdout), &v); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if v != "https://foo.com/users/{user_id}" {
+		t.Errorf("got %v", v)
+	}
+}
+
+func TestJSONMultiSection(t *testing.T) {
+	r := runCLI(t, "", "-pn", "--json", "foo.com/users/123")
+	var m map[string]interface{}
+	if err := json.Unmarshal([]byte(r.stdout), &m); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if _, ok := m["parse"]; !ok {
+		t.Error("missing parse")
+	}
+	if m["normalize"] != "https://foo.com/users/{user_id}" {
+		t.Errorf("got %v", m["normalize"])
+	}
+}
+
+func TestNoHints(t *testing.T) {
+	r := runCLI(t, "", "-n", "--no-hints", "foo.com/users/123")
+	if strings.TrimSpace(r.stdout) != "https://foo.com/users/{integer_id}" {
+		t.Errorf("got %q", r.stdout)
+	}
+}
+
+func TestPipeURLList(t *testing.T) {
+	stdin := "https://foo.com/users/1\nhttps://foo.com/users/2\nhttps://foo.com/posts/abc-123/edit\n"
+	r := runCLI(t, stdin)
+	for _, want := range []string{"https://foo.com/users/1", "https://foo.com/users/2", "https://foo.com/posts/abc-123/edit"} {
+		if !strings.Contains(r.stdout, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if strings.Contains(r.stdout, "[1]") {
+		t.Errorf("shouldn't have [1] prefix when all unique")
+	}
+}
+
+func TestPipeCountsWhenDuplicates(t *testing.T) {
+	stdin := "https://foo.com\nhttps://foo.com\nhttps://bar.com\n"
+	r := runCLI(t, stdin)
+	want := "[2] https://foo.com\n[1] https://bar.com\n"
+	if r.stdout != want {
+		t.Errorf("got %q want %q", r.stdout, want)
+	}
+}
+
+func TestPipeAutoCluster(t *testing.T) {
+	var stdin strings.Builder
+	for i := 1; i <= 10; i++ {
+		stdin.WriteString("https://foo.com/users/")
+		stdin.WriteString(itoaTest(i))
+		stdin.WriteByte('\n')
+	}
+	r := runCLI(t, stdin.String())
+	if !strings.Contains(r.stdout, "[10] foo.com  /users/{user_id}") {
+		t.Errorf("missing cluster line: %q", r.stdout)
+	}
+}
+
+func TestPipeStatsJSON(t *testing.T) {
+	r := runCLI(t, "https://foo.com/users/1\n", "--stats", "--json")
+	var v map[string]interface{}
+	if err := json.Unmarshal([]byte(r.stdout), &v); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if int(v["observations"].(float64)) != 1 {
+		t.Errorf("observations = %v", v["observations"])
+	}
+}
+
+func TestPipeNormalize(t *testing.T) {
+	r := runCLI(t, "see https://foo.com/users/1 and (https://foo.com/users/2)", "-n")
+	lines := strings.Split(strings.TrimSpace(r.stdout), "\n")
+	want := []string{"https://foo.com/users/{user_id}", "https://foo.com/users/{user_id}"}
+	if len(lines) != len(want) || lines[0] != want[0] || lines[1] != want[1] {
+		t.Errorf("got %v", lines)
+	}
+}
+
+func TestClusterSubcommand(t *testing.T) {
+	r := runCLI(t, "https://foo.com/users/1\nhttps://foo.com/users/2\n", "cluster")
+	if !strings.Contains(r.stdout, "[2] foo.com  /users/{user_id}") {
+		t.Errorf("got %q", r.stdout)
+	}
+}
+
+func TestFileAutoDetect(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "input.log")
+	if err := os.WriteFile(p, []byte("see https://foo.com.\nalso (https://bar.com).\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := runCLI(t, "", p)
+	if !strings.Contains(r.stdout, "https://foo.com") || !strings.Contains(r.stdout, "https://bar.com") {
+		t.Errorf("got %q", r.stdout)
+	}
+}
+
+func TestCorpusPersistence(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "c.json")
+	r := runCLI(t, "", "--corpus", p, "https://foo.com/users/1")
+	if r.code != 0 {
+		t.Fatalf("code = %d: %s", r.code, r.stderr)
+	}
+	if _, err := os.Stat(p); err != nil {
+		t.Fatalf("corpus file: %v", err)
+	}
+	// Second invocation accumulates.
+	r2 := runCLI(t, "", "--corpus", p, "https://foo.com/users/2")
+	if r2.code != 0 {
+		t.Fatalf("code = %d: %s", r2.code, r2.stderr)
+	}
+	data, _ := os.ReadFile(p)
+	var v map[string]interface{}
+	_ = json.Unmarshal(data, &v)
+	hc := v["host_counts"].(map[string]interface{})
+	if int(hc["foo.com"].(float64)) != 2 {
+		t.Errorf("foo.com count = %v", hc["foo.com"])
+	}
+}
+
+func TestCorpusInformedNormalize(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "c.json")
+	for _, n := range []string{"alice", "bob", "carol", "dave", "erin", "frank", "gina", "hank", "ivan", "jane"} {
+		r := runCLI(t, "", "--corpus", p, "https://foo.com/users/"+n+"/profile")
+		if r.code != 0 {
+			t.Fatalf("seed %s: %s", n, r.stderr)
+		}
+	}
+	r := runCLI(t, "", "-n", "--corpus", p, "https://foo.com/users/zoe/profile")
+	if r.code != 0 {
+		t.Fatalf("code = %d: %s", r.code, r.stderr)
+	}
+	if strings.TrimSpace(r.stdout) != "https://foo.com/users/{user}/profile" {
+		t.Errorf("got %q", r.stdout)
+	}
+}
+
+// itoaTest is a tiny helper so we don't pull in strconv just for the test.
+func itoaTest(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[i:])
+}

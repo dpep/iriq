@@ -1,0 +1,319 @@
+{
+  "cases": [
+    {
+      "input": "https://foo.com/users/123",
+      "identifier": {
+        "original": "https://foo.com/users/123",
+        "kind": "url",
+        "scheme": "https",
+        "host": "foo.com",
+        "port": null,
+        "path_segments": [
+          "users",
+          "123"
+        ],
+        "query_params": {
+        },
+        "fragment": null,
+        "nss": null,
+        "canonical": "https://foo.com/users/123"
+      }
+    },
+    {
+      "input": "HTTPS://FOO.COM/Bar",
+      "identifier": {
+        "original": "HTTPS://FOO.COM/Bar",
+        "kind": "url",
+        "scheme": "https",
+        "host": "foo.com",
+        "port": null,
+        "path_segments": [
+          "Bar"
+        ],
+        "query_params": {
+        },
+        "fragment": null,
+        "nss": null,
+        "canonical": "https://foo.com/Bar"
+      }
+    },
+    {
+      "input": "https://foo.com:443/",
+      "identifier": {
+        "original": "https://foo.com:443/",
+        "kind": "url",
+        "scheme": "https",
+        "host": "foo.com",
+        "port": null,
+        "path_segments": [
+
+        ],
+        "query_params": {
+        },
+        "fragment": null,
+        "nss": null,
+        "canonical": "https://foo.com"
+      }
+    },
+    {
+      "input": "http://foo.com:80/",
+      "identifier": {
+        "original": "http://foo.com:80/",
+        "kind": "url",
+        "scheme": "http",
+        "host": "foo.com",
+        "port": null,
+        "path_segments": [
+
+        ],
+        "query_params": {
+        },
+        "fragment": null,
+        "nss": null,
+        "canonical": "http://foo.com"
+      }
+    },
+    {
+      "input": "https://foo.com:8443/",
+      "identifier": {
+        "original": "https://foo.com:8443/",
+        "kind": "url",
+        "scheme": "https",
+        "host": "foo.com",
+        "port": 8443,
+        "path_segments": [
+
+        ],
+        "query_params": {
+        },
+        "fragment": null,
+        "nss": null,
+        "canonical": "https://foo.com:8443"
+      }
+    },
+    {
+      "input": "  https://Foo.com/  ",
+      "identifier": {
+        "original": "  https://Foo.com/  ",
+        "kind": "url",
+        "scheme": "https",
+        "host": "foo.com",
+        "port": null,
+        "path_segments": [
+
+        ],
+        "query_params": {
+        },
+        "fragment": null,
+        "nss": null,
+        "canonical": "https://foo.com"
+      }
+    },
+    {
+      "input": "https://foo.com/a/./b/../c",
+      "identifier": {
+        "original": "https://foo.com/a/./b/../c",
+        "kind": "url",
+        "scheme": "https",
+        "host": "foo.com",
+        "port": null,
+        "path_segments": [
+          "a",
+          "c"
+        ],
+        "query_params": {
+        },
+        "fragment": null,
+        "nss": null,
+        "canonical": "https://foo.com/a/c"
+      }
+    },
+    {
+      "input": "https://foo.com//a///b",
+      "identifier": {
+        "original": "https://foo.com//a///b",
+        "kind": "url",
+        "scheme": "https",
+        "host": "foo.com",
+        "port": null,
+        "path_segments": [
+          "a",
+          "b"
+        ],
+        "query_params": {
+        },
+        "fragment": null,
+        "nss": null,
+        "canonical": "https://foo.com/a/b"
+      }
+    },
+    {
+      "input": "https://foo.com/q?a=1&b=hello&c=",
+      "identifier": {
+        "original": "https://foo.com/q?a=1&b=hello&c=",
+        "kind": "url",
+        "scheme": "https",
+        "host": "foo.com",
+        "port": null,
+        "path_segments": [
+          "q"
+        ],
+        "query_params": {
+          "a": "1",
+          "b": "hello",
+          "c": ""
+        },
+        "fragment": null,
+        "nss": null,
+        "canonical": "https://foo.com/q?a=1&b=hello&c="
+      }
+    },
+    {
+      "input": "https://foo.com/x#top",
+      "identifier": {
+        "original": "https://foo.com/x#top",
+        "kind": "url",
+        "scheme": "https",
+        "host": "foo.com",
+        "port": null,
+        "path_segments": [
+          "x"
+        ],
+        "query_params": {
+        },
+        "fragment": "top",
+        "nss": null,
+        "canonical": "https://foo.com/x#top"
+      }
+    },
+    {
+      "input": "foo.com/users/456",
+      "identifier": {
+        "original": "foo.com/users/456",
+        "kind": "url",
+        "scheme": "https",
+        "host": "foo.com",
+        "port": null,
+        "path_segments": [
+          "users",
+          "456"
+        ],
+        "query_params": {
+        },
+        "fragment": null,
+        "nss": null,
+        "canonical": "https://foo.com/users/456"
+      }
+    },
+    {
+      "input": "urn:isbn:0451450523",
+      "identifier": {
+        "original": "urn:isbn:0451450523",
+        "kind": "urn",
+        "scheme": "urn",
+        "host": null,
+        "port": null,
+        "path_segments": [
+
+        ],
+        "query_params": {
+        },
+        "fragment": null,
+        "nss": "isbn:0451450523",
+        "canonical": "urn:isbn:0451450523"
+      }
+    },
+    {
+      "input": "urn:uuid:f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "identifier": {
+        "original": "urn:uuid:f47ac10b-58cc-4372-a567-0e02b2c3d479",
+        "kind": "urn",
+        "scheme": "urn",
+        "host": null,
+        "port": null,
+        "path_segments": [
+
+        ],
+        "query_params": {
+        },
+        "fragment": null,
+        "nss": "uuid:f47ac10b-58cc-4372-a567-0e02b2c3d479",
+        "canonical": "urn:uuid:f47ac10b-58cc-4372-a567-0e02b2c3d479"
+      }
+    },
+    {
+      "input": "https://例え.テスト/こんにちは",
+      "identifier": {
+        "original": "https://例え.テスト/こんにちは",
+        "kind": "url",
+        "scheme": "https",
+        "host": "例え.テスト",
+        "port": null,
+        "path_segments": [
+          "こんにちは"
+        ],
+        "query_params": {
+        },
+        "fragment": null,
+        "nss": null,
+        "canonical": "https://例え.テスト/こんにちは"
+      }
+    },
+    {
+      "input": "https://foo.com:8443/x?a=1&b=2#top",
+      "identifier": {
+        "original": "https://foo.com:8443/x?a=1&b=2#top",
+        "kind": "url",
+        "scheme": "https",
+        "host": "foo.com",
+        "port": 8443,
+        "path_segments": [
+          "x"
+        ],
+        "query_params": {
+          "a": "1",
+          "b": "2"
+        },
+        "fragment": "top",
+        "nss": null,
+        "canonical": "https://foo.com:8443/x?a=1&b=2#top"
+      }
+    },
+    {
+      "input": "https://127.0.0.1:8080/x",
+      "identifier": {
+        "original": "https://127.0.0.1:8080/x",
+        "kind": "url",
+        "scheme": "https",
+        "host": "127.0.0.1",
+        "port": 8080,
+        "path_segments": [
+          "x"
+        ],
+        "query_params": {
+        },
+        "fragment": null,
+        "nss": null,
+        "canonical": "https://127.0.0.1:8080/x"
+      }
+    },
+    {
+      "input": "https://россия.рф/о-нас",
+      "identifier": {
+        "original": "https://россия.рф/о-нас",
+        "kind": "url",
+        "scheme": "https",
+        "host": "россия.рф",
+        "port": null,
+        "path_segments": [
+          "о-нас"
+        ],
+        "query_params": {
+        },
+        "fragment": null,
+        "nss": null,
+        "canonical": "https://россия.рф/о-нас"
+      }
+    }
+  ]
+}

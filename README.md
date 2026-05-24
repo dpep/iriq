@@ -353,6 +353,25 @@ side: classification, normalization, and clustering — not a complete URL
 implementation.
 
 ----
+## Go port
+
+A Go implementation lives under [`go/`](go/) — same public surface, same
+behavior, ~10× faster CLI on extraction-heavy workloads. The Ruby gem is
+the reference; the Go port stays in sync via golden JSON fixtures
+(`spec/fixtures/`) and a CLI parity harness (`script/cli_parity.sh`), both
+checked in CI.
+
+```go
+import "github.com/dpep/iriq/go/iriq"
+
+iri, _ := iriq.Parse("https://foo.com/users/123")
+norm, _ := iriq.Normalize("https://foo.com/users/123")
+// "https://foo.com/users/{user_id}"
+```
+
+See [`go/README.md`](go/README.md) for the full API table and porting workflow.
+
+----
 ## Contributing
 
 Yes please  :)
@@ -360,6 +379,8 @@ Yes please  :)
 1. Fork it
 1. Create your feature branch (`git checkout -b my-feature`)
 1. Ensure the tests pass (`bundle exec rspec`)
+1. If you changed library behavior, port the change to Go (or open an
+   issue) and regenerate fixtures: `bundle exec ruby script/generate_fixtures.rb`
 1. Commit your changes (`git commit -am 'awesome new feature'`)
 1. Push your branch (`git push origin my-feature`)
 1. Create a Pull Request

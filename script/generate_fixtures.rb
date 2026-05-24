@@ -1,0 +1,242 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Generates golden JSON fixtures from the Ruby implementation. The Go port's
+# fixture tests load these files and assert the same outputs — a single source
+# of truth that catches drift without re-translating every RSpec example.
+#
+#   bundle exec ruby script/generate_fixtures.rb
+#
+# Outputs land in spec/fixtures/. Re-run after any semantic change to the Ruby
+# library and commit the regenerated files alongside the change.
+
+require "fileutils"
+require "json"
+require_relative "../lib/iriq"
+require_relative "../spec/support/iri_generator"
+
+FIXTURE_DIR = File.expand_path("../spec/fixtures", __dir__)
+FileUtils.mkdir_p(FIXTURE_DIR)
+
+PARSER_INPUTS = [
+  "https://foo.com/users/123",
+  "HTTPS://FOO.COM/Bar",
+  "https://foo.com:443/",
+  "http://foo.com:80/",
+  "https://foo.com:8443/",
+  "  https://Foo.com/  ",
+  "https://foo.com/a/./b/../c",
+  "https://foo.com//a///b",
+  "https://foo.com/q?a=1&b=hello&c=",
+  "https://foo.com/x#top",
+  "foo.com/users/456",
+  "urn:isbn:0451450523",
+  "urn:uuid:f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "https://例え.テスト/こんにちは",
+  "https://foo.com:8443/x?a=1&b=2#top",
+  "https://127.0.0.1:8080/x",
+  "https://россия.рф/о-нас",
+].freeze
+
+CLASSIFIER_INPUTS = [
+  "users", "Profile", "123", "0", "9999999",
+  "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "2024-05-23", "2024-05-23T10:30:00Z", "2024-05-23 10:30:00",
+  "1716470400", "1716470400000",
+  "d41d8cd98f00b204e9800998ecf8427e",
+  "my-cool-post", "my_cool_post",
+  "abc123XYZ",
+  "こんにちは", "",
+].freeze
+
+INFLECTOR_INPUTS = %w[
+  users posts orders comments articles items projects
+  categories companies cities libraries
+  addresses statuses classes boxes buses churches
+  matrices indices vertices octopi analyses diagnoses theses
+  knives leaves wolves
+  people children men women mice lice
+  heroes tomatoes
+  news fish sheep data person
+  Users USERS People
+].freeze
+
+NORMALIZE_INPUTS = [
+  ["https://foo.com/users/123",             true],
+  ["https://foo.com/users/123/orders/456",  true],
+  ["https://foo.com/users/123",             false],
+  ["HTTPS://FOO.COM:443/Bar",               true],
+  ["https://foo.com/posts/abc-123",         true],
+  ["https://foo.com/search?q=hi&page=2",    true],
+  ["urn:isbn:0451450523",                   true],
+  ["urn:uuid:f47ac10b-58cc-4372-a567-0e02b2c3d479", true],
+  ["https://foo.com/2024-05-23/events",     true],
+  ["https://foo.com/files/d41d8cd98f00b204e9800998ecf8427e", true],
+].freeze
+
+PATH_SHAPE_INPUTS = [
+  [[], true],
+  [["users", "123"], true],
+  [["users", "123"], false],
+  [["users", "123", "orders", "456"], true],
+  [["posts", "abc-123"], true],
+  [["events", "2024-05-23"], true],
+  [["login"], true],
+].freeze
+
+EXPLAIN_INPUTS = [
+  "https://foo.com/users/123/orders/456",
+  "https://foo.com/posts/abc-123",
+  "urn:isbn:0451450523",
+  "urn:uuid:f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "https://foo.com/2024-05-23/events",
+].freeze
+
+EXTRACTOR_INPUTS = [
+  "Visit https://foo.com today.",
+  "First https://a.com then https://b.com and https://c.com",
+  "See urn:isbn:0451450523 for details",
+  '"https://foo.com",',
+  "(see https://en.wikipedia.org/wiki/Foo_(bar))",
+  "She said “https://foo.com” loudly",
+  "「https://例え.テスト/こんにちは」を見て",
+  "Сайт https://россия.рф/о-нас здесь",
+  "visit foo.com/users today",
+  "1,https://a.com,2,https://b.com,3",
+  "https://maps.example.com/?q=37.7,-122.4 next",
+  "user@host:port/path",
+  "rsync user@host.com:/var/log/ to backup",
+  "see ./README.md and /usr/local/bin",
+].freeze
+
+def identifier_hash(iri)
+  {
+    "original"      => iri.original,
+    "kind"          => iri.kind.to_s,
+    "scheme"        => iri.scheme,
+    "host"          => iri.host,
+    "port"          => iri.port,
+    "path_segments" => iri.path_segments,
+    "query_params"  => iri.query_params,
+    "fragment"      => iri.fragment,
+    "nss"           => iri.nss,
+    "canonical"     => iri.canonical,
+  }
+end
+
+def hint_hash(entry)
+  {
+    "value"    => entry[:value],
+    "type"     => entry[:type].to_s,
+    "variable" => entry[:variable],
+    "hint"     => entry[:hint],
+  }
+end
+
+def write_fixture(name, data)
+  path = File.join(FIXTURE_DIR, "#{name}.json")
+  File.write(path, JSON.pretty_generate(data) + "\n")
+  puts "  wrote #{path}"
+end
+
+puts "Generating fixtures in #{FIXTURE_DIR}"
+
+# Parser
+parser_cases = PARSER_INPUTS.map do |input|
+  iri = Iriq::Parser.parse(input)
+  { "input" => input, "identifier" => identifier_hash(iri) }
+end
+write_fixture("parser", { "cases" => parser_cases })
+
+# Classifier
+classifier_cases = CLASSIFIER_INPUTS.map do |input|
+  { "input" => input, "type" => Iriq::SegmentClassifier::DEFAULT.classify(input).to_s }
+end
+write_fixture("classifier", { "cases" => classifier_cases })
+
+# Inflector (built-in adapter only — ActiveSupport may differ)
+original_adapter = Iriq::Inflector.adapter
+Iriq::Inflector.adapter = Iriq::Inflector::BuiltinAdapter
+inflector_cases = INFLECTOR_INPUTS.map do |input|
+  { "input" => input, "singular" => Iriq::Inflector.singularize(input) }
+end
+Iriq::Inflector.adapter = original_adapter
+write_fixture("inflector", { "cases" => inflector_cases })
+
+# Normalizer
+normalize_cases = NORMALIZE_INPUTS.map do |(input, hints)|
+  {
+    "input"  => input,
+    "hints"  => hints,
+    "output" => Iriq::Normalizer.normalize(input, hints: hints),
+  }
+end
+write_fixture("normalizer", { "cases" => normalize_cases })
+
+# PathShape
+pathshape_cases = PATH_SHAPE_INPUTS.map do |(segs, hints)|
+  {
+    "segments" => segs,
+    "hints"    => hints,
+    "shape"    => Iriq::PathShape.for(segs, hints: hints),
+  }
+end
+write_fixture("pathshape", { "cases" => pathshape_cases })
+
+# Explanation
+explain_cases = EXPLAIN_INPUTS.map do |input|
+  {
+    "input"   => input,
+    "entries" => Iriq::Explanation.explain(input).map { |e| hint_hash(e) },
+  }
+end
+write_fixture("explanation", { "cases" => explain_cases })
+
+# Extractor (default options + strict mode for the scheme-less example)
+extractor_cases = EXTRACTOR_INPUTS.map do |text|
+  {
+    "text"       => text,
+    "extracted"  => Iriq::Extractor.new.extract_strings(text),
+    "strict"     => Iriq::Extractor.new(scheme_less: false).extract_strings(text),
+  }
+end
+write_fixture("extractor", { "cases" => extractor_cases })
+
+# Synthetic corpus — exercises the corpus heuristics end-to-end with a
+# deterministic stream. We dump the resulting aggregates so Go can replay the
+# stream and assert the same final state.
+seed_count = 200
+urls       = IriGenerator.urls(count: seed_count, seed: 1234)
+corpus     = Iriq::Corpus.new
+urls.each { |u| iri = Iriq::Parser.parse(u); corpus.observe(iri) }
+
+corpus_fixture = {
+  "seed"   => 1234,
+  "count"  => seed_count,
+  "inputs" => urls,
+  "expected" => {
+    "host_counts"        => corpus.host_counts,
+    "path_length_counts" => corpus.path_length_counts.transform_keys(&:to_s),
+    "raw_shape_counts"   => corpus.raw_shape_counts,
+    "fingerprint_counts" => corpus.fingerprint_counts,
+    "cluster_count"      => corpus.size,
+    # Top 5 by count for stability; full counts above let Go assert exact equality.
+    "top_hosts"          => corpus.host_counts.sort_by { |_, n| -n }.first(5).to_h,
+    "top_shapes"         => corpus.fingerprint_counts.sort_by { |_, n| -n }.first(5).to_h,
+  },
+}
+write_fixture("corpus_stream", corpus_fixture)
+
+# Smaller deterministic corpus we can save+load and assert byte-for-byte parity
+# on the in-memory structures (not the JSON bytes).
+small = Iriq::Corpus.new
+%w[
+  https://foo.com/users/1
+  https://foo.com/users/2
+  https://foo.com/users/3
+  https://foo.com/posts/abc-123
+  https://bar.com/x
+].each { |u| small.observe(u) }
+write_fixture("corpus_dump", small.dump)
+
+puts "Done."

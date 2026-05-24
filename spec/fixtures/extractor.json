@@ -1,0 +1,136 @@
+{
+  "cases": [
+    {
+      "text": "Visit https://foo.com today.",
+      "extracted": [
+        "https://foo.com"
+      ],
+      "strict": [
+        "https://foo.com"
+      ]
+    },
+    {
+      "text": "First https://a.com then https://b.com and https://c.com",
+      "extracted": [
+        "https://a.com",
+        "https://b.com",
+        "https://c.com"
+      ],
+      "strict": [
+        "https://a.com",
+        "https://b.com",
+        "https://c.com"
+      ]
+    },
+    {
+      "text": "See urn:isbn:0451450523 for details",
+      "extracted": [
+        "urn:isbn:0451450523"
+      ],
+      "strict": [
+        "urn:isbn:0451450523"
+      ]
+    },
+    {
+      "text": "\"https://foo.com\",",
+      "extracted": [
+        "https://foo.com"
+      ],
+      "strict": [
+        "https://foo.com"
+      ]
+    },
+    {
+      "text": "(see https://en.wikipedia.org/wiki/Foo_(bar))",
+      "extracted": [
+        "https://en.wikipedia.org/wiki/Foo_(bar)"
+      ],
+      "strict": [
+        "https://en.wikipedia.org/wiki/Foo_(bar)"
+      ]
+    },
+    {
+      "text": "She said “https://foo.com” loudly",
+      "extracted": [
+        "https://foo.com"
+      ],
+      "strict": [
+        "https://foo.com"
+      ]
+    },
+    {
+      "text": "「https://例え.テスト/こんにちは」を見て",
+      "extracted": [
+        "https://例え.テスト/こんにちは"
+      ],
+      "strict": [
+        "https://例え.テスト/こんにちは"
+      ]
+    },
+    {
+      "text": "Сайт https://россия.рф/о-нас здесь",
+      "extracted": [
+        "https://россия.рф/о-нас"
+      ],
+      "strict": [
+        "https://россия.рф/о-нас"
+      ]
+    },
+    {
+      "text": "visit foo.com/users today",
+      "extracted": [
+        "https://foo.com/users"
+      ],
+      "strict": [
+
+      ]
+    },
+    {
+      "text": "1,https://a.com,2,https://b.com,3",
+      "extracted": [
+        "https://a.com",
+        "https://b.com"
+      ],
+      "strict": [
+        "https://a.com",
+        "https://b.com"
+      ]
+    },
+    {
+      "text": "https://maps.example.com/?q=37.7,-122.4 next",
+      "extracted": [
+        "https://maps.example.com/?q=37.7"
+      ],
+      "strict": [
+        "https://maps.example.com/?q=37.7"
+      ]
+    },
+    {
+      "text": "user@host:port/path",
+      "extracted": [
+
+      ],
+      "strict": [
+
+      ]
+    },
+    {
+      "text": "rsync user@host.com:/var/log/ to backup",
+      "extracted": [
+
+      ],
+      "strict": [
+
+      ]
+    },
+    {
+      "text": "see ./README.md and /usr/local/bin",
+      "extracted": [
+
+      ],
+      "strict": [
+
+      ]
+    }
+  ]
+}

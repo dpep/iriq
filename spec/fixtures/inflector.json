@@ -1,0 +1,176 @@
+{
+  "cases": [
+    {
+      "input": "users",
+      "singular": "user"
+    },
+    {
+      "input": "posts",
+      "singular": "post"
+    },
+    {
+      "input": "orders",
+      "singular": "order"
+    },
+    {
+      "input": "comments",
+      "singular": "comment"
+    },
+    {
+      "input": "articles",
+      "singular": "article"
+    },
+    {
+      "input": "items",
+      "singular": "item"
+    },
+    {
+      "input": "projects",
+      "singular": "project"
+    },
+    {
+      "input": "categories",
+      "singular": "category"
+    },
+    {
+      "input": "companies",
+      "singular": "company"
+    },
+    {
+      "input": "cities",
+      "singular": "city"
+    },
+    {
+      "input": "libraries",
+      "singular": "library"
+    },
+    {
+      "input": "addresses",
+      "singular": "address"
+    },
+    {
+      "input": "statuses",
+      "singular": "status"
+    },
+    {
+      "input": "classes",
+      "singular": "class"
+    },
+    {
+      "input": "boxes",
+      "singular": "box"
+    },
+    {
+      "input": "buses",
+      "singular": "bus"
+    },
+    {
+      "input": "churches",
+      "singular": "church"
+    },
+    {
+      "input": "matrices",
+      "singular": "matrix"
+    },
+    {
+      "input": "indices",
+      "singular": "index"
+    },
+    {
+      "input": "vertices",
+      "singular": "vertex"
+    },
+    {
+      "input": "octopi",
+      "singular": "octopus"
+    },
+    {
+      "input": "analyses",
+      "singular": "analysis"
+    },
+    {
+      "input": "diagnoses",
+      "singular": "diagnosis"
+    },
+    {
+      "input": "theses",
+      "singular": "thesis"
+    },
+    {
+      "input": "knives",
+      "singular": "knife"
+    },
+    {
+      "input": "leaves",
+      "singular": "leaf"
+    },
+    {
+      "input": "wolves",
+      "singular": "wolf"
+    },
+    {
+      "input": "people",
+      "singular": "person"
+    },
+    {
+      "input": "children",
+      "singular": "child"
+    },
+    {
+      "input": "men",
+      "singular": "man"
+    },
+    {
+      "input": "women",
+      "singular": "woman"
+    },
+    {
+      "input": "mice",
+      "singular": "mouse"
+    },
+    {
+      "input": "lice",
+      "singular": "louse"
+    },
+    {
+      "input": "heroes",
+      "singular": "hero"
+    },
+    {
+      "input": "tomatoes",
+      "singular": "tomato"
+    },
+    {
+      "input": "news",
+      "singular": "news"
+    },
+    {
+      "input": "fish",
+      "singular": "fish"
+    },
+    {
+      "input": "sheep",
+      "singular": "sheep"
+    },
+    {
+      "input": "data",
+      "singular": "data"
+    },
+    {
+      "input": "person",
+      "singular": "person"
+    },
+    {
+      "input": "Users",
+      "singular": "User"
+    },
+    {
+      "input": "USERS",
+      "singular": "USER"
+    },
+    {
+      "input": "People",
+      "singular": "Person"
+    }
+  ]
+}

@@ -5,7 +5,7 @@ Gem::Specification.new do |s|
   s.version     = Iriq::VERSION
   s.authors     = ["Daniel Pepper"]
   s.description = "IRI extraction, normalization, and clustering."
-  s.files       = `git ls-files * ':!:spec'`.split("\n")
+  s.files       = `git ls-files * ':!:spec' ':!:go' ':!:script'`.split("\n")
   s.bindir      = "exe"
   s.executables = ["iriq"]
   s.homepage    = "https://github.com/dpep/iriq"
