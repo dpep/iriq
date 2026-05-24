@@ -3,7 +3,7 @@ module Iriq
   #
   # Intentionally NOT a full RFC 3986 / 3987 / WHATWG URL implementation. We
   # accept enough of the common shapes (URLs, scheme-less hosts, URNs, raw
-  # Unicode hosts and paths) to support normalization and clustering.
+  # Unicode hosts and paths) to support extraction, normalization, and clustering.
   module Parser
     SCHEME_RE = /\A([a-zA-Z][a-zA-Z0-9+\-.]*):/.freeze
 

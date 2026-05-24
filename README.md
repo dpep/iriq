@@ -3,11 +3,11 @@ Iriq
 ![Gem](https://img.shields.io/gem/dt/iriq?style=plastic)
 [![codecov](https://codecov.io/gh/dpep/iriq/branch/main/graph/badge.svg)](https://codecov.io/gh/dpep/iriq)
 
-Semantic IRI / URI / URL / URN normalization and clustering for Ruby.
+IRI extraction, normalization, and clustering for Ruby.
 
-Iriq parses resource identifiers, normalizes them into canonical IRI-like
-forms, classifies path and query components, clusters similar identifiers,
-and explains which parts are stable vs. unique.
+Iriq pulls IRIs out of free text, parses them, normalizes them into
+canonical shape-aware forms, classifies their path and query components,
+and clusters similar identifiers — surfacing what's stable vs. unique.
 
 ```ruby
 require "iriq"

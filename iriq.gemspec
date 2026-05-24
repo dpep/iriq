@@ -4,13 +4,13 @@ Gem::Specification.new do |s|
   s.name        = "iriq"
   s.version     = Iriq::VERSION
   s.authors     = ["Daniel Pepper"]
-  s.description = "Semantic IRI/URI/URL/URN parsing, normalization, classification, and clustering."
+  s.description = "IRI extraction, normalization, and clustering."
   s.files       = `git ls-files * ':!:spec'`.split("\n")
   s.bindir      = "exe"
   s.executables = ["iriq"]
   s.homepage    = "https://github.com/dpep/iriq"
   s.license     = "MIT"
-  s.summary     = "Semantic IRI normalization and clustering."
+  s.summary     = "IRI extraction, normalization, and clustering."
 
   s.required_ruby_version = ">= 3.2"
 
