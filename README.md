@@ -301,12 +301,16 @@ Flags:
 | `-n, --normalize`   | Show the shape-normalized form                          |
 | `-e, --explain`     | Show per-segment annotations                            |
 | `-j, --json`        | Emit JSON                                               |
-| `--extract`         | Treat input as prose; pull URLs out                     |
 | `--no-scheme-less`  | Skip `foo.com/path`-style extraction (explicit-scheme only) |
 | `--no-hints`        | Use `{integer_id}` etc. instead of `{user_id}`          |
 | `--corpus PATH`     | Load/create a JSON corpus at PATH; observe and save     |
 | `--stats`           | Print rolling aggregates                                |
 | `-V, --version`     | Print version                                           |
+
+A positional argument that doesn't parse as an IRI but IS an existing
+file is read and extracted from automatically — `iriq ./access.log` and
+`iriq /var/log/foo.log` Just Work. (Bare filenames like `README.md`
+may still parse as a URL; pipe with `cat` to disambiguate.)
 
 Exit codes: `0` success, `1` usage error, `2` parse error.
 

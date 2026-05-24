@@ -314,53 +314,49 @@ describe Iriq::CLI do
     end
   end
 
-  describe "--extract (explicit, with positional or stdin)" do
-    it "extracts from piped prose, emits URL list with counts" do
-      stdin.string = "Visit https://foo.com and https://bar.com today."
-      expect(run("--extract")).to eq(0)
-      lines = stdout.string.lines.map(&:chomp)
-      expect(lines).to eq(["[1] https://foo.com", "[1] https://bar.com"])
-    end
-
-    it "reads from a file argument" do
-      Tempfile.open("iriq-extract") do |f|
+  describe "file-arg auto-detection (replaces --extract)" do
+    it "treats an existing file with a path-like name as text to extract from" do
+      Tempfile.open("iriq-autofile") do |f|
         f.write("see https://foo.com.\nalso (https://bar.com).\n")
         f.flush
-        expect(run("--extract", f.path)).to eq(0)
+        expect(run(f.path)).to eq(0)
         out = stdout.string
         expect(out).to include("[1] https://foo.com")
         expect(out).to include("[1] https://bar.com")
       end
     end
 
-    it "emits JSON with --json" do
-      stdin.string = "visit https://foo.com twice https://foo.com today"
-      expect(run("--extract", "--json")).to eq(0)
-      expect(JSON.parse(stdout.string)).to eq([{ "iri" => "https://foo.com", "count" => 2 }])
+    it "section flags apply to extracted IRIs from a file arg" do
+      Tempfile.open("iriq-autofile") do |f|
+        f.write("see https://foo.com/users/1 and https://foo.com/users/2.")
+        f.flush
+        expect(run("-n", f.path)).to eq(0)
+        expect(stdout.string.lines.map(&:chomp)).to eq([
+          "https://foo.com/users/{user_id}",
+          "https://foo.com/users/{user_id}",
+        ])
+      end
     end
 
-    it "scheme-less is on by default" do
-      stdin.string = "go to foo.com/users today"
-      expect(run("--extract")).to eq(0)
-      expect(stdout.string).to include("[1] https://foo.com/users")
-    end
-
-    it "can be disabled with --no-scheme-less" do
-      stdin.string = "go to foo.com/users today"
-      expect(run("--extract", "--no-scheme-less")).to eq(0)
-      expect(stdout.string).to eq("")
-    end
-
-    it "feeds extracted IRIs into --corpus when both are set" do
-      corpus_path = Tempfile.new(["iriq-extract-corpus", ".json"]).tap(&:close).path
+    it "feeds auto-detected file into --corpus" do
+      corpus_path = Tempfile.new(["iriq-autocorpus", ".json"]).tap(&:close).path
       File.delete(corpus_path) if File.exist?(corpus_path)
 
-      stdin.string = "see https://foo.com/users/1 and https://foo.com/users/2"
-      expect(run("--extract", "--corpus", corpus_path)).to eq(0)
+      Tempfile.open("iriq-autofile") do |f|
+        f.write("see https://foo.com/users/1 and https://foo.com/users/2")
+        f.flush
+        expect(run("--corpus", corpus_path, f.path)).to eq(0)
+      end
 
       data = JSON.parse(File.read(corpus_path))
       expect(data["host_counts"]).to eq("foo.com" => 2)
       File.delete(corpus_path)
+    end
+
+    it "leaves URL-shaped args alone — they still go through summary mode" do
+      expect(run("https://foo.com/users/1")).to eq(0)
+      expect(stdout.string).to include("# parse")
+      expect(stdout.string).to include("https://foo.com/users/1")
     end
   end
 

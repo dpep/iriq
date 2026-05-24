@@ -44,10 +44,13 @@ module Iriq
         -j, --json            Emit JSON instead of human-readable output
             --no-hints        Use {integer_id} placeholders instead of {user_id}
             --no-scheme-less  Skip foo.com/path-style extraction (explicit-scheme only)
-            --extract         Treat a positional argument as a text file to read
-                              (without this, `iriq FILE` tries to parse FILE as a URL)
         -h, --help            Show this message
         -V, --version         Print version
+
+      A positional argument that doesn't parse as an IRI but IS an existing
+      file is read and extracted from automatically — so `iriq ./access.log`
+      and `iriq /var/log/foo.log` Just Work. (Bare filenames like `README.md`
+      may still parse as a URL; pipe with `cat` to disambiguate.)
 
       Subcommands:
         cluster [file]        Force cluster-view output (rather than the default
@@ -79,17 +82,20 @@ module Iriq
       explicit_cluster = (args.first == "cluster")
       args.shift if explicit_cluster
 
-      # Pipe / batch mode kicks in when stdin is piped without a positional
-      # input, or when `cluster` is named explicitly.
-      batch_mode = explicit_cluster || (args.empty? && piped_stdin? && !opts[:extract])
+      # Auto-detect: a positional argument that isn't parseable as an IRI
+      # but IS an existing file gets treated as a file to extract from. This
+      # is what makes `iriq ./access.log` and `iriq /var/log/foo.log` Just
+      # Work without a separate --extract flag.
+      positional_is_file = args.first && File.file?(args.first) && !parseable_iri?(args.first)
 
-      return print_usage(stdout, 0) if args.empty? && !batch_mode && !opts[:extract]
+      batch_mode = explicit_cluster || positional_is_file ||
+                   (args.empty? && piped_stdin?)
+
+      return print_usage(stdout, 0) if args.empty? && !batch_mode
 
       corpus = opts[:corpus] ? load_corpus(opts[:corpus]) : nil
 
-      code = if opts[:extract]
-        cmd_extract(args, opts, corpus)
-      elsif batch_mode
+      code = if batch_mode
         cmd_batch(args, opts, corpus, explicit_cluster: explicit_cluster)
       elsif opts[:stats]
         cmd_stats(corpus, opts)
@@ -107,6 +113,13 @@ module Iriq
       1
     end
 
+    def parseable_iri?(input)
+      Iriq.parse(input)
+      true
+    rescue Iriq::ParseError
+      false
+    end
+
     private
 
     def parse_options(argv)
@@ -118,7 +131,6 @@ module Iriq
         sections:    [],
         corpus:      nil,
         stats:       false,
-        extract:     false,
         scheme_less: true,
       }
       parser = OptionParser.new do |o|
@@ -129,7 +141,6 @@ module Iriq
         o.on("--[no-]hints")         { |v| opts[:hints] = v }
         o.on("--corpus PATH")        { |v| opts[:corpus] = v }
         o.on("--stats")              { opts[:stats]   = true }
-        o.on("--extract")            { opts[:extract] = true }
         o.on("--[no-]scheme-less")   { |v| opts[:scheme_less] = v }
         o.on("-h", "--help")         { opts[:help]    = true }
         o.on("-V", "--version")      { opts[:version] = true }
@@ -246,18 +257,6 @@ module Iriq
 
     def extract_text(text, opts)
       Extractor.new(scheme_less: opts[:scheme_less]).extract(text)
-    end
-
-    def cmd_extract(args, opts, corpus)
-      iris = extract_text(read_text(args.first), opts)
-      iris.each { |iri| corpus.observe(iri) } if corpus
-
-      if opts[:stats] && corpus
-        emit_stats(corpus, opts)
-      else
-        emit_url_list(iris, opts)
-      end
-      0
     end
 
     # Emit a deduplicated list of IRIs with occurrence counts, sorted desc
