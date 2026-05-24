@@ -10,15 +10,15 @@ import (
 	"testing"
 )
 
-// fixturesDir locates spec/fixtures/ from this Go test file. The Go module is
-// nested under repo/go/, so we walk up two directories to reach the repo root.
+// fixturesDir locates spec/fixtures/ from this Go test file. The Go package
+// lives at the repo root, so the fixtures dir is a direct sibling.
 func fixturesDir(t *testing.T) string {
 	t.Helper()
 	_, here, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("runtime.Caller failed")
 	}
-	return filepath.Join(filepath.Dir(here), "..", "..", "spec", "fixtures")
+	return filepath.Join(filepath.Dir(here), "spec", "fixtures")
 }
 
 func loadFixture(t *testing.T, name string, v interface{}) {

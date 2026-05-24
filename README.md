@@ -3,19 +3,70 @@ Iriq
 ![Gem](https://img.shields.io/gem/dt/iriq?style=plastic)
 [![codecov](https://codecov.io/gh/dpep/iriq/branch/main/graph/badge.svg)](https://codecov.io/gh/dpep/iriq)
 
-IRI extraction, normalization, and clustering for Ruby.
+IRI extraction, normalization, and clustering.
 
 Iriq pulls IRIs out of free text, parses them, normalizes them into
 canonical shape-aware forms, classifies their path and query components,
 and clusters similar identifiers — surfacing what's stable vs. unique.
 
-```ruby
-require "iriq"
+Ships as both a **command-line tool** (`iriq`) and a **library** (Ruby and
+Go — same behavior, enforced by parity tests).
+
+## Install
+
+The CLI is available three ways. Pick whichever fits your workflow:
+
+```sh
+# Homebrew (recommended)
+brew install dpep/tools/iriq
+
+# RubyGems — installs the CLI shim and the library
+gem install iriq
+
+# Go — installs the CLI binary into $GOBIN
+go install github.com/dpep/iriq/cmd/iriq@latest
 ```
 
-## Quick start
+For library use, depend on whichever runtime you're working in:
 
 ```ruby
+# Gemfile
+gem "iriq"
+```
+
+```go
+import "github.com/dpep/iriq"
+```
+
+## CLI quick start
+
+```
+$ iriq https://foo.com/users/123
+# parse
+original:      https://foo.com/users/123
+kind:          url
+scheme:        https
+host:          foo.com
+path_segments: ["users", "123"]
+canonical:     https://foo.com/users/123
+
+# normalize
+https://foo.com/users/{user_id}
+
+$ iriq -n https://foo.com/users/123
+https://foo.com/users/{user_id}
+
+$ cat access.log | iriq             # extract → URL list (or clusters at scale)
+$ cat access.log | iriq --stats     # rolling aggregates
+$ iriq ./access.log -n              # file auto-detected → normalize each found URL
+```
+
+Full CLI reference is below under [CLI](#cli).
+
+## Library quick start
+
+```ruby
+# Ruby
 iri = Iriq.parse("https://foo.com/users/123")
 iri.scheme         # => "https"
 iri.host           # => "foo.com"
@@ -33,6 +84,22 @@ Iriq.explain("https://foo.com/users/123/orders/456")
 #      { value: "456",    type: :integer_id, variable: true,  hint: "order_id" },
 #    ]
 ```
+
+```go
+// Go (same surface)
+iri, _ := iriq.Parse("https://foo.com/users/123")
+iri.Scheme         // "https"
+iri.Host           // "foo.com"
+iri.PathSegments   // []string{"users", "123"}
+iri.Canonical()    // "https://foo.com/users/123"
+
+norm, _ := iriq.Normalize("https://foo.com/users/123")
+// "https://foo.com/users/{user_id}"
+```
+
+The Ruby gem is the reference implementation; Go mirrors its API and is
+kept in sync via JSON fixtures plus a CLI parity harness. See
+[CLAUDE.md](CLAUDE.md) for the dev process.
 
 Pass `hints: false` to `Iriq.normalize` (or `PathShape`) for mechanical
 placeholders (`{integer_id}` instead of `{user_id}`).

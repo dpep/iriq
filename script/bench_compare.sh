@@ -9,10 +9,11 @@
 # both implementations and reports the median wall-clock time.
 
 set -euo pipefail
+unset CDPATH  # don't let user CDPATH leak into our path resolution
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ITERS="${1:-5}"
-GO_BIN="${IRIQ_GO_BIN:-$REPO_ROOT/go/bin/iriq}"
+GO_BIN="${IRIQ_GO_BIN:-$REPO_ROOT/bin/iriq}"
 
 export LANG="${LANG:-C.UTF-8}"
 export LC_ALL="${LC_ALL:-C.UTF-8}"
@@ -20,7 +21,7 @@ export LC_ALL="${LC_ALL:-C.UTF-8}"
 if [[ ! -x "$GO_BIN" ]]; then
   echo "Building Go binary..." >&2
   mkdir -p "$(dirname "$GO_BIN")"
-  (cd "$REPO_ROOT/go" && go build -o "$GO_BIN" ./cmd/iriq)
+  (cd "$REPO_ROOT" && go build -o "$GO_BIN" ./cmd/iriq)
 fi
 
 # Generate a fixed input file: 2000 synthetic URLs from the spec generator.

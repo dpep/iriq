@@ -8,14 +8,15 @@
 # built Go binary (built on demand if not present).
 
 set -euo pipefail
+unset CDPATH  # don't let user CDPATH leak into our path resolution
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-GO_BIN="${IRIQ_GO_BIN:-$REPO_ROOT/go/bin/iriq}"
+GO_BIN="${IRIQ_GO_BIN:-$REPO_ROOT/bin/iriq}"
 
 if [[ ! -x "$GO_BIN" ]]; then
   echo "Building Go binary at $GO_BIN..."
   mkdir -p "$(dirname "$GO_BIN")"
-  (cd "$REPO_ROOT/go" && go build -o "$GO_BIN" ./cmd/iriq)
+  (cd "$REPO_ROOT" && go build -o "$GO_BIN" ./cmd/iriq)
 fi
 
 # Ruby's regex engine refuses UTF-8 pattern + ASCII-8BIT subject mixing, so

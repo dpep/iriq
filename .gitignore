@@ -1,5 +1,5 @@
 *.gem
 coverage
 
-# Go build outputs
-/go/bin/
+# Go build output
+/bin/

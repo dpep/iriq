@@ -28,15 +28,12 @@ jobs:
           cache: false  # no external deps → no go.sum to cache against
 
       - name: build
-        working-directory: go
         run: go build ./...
 
       - name: vet
-        working-directory: go
         run: go vet ./...
 
       - name: test
-        working-directory: go
         run: go test ./... -race
 
   parity:
@@ -70,8 +67,7 @@ jobs:
           fi
 
       - name: Go fixture tests
-        working-directory: go
-        run: go test ./iriq -run Fixture -v
+        run: go test -run Fixture -v ./...
 
       - name: CLI parity
         run: script/cli_parity.sh

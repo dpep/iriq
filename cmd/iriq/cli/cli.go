@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dpep/iriq/go/iriq"
+	"github.com/dpep/iriq"
 )
 
 const (
