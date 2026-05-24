@@ -67,6 +67,9 @@ module Iriq
       return print_usage(stdout, 0) if opts[:help]
       return print_version          if opts[:version]
 
+      # -N / --no-hints alone implies -n (normalize, mechanical placeholders).
+      opts[:sections] = [:normalize] if opts[:sections].empty? && !opts[:hints]
+
       explicit_cluster = (args.first == "cluster")
       args.shift if explicit_cluster
 
@@ -225,7 +228,8 @@ module Iriq
         payloads.each_with_index do |p, i|
           stdout.puts if i > 0
           stdout.puts "# #{iris[i].canonical}"
-          sections.each do |sec|
+          sections.each_with_index do |sec, j|
+            stdout.puts if j > 0  # blank line between sections within one IRI
             case sec
             when :parse     then emit_parse_human(p[:parse])
             when :normalize then stdout.puts p[:normalize]
@@ -247,8 +251,8 @@ module Iriq
     end
 
     # Emit a deduplicated list of IRIs with occurrence counts, sorted desc
-    # by count then by first-seen order. Useful default for "what URLs are
-    # in this text?" questions.
+    # by count then by first-seen order. If every IRI is a singleton the
+    # `[1]` prefix is omitted — just print the URLs.
     def emit_url_list(iris, opts)
       counts = Hash.new(0)
       first  = {}
@@ -262,6 +266,8 @@ module Iriq
 
       if opts[:json]
         stdout.puts JSON.generate(sorted.map { |k, c| { iri: k, count: c } })
+      elsif sorted.all? { |_, c| c == 1 }
+        sorted.each { |k, _| stdout.puts k }
       else
         sorted.each { |k, c| stdout.puts "[#{c}] #{k}" }
       end

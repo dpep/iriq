@@ -114,32 +114,41 @@ describe Iriq::CLI do
 
       expect(run).to eq(0)
       out = stdout.string
-      expect(out).to include("[1] https://foo.com/users/1")
-      expect(out).to include("[1] https://foo.com/users/2")
-      expect(out).to include("[1] https://foo.com/posts/abc-123/edit")
+      # All unique → no [count] prefix
+      expect(out).to include("https://foo.com/users/1")
+      expect(out).to include("https://foo.com/users/2")
+      expect(out).to include("https://foo.com/posts/abc-123/edit")
+      expect(out).not_to include("[1]")
     end
 
-    it "deduplicates with counts" do
+    it "deduplicates with counts when any duplicates exist" do
       stdin.string = "https://foo.com\nhttps://foo.com\nhttps://bar.com\n"
       expect(run).to eq(0)
       lines = stdout.string.lines.map(&:chomp)
       expect(lines).to eq(["[2] https://foo.com", "[1] https://bar.com"])
     end
 
+    it "drops the [1] prefix when every IRI is unique" do
+      stdin.string = "https://foo.com and https://bar.com and https://baz.com"
+      expect(run).to eq(0)
+      lines = stdout.string.lines.map(&:chomp)
+      expect(lines).to eq(["https://foo.com", "https://bar.com", "https://baz.com"])
+    end
+
     it "extracts URLs from prose, not just URL-per-line" do
       stdin.string = "Visit https://foo.com today. See also (https://bar.com)."
       expect(run).to eq(0)
       out = stdout.string
-      expect(out).to include("[1] https://foo.com")
-      expect(out).to include("[1] https://bar.com")
+      expect(out).to include("https://foo.com")
+      expect(out).to include("https://bar.com")
     end
 
     it "silently drops non-URL lines (no parse-error noise)" do
       stdin.string = "https://foo.com\nnot-a-url\nhttps://bar.com\n"
       expect(run).to eq(0)
       expect(stderr.string).to be_empty
-      expect(stdout.string).to include("[1] https://foo.com")
-      expect(stdout.string).to include("[1] https://bar.com")
+      expect(stdout.string).to include("https://foo.com")
+      expect(stdout.string).to include("https://bar.com")
     end
 
     it "prints --stats instead of URL list when requested" do
@@ -215,6 +224,20 @@ describe Iriq::CLI do
         expect(stdout.string.strip).to eq("https://foo.com/users/{integer_id}")
       end
 
+      it "-N alone implies -n (no need for -n -N)" do
+        stdin.string = "see https://foo.com/users/1"
+        expect(run("-N")).to eq(0)
+        expect(stdout.string.strip).to eq("https://foo.com/users/{integer_id}")
+      end
+
+      it "-pn shows a blank line between sections per IRI" do
+        stdin.string = "see https://foo.com/users/1"
+        expect(run("-pn")).to eq(0)
+        out = stdout.string
+        # The blank line separates parse fields from the normalize URL.
+        expect(out).to match(/canonical:.*\n\n.*\{user_id\}/m)
+      end
+
       it "multiple section flags bundle per IRI in JSON" do
         stdin.string = "see https://foo.com/users/1"
         expect(run("-pn", "--json")).to eq(0)
@@ -241,7 +264,7 @@ describe Iriq::CLI do
     it "still shows URL list for small inputs" do
       stdin.string = "https://foo.com\nhttps://bar.com"
       expect(run).to eq(0)
-      expect(stdout.string).to include("[1] https://foo.com")
+      expect(stdout.string).to include("https://foo.com")
       expect(stdout.string).not_to include("foo.com  /")  # no cluster line
     end
   end
@@ -311,8 +334,8 @@ describe Iriq::CLI do
         f.flush
         expect(run(f.path)).to eq(0)
         out = stdout.string
-        expect(out).to include("[1] https://foo.com")
-        expect(out).to include("[1] https://bar.com")
+        expect(out).to include("https://foo.com")
+        expect(out).to include("https://bar.com")
       end
     end
 
