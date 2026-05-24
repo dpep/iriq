@@ -344,17 +344,30 @@ $ cat README.md | iriq cluster                # force cluster view
 $ cat README.md | iriq --corpus c.json        # persist into a corpus
 ```
 
-`--corpus PATH` makes the corpus survive across invocations (atomic JSON
-file). Once it has data, `-n` becomes corpus-informed:
+`--corpus PATH` makes the corpus survive across invocations. The file
+extension picks the storage backend:
+
+- `.json` — a single atomically-written JSON file (default). Best for small
+  corpora and when you want the data human-readable.
+- `.db` / `.sqlite` / `.sqlite3` — a SQLite database with WAL journaling.
+  Each observation is an incremental UPSERT, so multiple `iriq --corpus`
+  processes can write concurrently without clobbering each other, and the
+  cost of opening doesn't scale with corpus size.
+
+Once the corpus has data, `-n` becomes corpus-informed:
 
 ```
 $ for n in alice bob carol dave erin frank gina hank ivan jane; do
-    iriq --corpus c.json https://foo.com/users/$n/profile >/dev/null
+    iriq --corpus c.db https://foo.com/users/$n/profile >/dev/null
   done
 
-$ iriq -n --corpus c.json https://foo.com/users/zoe/profile
+$ iriq -n --corpus c.db https://foo.com/users/zoe/profile
 https://foo.com/users/{user}/profile         # mechanical would keep "zoe"
 ```
+
+Library: `Iriq::Corpus.open("c.db")` (or `iriq.OpenCorpus("c.db")` in Go)
+dispatches on the same extension rules. `corpus.save("export.json")`
+exports any backend as JSON.
 
 Flags:
 
@@ -365,7 +378,7 @@ Flags:
 | `-j, --json`        | Emit JSON                                               |
 | `-N, --no-hints`    | Use `{integer_id}` etc. instead of `{user_id}`          |
 | `--no-scheme-less`  | Skip `foo.com/path`-style extraction (explicit-scheme only) |
-| `--corpus PATH`     | Load/create a JSON corpus at PATH; observe and save     |
+| `--corpus PATH`     | Load/create a corpus at PATH (`.json` or `.db`/`.sqlite`/`.sqlite3`) |
 | `--stats`           | Print rolling aggregates                                |
 | `-V, --version`     | Print version                                           |
 
