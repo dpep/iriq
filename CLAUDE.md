@@ -35,14 +35,17 @@ Trade-offs of this layout:
 ```sh
 # Ruby gem
 bundle install
-bundle exec exe/iriq --help      # runs the CLI from source
+bundle exec exe/iriq --help     # runs the CLI from source
 
-# Go binary
-go build -o bin/iriq ./cmd/iriq  # local build
-go install ./cmd/iriq            # into $GOBIN
+# Go binary — convenience targets in the Makefile
+make build                      # → ./bin/iriq
+make install                    # go install into $GOBIN
+make uninstall                  # remove from $GOBIN
+make clean                      # remove ./bin/
+make test                       # go test ./...
 
 # Both via Homebrew
-brew install dpep/tools/iriq     # uses the Ruby gem under the hood
+brew install dpep/tools/iriq    # uses the Ruby gem under the hood
 ```
 
 ## Keeping Ruby and Go in sync
