@@ -42,15 +42,23 @@ module Iriq
       )
     }xu.freeze
 
-    # Scheme-less pattern: opt-in, conservative. Requires a host whose TLD
-    # is in SCHEMELESS_TLDS AND a `/path` to disambiguate from prose. The
-    # host part allows ASCII labels separated by dots; no Unicode hosts
-    # (those are too easily confused with prose).
-    SCHEMELESS_RE = %r{
-      (?<![\w/.@])                                                   # boundary; not after @ (avoid emails)
-      (?:[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+            # label(s)
-      (?i:#{SCHEMELESS_TLDS.join("|")})                              # TLD
-      /#{URL_CHAR_CLASS}                                             # required path
+    # Scheme-less alternative — same chars allowed as the absolute URL but
+    # requires a host with an allow-listed TLD AND a `/path` to keep prose
+    # noise low. The host part allows ASCII labels separated by dots; no
+    # Unicode hosts (those are too easily confused with prose).
+    SCHEMELESS_ALT = %{(?:[a-zA-Z0-9](?:[a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?\\.)+(?i:#{SCHEMELESS_TLDS.join("|")})/#{URL_CHAR_CLASS}}.freeze
+
+    # Single-scan combined pattern used when scheme_less is on. One regex
+    # over the text is meaningfully cheaper than two.
+    COMBINED_RE = %r{
+      (?<![\w/.@])
+      (?:
+        (?i:#{SCHEMES.join("|")})://#{URL_CHAR_CLASS}
+        |
+        urn:[a-zA-Z0-9][a-zA-Z0-9\-]{0,30}:#{URL_CHAR_CLASS}
+        |
+        #{SCHEMELESS_ALT}
+      )
     }xu.freeze
 
     # Punctuation that's almost always sentence punctuation rather than part
@@ -90,14 +98,11 @@ module Iriq
 
     private
 
-    # Combine scheme + (optionally) scheme-less matches in source order.
+    # One regex scan over the text — combined pattern when scheme-less is
+    # on, scheme-anchored only otherwise.
     def scan_candidates(text)
-      matches = []
-      text.scan(CANDIDATE_RE) { matches << [Regexp.last_match.begin(0), Regexp.last_match[0]] }
-      if @scheme_less
-        text.scan(SCHEMELESS_RE) { matches << [Regexp.last_match.begin(0), Regexp.last_match[0]] }
-      end
-      matches.sort_by(&:first).map(&:last)
+      pattern = @scheme_less ? COMBINED_RE : CANDIDATE_RE
+      text.scan(pattern)
     end
 
     # Iteratively strip sentence punctuation and unmatched closing brackets

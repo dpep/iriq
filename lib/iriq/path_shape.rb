@@ -11,7 +11,7 @@ module Iriq
   #   PathShape.for(["users", "123"], hints: false)
   #   # => "/users/{integer_id}"
   class PathShape
-    def initialize(classifier: SegmentClassifier.new, hints: true)
+    def initialize(classifier: SegmentClassifier::DEFAULT, hints: true)
       @classifier = classifier
       @hints      = hints
     end
@@ -38,7 +38,7 @@ module Iriq
       "{#{placeholder}}"
     end
 
-    def self.for(segments, classifier: SegmentClassifier.new, hints: true)
+    def self.for(segments, classifier: SegmentClassifier::DEFAULT, hints: true)
       new(classifier: classifier, hints: hints).for(segments)
     end
   end

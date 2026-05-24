@@ -8,12 +8,12 @@ module Iriq
   module Normalizer
     module_function
 
-    def normalize(input, classifier: SegmentClassifier.new, hints: true)
+    def normalize(input, classifier: SegmentClassifier::DEFAULT, hints: true)
       iri = input.is_a?(Identifier) ? input : Parser.parse(input)
       normalize_identifier(iri, classifier: classifier, hints: hints)
     end
 
-    def normalize_identifier(iri, classifier: SegmentClassifier.new, hints: true)
+    def normalize_identifier(iri, classifier: SegmentClassifier::DEFAULT, hints: true)
       if iri.urn?
         if iri.scheme == "urn" && iri.nss && iri.nss.include?(":")
           ns, value = iri.nss.split(":", 2)

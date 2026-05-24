@@ -41,7 +41,7 @@ module Iriq
     attr_reader :host_counts, :path_length_counts, :raw_shape_counts,
                 :fingerprint_counts, :position_stats
 
-    def initialize(classifier: SegmentClassifier.new,
+    def initialize(classifier: SegmentClassifier::DEFAULT,
                    max_values_per_position: PositionStats::DEFAULT_MAX_VALUES)
       @classifier              = classifier
       @max_values_per_position = max_values_per_position
@@ -244,7 +244,7 @@ module Iriq
       File.rename(tmp, path)
     end
 
-    def self.from_dump(h, classifier: SegmentClassifier.new)
+    def self.from_dump(h, classifier: SegmentClassifier::DEFAULT)
       c = new(
         classifier: classifier,
         max_values_per_position: h.fetch("max_values_per_position", PositionStats::DEFAULT_MAX_VALUES),
@@ -261,7 +261,7 @@ module Iriq
       c
     end
 
-    def self.load(path, classifier: SegmentClassifier.new)
+    def self.load(path, classifier: SegmentClassifier::DEFAULT)
       from_dump(JSON.parse(File.read(path)), classifier: classifier)
     end
   end

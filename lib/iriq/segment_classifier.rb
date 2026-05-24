@@ -20,9 +20,34 @@ module Iriq
     TS_SECONDS_RANGE = 1_000_000_000..9_999_999_999
     TS_MILLIS_RANGE  = 1_000_000_000_000..9_999_999_999_999
 
+    # Bounded memoization: classification of a given string is pure, so
+    # repeat segments (e.g. /users in countless paths) can be cached. Cap
+    # keeps the cache from unbounded growth when inputs are dominated by
+    # unique IDs.
+    CACHE_MAX = 10_000
+
+    def initialize
+      @cache = {}
+    end
+
     def classify(segment)
       return :literal if segment.nil? || segment.empty?
 
+      cached = @cache[segment]
+      return cached if cached
+
+      @cache.clear if @cache.size >= CACHE_MAX
+      @cache[segment] = compute_classification(segment)
+    end
+
+    # Anything except :literal is considered variable for shape/explain.
+    def variable?(type)
+      type != :literal
+    end
+
+    private
+
+    def compute_classification(segment)
       case segment
       when UUID_RE     then :uuid
       when DATE_RE     then :date
@@ -36,13 +61,6 @@ module Iriq
       end
     end
 
-    # Anything except :literal is considered variable for shape/explain.
-    def variable?(type)
-      type != :literal
-    end
-
-    private
-
     def classify_integer(segment)
       n = segment.to_i
       return :timestamp if TS_MILLIS_RANGE.cover?(n)
@@ -50,5 +68,11 @@ module Iriq
 
       :integer_id
     end
+
+    public
+
+    # Shared singleton — preferred default for callers that don't bring
+    # their own classifier (saves a per-call allocation).
+    DEFAULT = new
   end
 end

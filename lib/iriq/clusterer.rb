@@ -4,7 +4,7 @@ module Iriq
   # against the cluster it would fall into, including which positions are
   # stable across all observed members.
   class Clusterer
-    def initialize(classifier: SegmentClassifier.new)
+    def initialize(classifier: SegmentClassifier::DEFAULT)
       @classifier = classifier
       @clusters   = {}
     end
@@ -82,7 +82,7 @@ module Iriq
       { "clusters" => @clusters.transform_values(&:dump) }
     end
 
-    def self.from_dump(h, classifier: SegmentClassifier.new)
+    def self.from_dump(h, classifier: SegmentClassifier::DEFAULT)
       c = new(classifier: classifier)
       restored = h["clusters"].transform_values { |cdump| Cluster.from_dump(cdump) }
       c.instance_variable_set(:@clusters, restored)

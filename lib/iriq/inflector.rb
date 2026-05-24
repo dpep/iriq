@@ -10,19 +10,32 @@ module Iriq
   #
   # And reset to default with `Iriq::Inflector.reset_adapter!`.
   module Inflector
+    # Vocabulary is bounded in practice; cache + cap matches the
+    # SegmentClassifier strategy.
+    CACHE_MAX = 10_000
+
     class << self
       def singularize(word)
-        adapter.singularize(word)
+        cache = (@cache ||= {})
+        cached = cache[word]
+        return cached if cached
+
+        cache.clear if cache.size >= CACHE_MAX
+        cache[word] = adapter.singularize(word)
       end
 
       def adapter
         @adapter ||= default_adapter
       end
 
-      attr_writer :adapter
+      def adapter=(value)
+        @adapter = value
+        @cache = {} # different adapter could singularize differently
+      end
 
       def reset_adapter!
         @adapter = nil
+        @cache = {}
       end
 
       def default_adapter

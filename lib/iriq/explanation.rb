@@ -9,7 +9,7 @@ module Iriq
   module Explanation
     module_function
 
-    def explain(input, classifier: SegmentClassifier.new)
+    def explain(input, classifier: SegmentClassifier::DEFAULT)
       iri = input.is_a?(Identifier) ? input : Parser.parse(input)
 
       if iri.urn?
