@@ -22,46 +22,35 @@ module Iriq
              iriq [options] < text
              iriq cluster [options] [file]
 
-      With a positional input: prints parse + normalize + explain (or just the
-      sections you select with -p/-n/-e).
+      <input> may be an IRI, a file path (extracted automatically), or piped
+      text via stdin. Default output adapts to the input shape — see Examples.
 
-      With piped stdin: extracts IRIs from the input. By default emits a
-      deduplicated URL list with occurrence counts (or clusters when the input
-      is large). Section flags emit one section per extracted IRI; --stats
-      prints rolling aggregates.
-
-      Section flags (combine freely; work with positional or piped input):
-        -p, --parse           Parsed fields
-        -n, --normalize       Shape-normalized form
+      Sections (combine freely):
         -e, --explain         Per-segment annotations
+        -n, --normalize       Shape-normalized form
+        -p, --parse           Parsed fields
 
-      Corpus:
+      Corpus + stats:
             --corpus PATH     Load/create a JSON corpus; observe and save atomically.
                               -n/-e become corpus-informed once it has data.
             --stats           Print rolling aggregates
 
       Other:
+        -h, --help            Show this message
         -j, --json            Emit JSON instead of human-readable output
             --no-hints        Use {integer_id} placeholders instead of {user_id}
-            --no-scheme-less  Skip foo.com/path-style extraction (explicit-scheme only)
-        -h, --help            Show this message
+            --no-scheme-less  Skip foo.com/path extraction (explicit-scheme only)
         -V, --version         Print version
 
-      A positional argument that doesn't parse as an IRI but IS an existing
-      file is read and extracted from automatically — so `iriq ./access.log`
-      and `iriq /var/log/foo.log` Just Work. (Bare filenames like `README.md`
-      may still parse as a URL; pipe with `cat` to disambiguate.)
-
       Subcommands:
-        cluster [file]        Force cluster-view output (rather than the default
-                              URL list for small inputs)
+        cluster [file]        Force cluster view (default for ≥10 IRIs anyway)
 
       Examples:
         iriq foo.com/users/456
         iriq -n https://foo.com/users/123
-        cat README.md | iriq
-        cat README.md | iriq -n              # normalized URL per line
-        cat README.md | iriq --corpus c.json --stats
+        iriq ./access.log                     # auto-detect file → extract URLs
+        cat README.md | iriq -n               # one normalized URL per line
+        cat README.md | iriq --corpus c.json
     TXT
 
     attr_reader :stdin, :stdout, :stderr
