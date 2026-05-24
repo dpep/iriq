@@ -43,9 +43,17 @@ module Iriq
         out << "#{scheme}://" if scheme
         out << host if host
         out << ":#{port}" if port
-        out << "/" + path_segments.join("/") if path_segments.any?
-        out << "?#{query}" if query && !query.empty?
-        out << "##{fragment}" if fragment && !fragment.empty?
+        has_query    = query && !query.empty?
+        has_fragment = fragment && !fragment.empty?
+        if path_segments.any?
+          out << "/" + path_segments.join("/")
+        elsif has_query || has_fragment
+          # RFC 3986: an authority with query/fragment but no path needs the
+          # implied "/" to be a valid URI.
+          out << "/"
+        end
+        out << "?#{query}"    if has_query
+        out << "##{fragment}" if has_fragment
         out
       end
     end

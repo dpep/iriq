@@ -173,6 +173,39 @@ Each row of `corpus.explain(...)` (and `observation.explanation`) carries a
 | `:corpus_inferred_variable` | Classifier said literal, but position has high entropy |
 | `:ambiguous`                | Insufficient signal — never seen, or mixed           |
 
+## Extracting IRIs from text
+
+`Iriq::Extractor` pulls IRIs out of free text. Scheme-anchored by default
+(only `http`, `https`, `ftp`, `ws`, `wss`, `urn`), with iterative
+trailing-punctuation trimming and balanced-paren preservation.
+
+```ruby
+Iriq.extract("Visit https://foo.com today (see https://en.wikipedia.org/wiki/Foo_(bar)).")
+# => [#<Iriq::Identifier https://foo.com>,
+#     #<Iriq::Identifier https://en.wikipedia.org/wiki/Foo_(bar)>]
+
+# Opt in to scheme-less extraction (foo.com/path style). Limited to a small
+# allow-list of common TLDs and requires a `/path` to disambiguate from
+# sentence-ending periods.
+Iriq::Extractor.new(scheme_less: true).extract("hit foo.com/users today")
+# => [#<Iriq::Identifier https://foo.com/users>]
+```
+
+CLI:
+
+```
+$ cat README.md | iriq --extract
+$ cat README.md | iriq --extract --scheme-less
+$ cat README.md | iriq --extract --corpus mycorpus.json   # extract + observe
+```
+
+Known limitations (intentional, MVP):
+
+- Comma is a URL boundary, so query strings like `?q=37.7,-122.4` get
+  truncated. Trade-off picked to keep CSV-shaped text working.
+- No HTML entity decoding (`&amp;` stays as-is).
+- Scheme-less mode skips bare hostnames without a path (too noisy in prose).
+
 ### Memory bounds
 
 - Per-position `value_counts` is capped (`max_values_per_position`, default
@@ -201,6 +234,7 @@ Iriq::Corpus.new(max_values_per_position: 200)
 | `Iriq::PositionStats`       | Capped value/type frequencies for one position       |
 | `Iriq::Observation`         | What `Corpus#observe` returns                        |
 | `Iriq::Corpus`              | Streaming observer with rolling aggregates + learning |
+| `Iriq::Extractor`           | Pulls IRIs out of free text (scheme-anchored)        |
 
 ## CLI
 

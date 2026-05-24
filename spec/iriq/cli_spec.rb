@@ -219,6 +219,47 @@ describe Iriq::CLI do
     end
   end
 
+  describe "--extract" do
+    it "extracts URLs from piped prose, one per line" do
+      stdin.string = "Visit https://foo.com and https://bar.com today."
+      expect(run("--extract")).to eq(0)
+      expect(stdout.string).to eq("https://foo.com\nhttps://bar.com\n")
+    end
+
+    it "reads from a file argument" do
+      Tempfile.open("iriq-extract") do |f|
+        f.write("see https://foo.com.\nalso (https://bar.com).\n")
+        f.flush
+        expect(run("--extract", f.path)).to eq(0)
+        expect(stdout.string).to eq("https://foo.com\nhttps://bar.com\n")
+      end
+    end
+
+    it "emits JSON with --json" do
+      stdin.string = "visit https://foo.com today"
+      expect(run("--extract", "--json")).to eq(0)
+      expect(JSON.parse(stdout.string)).to eq(["https://foo.com"])
+    end
+
+    it "supports --scheme-less" do
+      stdin.string = "go to foo.com/users today"
+      expect(run("--extract", "--scheme-less")).to eq(0)
+      expect(stdout.string).to eq("https://foo.com/users\n")
+    end
+
+    it "feeds extracted IRIs into --corpus when both are set" do
+      corpus_path = Tempfile.new(["iriq-extract-corpus", ".json"]).tap(&:close).path
+      File.delete(corpus_path) if File.exist?(corpus_path)
+
+      stdin.string = "see https://foo.com/users/1 and https://foo.com/users/2"
+      expect(run("--extract", "--corpus", corpus_path)).to eq(0)
+
+      data = JSON.parse(File.read(corpus_path))
+      expect(data["host_counts"]).to eq("foo.com" => 2)
+      File.delete(corpus_path)
+    end
+  end
+
   describe "cluster" do
     it "clusters identifiers from stdin" do
       stdin.string = <<~LINES

@@ -34,6 +34,13 @@ module Iriq
                               explain are corpus-informed.
             --stats           Print rolling aggregates instead of clusters
 
+      Extraction from free text:
+            --extract         Treat input as prose; pull URLs/URNs out and emit
+                              them one per line (combine with --corpus to feed
+                              the corpus, --json for machine output).
+            --scheme-less     Also extract scheme-less URLs like foo.com/path
+                              (conservative TLD allow-list; requires a path)
+
       Other options:
         -j, --json            Emit JSON instead of human-readable output
             --no-hints        Use mechanical placeholders ({integer_id})
@@ -70,13 +77,15 @@ module Iriq
       explicit_cluster = (args.first == "cluster")
       args.shift if explicit_cluster
 
-      batch_mode = explicit_cluster || (args.empty? && piped_stdin?)
+      batch_mode = explicit_cluster || (args.empty? && piped_stdin? && !opts[:extract])
 
-      return print_usage(stdout, 0) if args.empty? && !batch_mode
+      return print_usage(stdout, 0) if args.empty? && !batch_mode && !opts[:extract]
 
       corpus = opts[:corpus] ? load_corpus(opts[:corpus]) : nil
 
-      code = if batch_mode
+      code = if opts[:extract]
+        cmd_extract(args, opts, corpus)
+      elsif batch_mode
         cmd_batch(args, opts, corpus)
       elsif opts[:stats]
         cmd_stats(corpus, opts)
@@ -98,13 +107,15 @@ module Iriq
 
     def parse_options(argv)
       opts = {
-        json:     false,
-        help:     false,
-        version:  false,
-        hints:    true,
-        sections: [],
-        corpus:   nil,
-        stats:    false,
+        json:        false,
+        help:        false,
+        version:     false,
+        hints:       true,
+        sections:    [],
+        corpus:      nil,
+        stats:       false,
+        extract:     false,
+        scheme_less: false,
       }
       parser = OptionParser.new do |o|
         o.on("-p", "--parse")     { opts[:sections] << :parse }
@@ -114,6 +125,8 @@ module Iriq
         o.on("--[no-]hints")      { |v| opts[:hints] = v }
         o.on("--corpus PATH")     { |v| opts[:corpus] = v }
         o.on("--stats")           { opts[:stats]   = true }
+        o.on("--extract")         { opts[:extract] = true }
+        o.on("--scheme-less")     { opts[:scheme_less] = true }
         o.on("-h", "--help")      { opts[:help]    = true }
         o.on("-V", "--version")   { opts[:version] = true }
       end
@@ -191,6 +204,23 @@ module Iriq
       0
     end
 
+    def cmd_extract(args, opts, corpus)
+      text = read_text(args.first)
+      extractor = Extractor.new(scheme_less: opts[:scheme_less])
+      iris = extractor.extract(text)
+
+      iris.each { |iri| corpus.observe(iri) } if corpus
+
+      if opts[:stats] && corpus
+        emit_stats(corpus, opts)
+      elsif opts[:json]
+        stdout.puts JSON.generate(iris.map(&:canonical))
+      else
+        iris.each { |iri| stdout.puts iri.canonical }
+      end
+      0
+    end
+
     def cmd_stats(corpus, opts)
       return missing("--corpus") unless corpus
 
@@ -208,6 +238,14 @@ module Iriq
         stdin.read.lines
       else
         File.readlines(path)
+      end
+    end
+
+    def read_text(path)
+      if path.nil? || path == "-"
+        stdin.read
+      else
+        File.read(path)
       end
     end
 

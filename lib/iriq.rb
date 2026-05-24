@@ -13,6 +13,7 @@ require "iriq/clusterer"
 require "iriq/position_stats"
 require "iriq/observation"
 require "iriq/corpus"
+require "iriq/extractor"
 require "iriq/cli"
 
 module Iriq
@@ -27,6 +28,10 @@ module Iriq
 
     def explain(input)
       Explanation.explain(input)
+    end
+
+    def extract(text)
+      Extractor.new.extract(text)
     end
   end
 end
