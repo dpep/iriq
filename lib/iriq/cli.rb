@@ -19,49 +19,46 @@ module Iriq
 
     USAGE = <<~TXT
       Usage: iriq [options] <input>
-             iriq [options] < urls.txt
+             iriq [options] < text
              iriq cluster [options] [file]
 
       With a positional input: prints parse + normalize + explain (or just the
-      sections you select with -p/-n/-e). With piped stdin and no positional:
-      processes each line as an input (batch mode) and prints clusters at the
-      end (or stats with --stats).
+      sections you select with -p/-n/-e).
 
-      Section flags (combine freely):
-        -p, --parse           Show parsed fields
-        -n, --normalize       Show the shape-normalized form
-        -e, --explain         Show per-segment annotations
+      With piped stdin: extracts IRIs from the input. By default emits a
+      deduplicated URL list with occurrence counts (or clusters when the input
+      is large). Section flags emit one section per extracted IRI; --stats
+      prints rolling aggregates.
 
-      Corpus + streaming:
-            --corpus PATH     Load/create a JSON-backed corpus at PATH. Each
-                              observed IRI updates it; the file is rewritten
-                              atomically on exit. With --corpus, normalize and
-                              explain are corpus-informed.
-            --stats           Print rolling aggregates instead of clusters
+      Section flags (combine freely; work with positional or piped input):
+        -p, --parse           Parsed fields
+        -n, --normalize       Shape-normalized form
+        -e, --explain         Per-segment annotations
 
-      Extraction from free text:
-            --extract         Treat input as prose; pull URLs/URNs out and emit
-                              them one per line (combine with --corpus to feed
-                              the corpus, --json for machine output).
-            --scheme-less     Also extract scheme-less URLs like foo.com/path
-                              (conservative TLD allow-list; requires a path)
+      Corpus:
+            --corpus PATH     Load/create a JSON corpus; observe and save atomically.
+                              -n/-e become corpus-informed once it has data.
+            --stats           Print rolling aggregates
 
-      Other options:
+      Other:
         -j, --json            Emit JSON instead of human-readable output
-            --no-hints        Use mechanical placeholders ({integer_id})
+            --no-hints        Use {integer_id} placeholders instead of {user_id}
+            --no-scheme-less  Skip foo.com/path-style extraction (explicit-scheme only)
+            --extract         Treat a positional argument as a text file to read
+                              (without this, `iriq FILE` tries to parse FILE as a URL)
         -h, --help            Show this message
         -V, --version         Print version
 
       Subcommands:
-        iriq cluster [file]   Cluster identifiers from FILE or stdin (alias for
-                              piped batch mode)
+        cluster [file]        Force cluster-view output (rather than the default
+                              URL list for small inputs)
 
       Examples:
         iriq foo.com/users/456
         iriq -n https://foo.com/users/123
-        cat urls.txt | iriq
-        cat urls.txt | iriq --corpus mycorpus.json --stats
-        iriq --corpus mycorpus.json https://foo.com/users/1
+        cat README.md | iriq
+        cat README.md | iriq -n              # normalized URL per line
+        cat README.md | iriq --corpus c.json --stats
     TXT
 
     attr_reader :stdin, :stdout, :stderr
@@ -198,7 +195,9 @@ module Iriq
       iris = extract_text(read_text(args.first), opts)
       iris.each { |iri| corpus.observe(iri) }
 
-      if opts[:stats]
+      if opts[:sections].any?
+        emit_per_iri_sections(iris, opts)
+      elsif opts[:stats]
         emit_stats(corpus, opts)
       elsif explicit_cluster || iris.size >= LARGE_BATCH_THRESHOLD
         # Either the user asked for clusters explicitly, or the input is
@@ -208,6 +207,41 @@ module Iriq
         emit_url_list(iris, opts)
       end
       0
+    end
+
+    # Emit the requested sections (parse/normalize/explain) for each
+    # extracted IRI. -n alone is the cleanest case: one line per URL.
+    def emit_per_iri_sections(iris, opts)
+      sections = opts[:sections]
+      payloads = iris.map { |iri| section_payload(iri, sections, opts) }
+
+      if opts[:json]
+        out = sections.size == 1 ? payloads.map(&:values).flatten(1) : payloads
+        stdout.puts JSON.generate(out)
+      elsif sections == [:normalize]
+        # Most common case — keep it tight: one URL per line, no headers.
+        payloads.each { |p| stdout.puts p[:normalize] }
+      else
+        payloads.each_with_index do |p, i|
+          stdout.puts if i > 0
+          stdout.puts "# #{iris[i].canonical}"
+          sections.each do |sec|
+            case sec
+            when :parse     then emit_parse_human(p[:parse])
+            when :normalize then stdout.puts p[:normalize]
+            when :explain   then emit_explain_human(p[:explain])
+            end
+          end
+        end
+      end
+    end
+
+    def section_payload(iri, sections, opts)
+      data = {}
+      data[:parse]     = identifier_hash(iri)                                                 if sections.include?(:parse)
+      data[:normalize] = Normalizer.normalize_identifier(iri, hints: opts[:hints])            if sections.include?(:normalize)
+      data[:explain]   = Explanation.explain(iri)                                             if sections.include?(:explain)
+      data
     end
 
     def extract_text(text, opts)

@@ -175,57 +175,27 @@ Each row of `corpus.explain(...)` (and `observation.explanation`) carries a
 
 ## Extracting IRIs from text
 
-`Iriq::Extractor` pulls IRIs out of free text. Picks up:
-
-- Explicit-scheme URLs: `http`, `https`, `ftp`, `ws`, `wss`, `urn`
-- Scheme-less URLs like `foo.com/users` (on by default; small TLD
-  allow-list and a required `/path` keep prose noise down)
-
-Trims trailing sentence punctuation iteratively and preserves balanced
-parens (so `https://en.wikipedia.org/wiki/Ruby_(programming_language)`
-stays intact while `(see https://foo.com)` drops the unmatched paren).
+`Iriq::Extractor` is what powers pipe-mode in the CLI. Picks up explicit-
+scheme URLs (`http`, `https`, `ftp`, `ws`, `wss`, `urn`) and `foo.com/path`-
+style scheme-less URLs (small TLD allow-list, required path). Trims trailing
+sentence punctuation iteratively and preserves balanced parens
+(`https://en.wikipedia.org/wiki/Ruby_(programming_language)` stays intact;
+`(see https://foo.com)` drops the outer paren).
 
 ```ruby
 Iriq.extract("Visit https://foo.com today, also hit foo.com/users.")
 # => [#<Iriq::Identifier https://foo.com>,
 #     #<Iriq::Identifier https://foo.com/users>]
 
-# To turn off scheme-less:
+# Disable scheme-less:
 Iriq::Extractor.new(scheme_less: false).extract("hit foo.com/users today")
 # => []
 ```
 
-CLI — piped stdin without arguments runs extraction by default. Output
-auto-switches based on input size: small inputs get a deduplicated URL
-list (easy to scan), larger inputs (≥ 10 IRIs) get the cluster view (more
-informative summary) using an ephemeral corpus.
+Known limitations (intentional):
 
-```
-$ cat short.txt | iriq
-[2] https://github.com/dpep/iriq
-[1] https://foo.com/users
-
-$ cat access.log | iriq                # large input → cluster view
-[190] docs.example.com  /users/{user_id}
-[186] app.example.com   /users/{user_id}
-[140] api.example.com   /users/{user_id}/orders/{order_id}
-...
-```
-
-Other invocations:
-
-```
-$ cat README.md | iriq --stats              # rolling stats from extracted IRIs
-$ cat README.md | iriq cluster              # route-shape clusters
-$ cat README.md | iriq --corpus c.json      # extract + observe + URL list
-$ cat README.md | iriq --no-scheme-less     # explicit-scheme URLs only
-$ iriq --extract README.md                  # same as the pipe form, with a file
-```
-
-Known limitations (intentional, MVP):
-
-- Comma is a URL boundary, so query strings like `?q=37.7,-122.4` get
-  truncated. Trade-off picked to keep CSV-shaped text working.
+- Comma is a URL boundary, so query strings like `?q=37.7,-122.4` truncate.
+  Trade-off picked to keep CSV-shaped text working.
 - No HTML entity decoding (`&amp;` stays as-is).
 - Scheme-less mode skips bare hostnames without a path (too noisy in prose).
 
@@ -289,12 +259,17 @@ https://foo.com/users/{user_id}
 
 **Piped stdin** — extraction runs by default. Output auto-switches: small
 inputs get a deduplicated URL list, larger inputs (≥ 10 IRIs) get the
-cluster view via an ephemeral corpus.
+cluster view via an ephemeral corpus. Section flags work too — emit one
+normalized URL / parsed record / explanation per extracted IRI.
 
 ```
 $ cat short.txt | iriq
 [2] https://github.com/dpep/iriq
 [1] https://foo.com/users
+
+$ cat short.txt | iriq -n                     # normalized URL per line
+https://github.com/dpep/iriq
+https://foo.com/users
 
 $ cat access.log | iriq                       # ≥ 10 IRIs → cluster view
 [190] docs.example.com  /users/{user_id}

@@ -184,6 +184,57 @@ describe Iriq::CLI do
       expect(JSON.parse(stdout.string)).to eq([{ "iri" => "https://foo.com", "count" => 2 }])
     end
 
+    describe "section flags in pipe mode" do
+      it "-n prints one normalized URL per extracted IRI" do
+        stdin.string = "see https://foo.com/users/1 and (https://foo.com/users/2)"
+        expect(run("-n")).to eq(0)
+        expect(stdout.string.lines.map(&:chomp)).to eq([
+          "https://foo.com/users/{user_id}",
+          "https://foo.com/users/{user_id}",
+        ])
+      end
+
+      it "-n --json emits a flat array of normalized strings" do
+        stdin.string = "see https://foo.com/users/1 and https://foo.com/users/2"
+        expect(run("-n", "--json")).to eq(0)
+        expect(JSON.parse(stdout.string)).to eq([
+          "https://foo.com/users/{user_id}",
+          "https://foo.com/users/{user_id}",
+        ])
+      end
+
+      it "-p prints parse output per IRI with a header" do
+        stdin.string = "see https://foo.com/users/1"
+        expect(run("-p")).to eq(0)
+        out = stdout.string
+        expect(out).to include("# https://foo.com/users/1")
+        expect(out).to include("scheme:        https")
+        expect(out).to include("host:          foo.com")
+      end
+
+      it "-e prints explanation rows per IRI" do
+        stdin.string = "see https://foo.com/users/123"
+        expect(run("-e")).to eq(0)
+        out = stdout.string
+        expect(out).to include("# https://foo.com/users/123")
+        expect(out).to match(/\* integer_id\s+user_id\s+123/)
+      end
+
+      it "multiple section flags bundle per IRI in JSON" do
+        stdin.string = "see https://foo.com/users/1"
+        expect(run("-pn", "--json")).to eq(0)
+        data = JSON.parse(stdout.string)
+        expect(data.size).to eq(1)
+        expect(data.first.keys).to contain_exactly("parse", "normalize")
+      end
+
+      it "produces empty output when no URLs found" do
+        stdin.string = "no urls here at all"
+        expect(run("-n")).to eq(0)
+        expect(stdout.string).to eq("")
+      end
+    end
+
     it "auto-switches to clusters when input is large (>= LARGE_BATCH_THRESHOLD IRIs)" do
       # 10 URLs that cluster into one shape — cluster view is more useful
       # than a 10-line URL list.
