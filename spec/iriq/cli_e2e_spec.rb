@@ -54,13 +54,19 @@ describe "iriq CLI (end-to-end)" do
   end
 
   describe "corpus persistence across invocations" do
-    let(:corpus_path) do
+    # IMPORTANT: hold the Tempfile object via `let` so it stays referenced
+    # for the whole example. Tempfile registers a GC finalizer that
+    # File.unlinks the path — if we let the object go (e.g. by returning
+    # only `.path` from let), GC can fire mid-test and delete our corpus
+    # file out from under the next subprocess invocation. Ruby 3.3's GC
+    # was eager enough to surface this as a CI flake.
+    let(:corpus_file) do
       f = Tempfile.new(["iriq-e2e", ".json"])
       f.close
       File.delete(f.path)
-      f.path
+      f
     end
-    after { File.delete(corpus_path) if File.exist?(corpus_path) }
+    let(:corpus_path) { corpus_file.path }
 
     it "creates, accumulates, and persists corpus state" do
       # First invocation: create

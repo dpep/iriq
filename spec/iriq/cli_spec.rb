@@ -289,12 +289,15 @@ describe Iriq::CLI do
   end
 
   describe "--corpus" do
-    let(:corpus_path) do
+    # Hold the Tempfile ref via `let` so its GC finalizer doesn't unlink
+    # the corpus file mid-test. See cli_e2e_spec for details.
+    let(:corpus_file) do
       f = Tempfile.new(["iriq-corpus", ".json"])
       f.close
       File.delete(f.path) # start fresh
-      f.path
+      f
     end
+    let(:corpus_path) { corpus_file.path }
 
     after do
       File.delete(corpus_path) if File.exist?(corpus_path)
@@ -371,18 +374,19 @@ describe Iriq::CLI do
     end
 
     it "feeds auto-detected file into --corpus" do
-      corpus_path = Tempfile.new(["iriq-autocorpus", ".json"]).tap(&:close).path
-      File.delete(corpus_path) if File.exist?(corpus_path)
+      corpus_file = Tempfile.new(["iriq-autocorpus", ".json"])
+      corpus_file.close
+      File.delete(corpus_file.path)
 
       Tempfile.open("iriq-autofile") do |f|
         f.write("see https://foo.com/users/1 and https://foo.com/users/2")
         f.flush
-        expect(run("--corpus", corpus_path, f.path)).to eq(0)
+        expect(run("--corpus", corpus_file.path, f.path)).to eq(0)
       end
 
-      data = JSON.parse(File.read(corpus_path))
+      data = JSON.parse(File.read(corpus_file.path))
       expect(data["host_counts"]).to eq("foo.com" => 2)
-      File.delete(corpus_path)
+      corpus_file.close!  # explicit cleanup; keeps the ref alive through the assertions
     end
 
     it "leaves URL-shaped args alone — they still go through summary mode" do
