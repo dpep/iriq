@@ -60,7 +60,7 @@ module Iriq
     # Unmatched closing brackets that should be trimmed.
     BRACKET_PAIRS = { ")" => "(", "]" => "[", "}" => "{" }.freeze
 
-    def initialize(scheme_less: false)
+    def initialize(scheme_less: true)
       @scheme_less = scheme_less
     end
 

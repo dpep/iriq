@@ -175,28 +175,51 @@ Each row of `corpus.explain(...)` (and `observation.explanation`) carries a
 
 ## Extracting IRIs from text
 
-`Iriq::Extractor` pulls IRIs out of free text. Scheme-anchored by default
-(only `http`, `https`, `ftp`, `ws`, `wss`, `urn`), with iterative
-trailing-punctuation trimming and balanced-paren preservation.
+`Iriq::Extractor` pulls IRIs out of free text. Picks up:
+
+- Explicit-scheme URLs: `http`, `https`, `ftp`, `ws`, `wss`, `urn`
+- Scheme-less URLs like `foo.com/users` (on by default; small TLD
+  allow-list and a required `/path` keep prose noise down)
+
+Trims trailing sentence punctuation iteratively and preserves balanced
+parens (so `https://en.wikipedia.org/wiki/Ruby_(programming_language)`
+stays intact while `(see https://foo.com)` drops the unmatched paren).
 
 ```ruby
-Iriq.extract("Visit https://foo.com today (see https://en.wikipedia.org/wiki/Foo_(bar)).")
+Iriq.extract("Visit https://foo.com today, also hit foo.com/users.")
 # => [#<Iriq::Identifier https://foo.com>,
-#     #<Iriq::Identifier https://en.wikipedia.org/wiki/Foo_(bar)>]
+#     #<Iriq::Identifier https://foo.com/users>]
 
-# Opt in to scheme-less extraction (foo.com/path style). Limited to a small
-# allow-list of common TLDs and requires a `/path` to disambiguate from
-# sentence-ending periods.
-Iriq::Extractor.new(scheme_less: true).extract("hit foo.com/users today")
-# => [#<Iriq::Identifier https://foo.com/users>]
+# To turn off scheme-less:
+Iriq::Extractor.new(scheme_less: false).extract("hit foo.com/users today")
+# => []
 ```
 
-CLI:
+CLI — piped stdin without arguments runs extraction by default. Output
+auto-switches based on input size: small inputs get a deduplicated URL
+list (easy to scan), larger inputs (≥ 10 IRIs) get the cluster view (more
+informative summary) using an ephemeral corpus.
 
 ```
-$ cat README.md | iriq --extract
-$ cat README.md | iriq --extract --scheme-less
-$ cat README.md | iriq --extract --corpus mycorpus.json   # extract + observe
+$ cat short.txt | iriq
+[2] https://github.com/dpep/iriq
+[1] https://foo.com/users
+
+$ cat big_log.txt | iriq
+[1247] api.example.com  /users/{user_id}
+[423]  api.example.com  /users/{user_id}/orders/{order_id}
+[88]   docs.example.com /v2/{v2_id}
+...
+```
+
+Other invocations:
+
+```
+$ cat README.md | iriq --stats              # rolling stats from extracted IRIs
+$ cat README.md | iriq cluster              # route-shape clusters
+$ cat README.md | iriq --corpus c.json      # extract + observe + URL list
+$ cat README.md | iriq --no-scheme-less     # explicit-scheme URLs only
+$ iriq --extract README.md                  # same as the pipe form, with a file
 ```
 
 Known limitations (intentional, MVP):

@@ -195,8 +195,8 @@ describe Iriq::Extractor do
     end
   end
 
-  describe "false positives" do
-    it "does not extract bare 'foo.com' (scheme-less skipped intentionally)" do
+  describe "false positives (default scheme-less on)" do
+    it "does not extract bare 'foo.com' (no path = no match)" do
       expect(extract("visit foo.com today")).to eq([])
     end
 
@@ -206,6 +206,14 @@ describe Iriq::Extractor do
 
     it "does not extract from text resembling a URL but missing scheme" do
       expect(extract("user@host:port/path")).to eq([])
+    end
+
+    it "does not match a bare domain without a path even with an allow-listed TLD" do
+      expect(extract("Acme Inc. (acme.com is the corporate page)")).to eq([])
+    end
+
+    it "does not extract from rsync/scp-style host:path" do
+      expect(extract("rsync user@host.com:/var/log/ to backup")).to eq([])
     end
   end
 
@@ -339,15 +347,20 @@ describe Iriq::Extractor do
     end
   end
 
-  describe "scheme-less mode (opt-in)" do
+  describe "scheme-less mode (on by default; --no-scheme-less to disable)" do
+    let(:strict)     { described_class.new(scheme_less: false) }
     let(:permissive) { described_class.new(scheme_less: true) }
 
     def permissive_extract(text)
       permissive.extract(text).map(&:canonical)
     end
 
-    it "is off by default" do
-      expect(extract("visit foo.com/users today")).to eq([])
+    it "is on by default" do
+      expect(extract("visit foo.com/users today")).to eq(["https://foo.com/users"])
+    end
+
+    it "can be turned off explicitly" do
+      expect(strict.extract("visit foo.com/users today").map(&:canonical)).to eq([])
     end
 
     it "extracts scheme-less URLs with a path on an allow-listed TLD" do

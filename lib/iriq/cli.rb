@@ -12,6 +12,11 @@ module Iriq
     SECTION_FLAGS = %i[parse normalize explain].freeze
     TOP_N_STATS   = 10
 
+    # When extraction yields this many or more IRIs, the default pipe
+    # output switches from a URL list to clusters — a longer list is
+    # easier to read as route-shape groups.
+    LARGE_BATCH_THRESHOLD = 10
+
     USAGE = <<~TXT
       Usage: iriq [options] <input>
              iriq [options] < urls.txt
@@ -77,6 +82,8 @@ module Iriq
       explicit_cluster = (args.first == "cluster")
       args.shift if explicit_cluster
 
+      # Pipe / batch mode kicks in when stdin is piped without a positional
+      # input, or when `cluster` is named explicitly.
       batch_mode = explicit_cluster || (args.empty? && piped_stdin? && !opts[:extract])
 
       return print_usage(stdout, 0) if args.empty? && !batch_mode && !opts[:extract]
@@ -86,7 +93,7 @@ module Iriq
       code = if opts[:extract]
         cmd_extract(args, opts, corpus)
       elsif batch_mode
-        cmd_batch(args, opts, corpus)
+        cmd_batch(args, opts, corpus, explicit_cluster: explicit_cluster)
       elsif opts[:stats]
         cmd_stats(corpus, opts)
       else
@@ -115,20 +122,20 @@ module Iriq
         corpus:      nil,
         stats:       false,
         extract:     false,
-        scheme_less: false,
+        scheme_less: true,
       }
       parser = OptionParser.new do |o|
-        o.on("-p", "--parse")     { opts[:sections] << :parse }
-        o.on("-n", "--normalize") { opts[:sections] << :normalize }
-        o.on("-e", "--explain")   { opts[:sections] << :explain }
-        o.on("-j", "--json")      { opts[:json]    = true }
-        o.on("--[no-]hints")      { |v| opts[:hints] = v }
-        o.on("--corpus PATH")     { |v| opts[:corpus] = v }
-        o.on("--stats")           { opts[:stats]   = true }
-        o.on("--extract")         { opts[:extract] = true }
-        o.on("--scheme-less")     { opts[:scheme_less] = true }
-        o.on("-h", "--help")      { opts[:help]    = true }
-        o.on("-V", "--version")   { opts[:version] = true }
+        o.on("-p", "--parse")        { opts[:sections] << :parse }
+        o.on("-n", "--normalize")    { opts[:sections] << :normalize }
+        o.on("-e", "--explain")      { opts[:sections] << :explain }
+        o.on("-j", "--json")         { opts[:json]    = true }
+        o.on("--[no-]hints")         { |v| opts[:hints] = v }
+        o.on("--corpus PATH")        { |v| opts[:corpus] = v }
+        o.on("--stats")              { opts[:stats]   = true }
+        o.on("--extract")            { opts[:extract] = true }
+        o.on("--[no-]scheme-less")   { |v| opts[:scheme_less] = v }
+        o.on("-h", "--help")         { opts[:help]    = true }
+        o.on("-V", "--version")      { opts[:version] = true }
       end
       args = parser.parse(argv)
       [args, opts]
@@ -182,43 +189,62 @@ module Iriq
       0
     end
 
-    def cmd_batch(args, opts, corpus)
+    # Used for the `cluster` subcommand and implicit piped batch mode. Reads
+    # the whole input as text and runs it through the extractor — so a file
+    # of URLs (one per line) and a file of prose with URLs both work. The
+    # corpus is ephemeral unless --corpus was given.
+    def cmd_batch(args, opts, corpus, explicit_cluster: false)
       corpus ||= Corpus.new
-      lines = read_input(args.first)
-      lines.each do |line|
-        line = line.strip
-        next if line.empty?
-
-        begin
-          corpus.observe(line)
-        rescue Iriq::ParseError => e
-          stderr.puts "iriq: skipped #{line.inspect}: #{e.message}"
-        end
-      end
+      iris = extract_text(read_text(args.first), opts)
+      iris.each { |iri| corpus.observe(iri) }
 
       if opts[:stats]
         emit_stats(corpus, opts)
-      else
+      elsif explicit_cluster || iris.size >= LARGE_BATCH_THRESHOLD
+        # Either the user asked for clusters explicitly, or the input is
+        # big enough that the cluster summary beats a long URL list.
         emit_clusters(corpus.clusters, opts)
+      else
+        emit_url_list(iris, opts)
       end
       0
     end
 
-    def cmd_extract(args, opts, corpus)
-      text = read_text(args.first)
-      extractor = Extractor.new(scheme_less: opts[:scheme_less])
-      iris = extractor.extract(text)
+    def extract_text(text, opts)
+      Extractor.new(scheme_less: opts[:scheme_less]).extract(text)
+    end
 
+    def cmd_extract(args, opts, corpus)
+      iris = extract_text(read_text(args.first), opts)
       iris.each { |iri| corpus.observe(iri) } if corpus
 
       if opts[:stats] && corpus
         emit_stats(corpus, opts)
-      elsif opts[:json]
-        stdout.puts JSON.generate(iris.map(&:canonical))
       else
-        iris.each { |iri| stdout.puts iri.canonical }
+        emit_url_list(iris, opts)
       end
       0
+    end
+
+    # Emit a deduplicated list of IRIs with occurrence counts, sorted desc
+    # by count then by first-seen order. Useful default for "what URLs are
+    # in this text?" questions.
+    def emit_url_list(iris, opts)
+      counts = Hash.new(0)
+      first  = {}
+      iris.each_with_index do |iri, i|
+        key = iri.canonical
+        counts[key] += 1
+        first[key] ||= i
+      end
+
+      sorted = counts.sort_by { |k, c| [-c, first[k]] }
+
+      if opts[:json]
+        stdout.puts JSON.generate(sorted.map { |k, c| { iri: k, count: c } })
+      else
+        sorted.each { |k, c| stdout.puts "[#{c}] #{k}" }
+      end
     end
 
     def cmd_stats(corpus, opts)

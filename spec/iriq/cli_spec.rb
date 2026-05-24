@@ -117,7 +117,7 @@ describe Iriq::CLI do
   end
 
   describe "pipe (batch) mode" do
-    it "treats piped stdin with no positional as batch and prints clusters" do
+    it "treats piped stdin with no positional as extract → URL list" do
       stdin.string = <<~LINES
         https://foo.com/users/1
         https://foo.com/users/2
@@ -126,18 +126,35 @@ describe Iriq::CLI do
 
       expect(run).to eq(0)
       out = stdout.string
-      expect(out).to include("[2] foo.com  /users/{user_id}")
-      expect(out).to include("/posts/{post_id}/edit")
+      expect(out).to include("[1] https://foo.com/users/1")
+      expect(out).to include("[1] https://foo.com/users/2")
+      expect(out).to include("[1] https://foo.com/posts/abc-123/edit")
     end
 
-    it "skips bad lines but keeps going" do
-      stdin.string = "https://foo.com/users/1\nnot-a-url\nhttps://foo.com/users/2\n"
+    it "deduplicates with counts" do
+      stdin.string = "https://foo.com\nhttps://foo.com\nhttps://bar.com\n"
       expect(run).to eq(0)
-      expect(stderr.string).to include("skipped")
-      expect(stdout.string).to include("[2] foo.com  /users/{user_id}")
+      lines = stdout.string.lines.map(&:chomp)
+      expect(lines).to eq(["[2] https://foo.com", "[1] https://bar.com"])
     end
 
-    it "prints --stats instead of clusters when requested" do
+    it "extracts URLs from prose, not just URL-per-line" do
+      stdin.string = "Visit https://foo.com today. See also (https://bar.com)."
+      expect(run).to eq(0)
+      out = stdout.string
+      expect(out).to include("[1] https://foo.com")
+      expect(out).to include("[1] https://bar.com")
+    end
+
+    it "silently drops non-URL lines (no parse-error noise)" do
+      stdin.string = "https://foo.com\nnot-a-url\nhttps://bar.com\n"
+      expect(run).to eq(0)
+      expect(stderr.string).to be_empty
+      expect(stdout.string).to include("[1] https://foo.com")
+      expect(stdout.string).to include("[1] https://bar.com")
+    end
+
+    it "prints --stats instead of URL list when requested" do
       stdin.string = "https://foo.com/users/1\nhttps://foo.com/users/2\nhttps://bar.com/x\n"
       expect(run("--stats")).to eq(0)
       out = stdout.string
@@ -147,12 +164,39 @@ describe Iriq::CLI do
       expect(out).to match(/1\s+bar\.com/)
     end
 
+    it "the cluster keyword still prints clusters" do
+      stdin.string = "https://foo.com/users/1\nhttps://foo.com/users/2\n"
+      expect(run("cluster")).to eq(0)
+      expect(stdout.string).to include("[2] foo.com  /users/{user_id}")
+    end
+
     it "emits JSON stats when --stats and --json combine" do
       stdin.string = "https://foo.com/users/1\n"
       expect(run("--stats", "--json")).to eq(0)
       data = JSON.parse(stdout.string)
       expect(data["observations"]).to eq(1)
       expect(data["hosts"]).to eq("foo.com" => 1)
+    end
+
+    it "emits JSON URL list with --json (default output)" do
+      stdin.string = "see https://foo.com and https://foo.com again"
+      expect(run("--json")).to eq(0)
+      expect(JSON.parse(stdout.string)).to eq([{ "iri" => "https://foo.com", "count" => 2 }])
+    end
+
+    it "auto-switches to clusters when input is large (>= LARGE_BATCH_THRESHOLD IRIs)" do
+      # 10 URLs that cluster into one shape — cluster view is more useful
+      # than a 10-line URL list.
+      stdin.string = (1..10).map { |i| "https://foo.com/users/#{i}" }.join("\n")
+      expect(run).to eq(0)
+      expect(stdout.string).to include("[10] foo.com  /users/{user_id}")
+    end
+
+    it "still shows URL list for small inputs" do
+      stdin.string = "https://foo.com\nhttps://bar.com"
+      expect(run).to eq(0)
+      expect(stdout.string).to include("[1] https://foo.com")
+      expect(stdout.string).not_to include("foo.com  /")  # no cluster line
     end
   end
 
@@ -219,11 +263,12 @@ describe Iriq::CLI do
     end
   end
 
-  describe "--extract" do
-    it "extracts URLs from piped prose, one per line" do
+  describe "--extract (explicit, with positional or stdin)" do
+    it "extracts from piped prose, emits URL list with counts" do
       stdin.string = "Visit https://foo.com and https://bar.com today."
       expect(run("--extract")).to eq(0)
-      expect(stdout.string).to eq("https://foo.com\nhttps://bar.com\n")
+      lines = stdout.string.lines.map(&:chomp)
+      expect(lines).to eq(["[1] https://foo.com", "[1] https://bar.com"])
     end
 
     it "reads from a file argument" do
@@ -231,20 +276,28 @@ describe Iriq::CLI do
         f.write("see https://foo.com.\nalso (https://bar.com).\n")
         f.flush
         expect(run("--extract", f.path)).to eq(0)
-        expect(stdout.string).to eq("https://foo.com\nhttps://bar.com\n")
+        out = stdout.string
+        expect(out).to include("[1] https://foo.com")
+        expect(out).to include("[1] https://bar.com")
       end
     end
 
     it "emits JSON with --json" do
-      stdin.string = "visit https://foo.com today"
+      stdin.string = "visit https://foo.com twice https://foo.com today"
       expect(run("--extract", "--json")).to eq(0)
-      expect(JSON.parse(stdout.string)).to eq(["https://foo.com"])
+      expect(JSON.parse(stdout.string)).to eq([{ "iri" => "https://foo.com", "count" => 2 }])
     end
 
-    it "supports --scheme-less" do
+    it "scheme-less is on by default" do
       stdin.string = "go to foo.com/users today"
-      expect(run("--extract", "--scheme-less")).to eq(0)
-      expect(stdout.string).to eq("https://foo.com/users\n")
+      expect(run("--extract")).to eq(0)
+      expect(stdout.string).to include("[1] https://foo.com/users")
+    end
+
+    it "can be disabled with --no-scheme-less" do
+      stdin.string = "go to foo.com/users today"
+      expect(run("--extract", "--no-scheme-less")).to eq(0)
+      expect(stdout.string).to eq("")
     end
 
     it "feeds extracted IRIs into --corpus when both are set" do
@@ -274,11 +327,11 @@ describe Iriq::CLI do
       expect(out).to include("/posts/{post_id}/edit")
     end
 
-    it "skips lines that fail to parse but keeps going" do
+    it "silently skips non-URL lines via the extractor" do
       stdin.string = "https://foo.com/users/1\nnot-a-url\nhttps://foo.com/users/2\n"
 
       expect(run("cluster")).to eq(0)
-      expect(stderr.string).to include("skipped")
+      expect(stderr.string).to be_empty
       expect(stdout.string).to include("[2] foo.com  /users/{user_id}")
     end
 

@@ -30,9 +30,17 @@ describe "iriq CLI (end-to-end)" do
     expect(out).to include("https://foo.com/users/{user_id}")
   end
 
-  it "processes piped stdin in batch mode" do
-    input = "https://foo.com/users/1\nhttps://foo.com/users/2\n"
+  it "processes piped stdin → URL list with counts" do
+    input = "https://foo.com/users/1\nhttps://foo.com/users/1\nhttps://foo.com/users/2\n"
     out, _err, status = iriq(stdin: input)
+    expect(status.exitstatus).to eq(0)
+    expect(out).to include("[2] https://foo.com/users/1")
+    expect(out).to include("[1] https://foo.com/users/2")
+  end
+
+  it "the cluster keyword still produces cluster output" do
+    input = "https://foo.com/users/1\nhttps://foo.com/users/2\n"
+    out, _err, status = iriq("cluster", stdin: input)
     expect(status.exitstatus).to eq(0)
     expect(out).to include("[2] foo.com  /users/{user_id}")
   end
