@@ -1,2 +1,5 @@
 *.gem
 coverage
+
+# Go build outputs
+/go/bin/
