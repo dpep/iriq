@@ -9,9 +9,9 @@ module Iriq
       @clusters   = {}
     end
 
-    def add(input)
+    def add(input, shape: nil)
       iri = coerce(input)
-      key, host, scheme, shape = cluster_key(iri)
+      key, host, scheme, shape = cluster_key(iri, shape: shape)
       cluster = @clusters[key] ||= Cluster.new(
         key:    key,
         host:   host,
@@ -56,14 +56,14 @@ module Iriq
       input.is_a?(Identifier) ? input : Parser.parse(input)
     end
 
-    def cluster_key(iri)
+    def cluster_key(iri, shape: nil)
       if iri.urn?
         ns, value = (iri.nss || "").split(":", 2)
         shape = value ? urn_value_shape(ns, value) : nil
         key   = "urn:#{ns}:#{shape}"
         [key, nil, "urn", key]
       else
-        shape = PathShape.new(classifier: @classifier).for(iri.path_segments)
+        shape ||= PathShape.new(classifier: @classifier).for(iri.path_segments)
         key   = "#{iri.scheme}://#{iri.host}#{shape}"
         [key, iri.host, iri.scheme, shape]
       end

@@ -56,8 +56,10 @@ module Iriq
     # Observe a single IRI. Returns an Observation.
     def observe(input)
       iri = coerce(input)
-      record_aggregates(iri)
-      cluster = @clusterer.add(iri)
+      hinted_entries = SegmentHints.derive(iri.path_segments, @classifier)
+      record_aggregates(iri, hinted_entries)
+      hinted_shape = PathShape.new(classifier: @classifier, hints: true).from_entries(hinted_entries)
+      cluster = @clusterer.add(iri, shape: hinted_shape)
       Observation.new(corpus: self, identifier: iri, cluster: cluster)
     end
 
@@ -107,22 +109,21 @@ module Iriq
       input.is_a?(Identifier) ? input : Parser.parse(input)
     end
 
-    def record_aggregates(iri)
+    def record_aggregates(iri, hinted_entries)
       @host_counts[iri.host] += 1 if iri.host
       @path_length_counts[iri.path_segments.size] += 1
 
-      raw = PathShape.new(classifier: @classifier, hints: false).for(iri.path_segments)
-      fp  = PathShape.new(classifier: @classifier, hints: true).for(iri.path_segments)
+      raw = PathShape.new(classifier: @classifier, hints: false).from_entries(hinted_entries)
+      fp  = PathShape.new(classifier: @classifier, hints: true).from_entries(hinted_entries)
       @raw_shape_counts[raw] += 1
       @fingerprint_counts[fp] += 1
 
-      record_position_stats(iri)
+      record_position_stats(iri, hinted_entries)
     end
 
-    def record_position_stats(iri)
-      hinted = SegmentHints.derive(iri.path_segments, @classifier)
+    def record_position_stats(iri, hinted_entries)
       prefix = ""
-      hinted.each do |entry|
+      hinted_entries.each do |entry|
         key   = [iri.host, prefix]
         stats = @position_stats[key] ||= PositionStats.new(max_values: @max_values_per_position)
         stats.observe(entry[:value], entry[:type])

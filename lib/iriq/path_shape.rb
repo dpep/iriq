@@ -19,7 +19,15 @@ module Iriq
     def for(segments)
       return "/" if segments.nil? || segments.empty?
 
-      entries = SegmentHints.derive(segments, @classifier)
+      from_entries(SegmentHints.derive(segments, @classifier))
+    end
+
+    # Build a shape string from already-derived SegmentHints entries.
+    # Used by Corpus to avoid re-deriving entries per observation when it
+    # needs multiple shape variants (raw and hinted).
+    def from_entries(entries)
+      return "/" if entries.nil? || entries.empty?
+
       "/" + entries.map { |e| shape_token(e) }.join("/")
     end
 
