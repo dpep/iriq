@@ -295,22 +295,24 @@ func TestFixtureCorpusStream(t *testing.T) {
 			t.Fatalf("Observe(%q): %v", u, err)
 		}
 	}
-	if !reflect.DeepEqual(c.HostCounts, fx.Expected.HostCounts) {
-		t.Errorf("host_counts mismatch:\n  go:   %v\n  want: %v", c.HostCounts, fx.Expected.HostCounts)
+	gotHosts := c.HostCounts()
+	if !reflect.DeepEqual(gotHosts, fx.Expected.HostCounts) {
+		t.Errorf("host_counts mismatch:\n  go:   %v\n  want: %v", gotHosts, fx.Expected.HostCounts)
 	}
+	gotPLC := c.PathLengthCounts()
 	for k, v := range fx.Expected.PathLengthCounts {
 		n, err := strconv.Atoi(k)
 		if err != nil {
 			t.Fatalf("non-integer path_length_counts key %q: %v", k, err)
 		}
-		if c.PathLengthCounts[n] != v {
-			t.Errorf("path_length_counts[%d] = %d, want %d", n, c.PathLengthCounts[n], v)
+		if gotPLC[n] != v {
+			t.Errorf("path_length_counts[%d] = %d, want %d", n, gotPLC[n], v)
 		}
 	}
-	if !reflect.DeepEqual(c.RawShapeCounts, fx.Expected.RawShapeCounts) {
+	if !reflect.DeepEqual(c.RawShapeCounts(), fx.Expected.RawShapeCounts) {
 		t.Errorf("raw_shape_counts mismatch")
 	}
-	if !reflect.DeepEqual(c.FingerprintCounts, fx.Expected.FingerprintCounts) {
+	if !reflect.DeepEqual(c.FingerprintCounts(), fx.Expected.FingerprintCounts) {
 		t.Errorf("fingerprint_counts mismatch")
 	}
 	if c.Size() != fx.Expected.ClusterCount {
@@ -326,8 +328,9 @@ func TestFixtureCorpusDump(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)
 	}
-	if c.HostCounts["foo.com"] != 4 || c.HostCounts["bar.com"] != 1 {
-		t.Errorf("host_counts = %v", c.HostCounts)
+	hc := c.HostCounts()
+	if hc["foo.com"] != 4 || hc["bar.com"] != 1 {
+		t.Errorf("host_counts = %v", hc)
 	}
 	if c.Size() == 0 {
 		t.Errorf("expected clusters")
@@ -342,10 +345,10 @@ func TestFixtureCorpusDump(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(reloaded.HostCounts, c.HostCounts) {
+	if !reflect.DeepEqual(reloaded.HostCounts(), c.HostCounts()) {
 		t.Errorf("round-trip host_counts mismatch")
 	}
-	if !reflect.DeepEqual(reloaded.RawShapeCounts, c.RawShapeCounts) {
+	if !reflect.DeepEqual(reloaded.RawShapeCounts(), c.RawShapeCounts()) {
 		t.Errorf("round-trip raw_shape_counts mismatch")
 	}
 }

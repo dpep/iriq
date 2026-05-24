@@ -7,6 +7,10 @@ module Iriq
   #
   # The deterministic, single-IRI API (Iriq.normalize/explain) is unchanged —
   # Corpus#normalize and Corpus#explain are the corpus-informed variants.
+  #
+  # State lives in a Storage backend (Memory by default; Json or Sqlite when
+  # opened against a file). The classification logic on top is identical
+  # regardless of where the counters live.
   class Corpus
     # Type-based: position is "mostly variable" (UUIDs/integers/etc.).
     VARIABLE_DOMINANCE_THRESHOLD = 0.8
@@ -38,28 +42,53 @@ module Iriq
     POPULAR_MIN_COUNT         = 5
     POPULAR_BASELINE_MULTIPLE = 3
 
-    attr_reader :host_counts, :path_length_counts, :raw_shape_counts,
-                :fingerprint_counts, :position_stats
+    attr_reader :storage
 
     def initialize(classifier: SegmentClassifier::DEFAULT,
-                   max_values_per_position: PositionStats::DEFAULT_MAX_VALUES)
-      @classifier              = classifier
-      @max_values_per_position = max_values_per_position
-      @host_counts             = Hash.new(0)
-      @path_length_counts      = Hash.new(0)
-      @raw_shape_counts        = Hash.new(0)
-      @fingerprint_counts      = Hash.new(0)
-      @position_stats          = {}
-      @clusterer               = Clusterer.new(classifier: classifier)
+                   max_values_per_position: PositionStats::DEFAULT_MAX_VALUES,
+                   storage: nil)
+      @classifier = classifier
+      @storage    = storage || Storage::Memory.new(
+        classifier: classifier,
+        max_values_per_position: max_values_per_position,
+      )
+    end
+
+    # Open a corpus against `path`. File extension picks the backend:
+    # `.db`/`.sqlite`/`.sqlite3` use SQLite (incremental writes); anything
+    # else uses JSON.
+    def self.open(path, classifier: SegmentClassifier::DEFAULT,
+                        max_values_per_position: PositionStats::DEFAULT_MAX_VALUES)
+      storage = Storage.open(path,
+                             classifier: classifier,
+                             max_values_per_position: max_values_per_position)
+      new(classifier: classifier, storage: storage)
     end
 
     # Observe a single IRI. Returns an Observation.
     def observe(input)
       iri = coerce(input)
       hinted_entries = SegmentHints.derive(iri.path_segments, @classifier)
-      record_aggregates(iri, hinted_entries)
+      raw_shape    = PathShape.new(classifier: @classifier, hints: false).from_entries(hinted_entries)
       hinted_shape = PathShape.new(classifier: @classifier, hints: true).from_entries(hinted_entries)
-      cluster = @clusterer.add(iri, shape: hinted_shape)
+
+      cluster = nil
+      @storage.transaction do |s|
+        s.increment_host(iri.host)
+        s.increment_path_length(iri.path_segments.size)
+        s.increment_raw_shape(raw_shape)
+        s.increment_fingerprint(hinted_shape)
+
+        prefix = ""
+        hinted_entries.each do |entry|
+          s.observe_position(iri.host, prefix, entry[:value], entry[:type])
+          prefix = "#{prefix}/#{placeholder(entry)}"
+        end
+
+        key, host, scheme, shape = cluster_key(iri, shape: hinted_shape)
+        cluster = s.add_to_cluster(key, host, scheme, shape, iri)
+      end
+
       Observation.new(corpus: self, identifier: iri, cluster: cluster)
     end
 
@@ -89,18 +118,56 @@ module Iriq
       end
     end
 
+    def host_counts;        @storage.host_counts;        end
+    def path_length_counts; @storage.path_length_counts; end
+    def raw_shape_counts;   @storage.raw_shape_counts;   end
+    def fingerprint_counts; @storage.fingerprint_counts; end
+
+    # Iterates (host, prefix) → PositionStats over all observed positions.
+    # Used by inspection tooling; not part of the hot path.
+    def each_position_stats(&block)
+      @storage.each_position_stats(&block)
+    end
+
     def clusters
-      @clusterer.clusters
+      @storage.clusters
     end
 
     def size
-      @clusterer.size
+      @storage.cluster_size
     end
 
     # Stats for a given (host, prefix_shape) — useful for tests and
     # debugging. Returns nil if nothing has been observed there.
     def stats_for(host, prefix)
-      @position_stats[[host, prefix]]
+      @storage.position_stats(host, prefix)
+    end
+
+    # Persist the corpus.
+    #
+    #   save()           → flush the backend in place (JSON writes its file,
+    #                      SQLite is already on disk).
+    #   save(same_path)  → same as save() — idempotent for the backend's path.
+    #   save(other_path) → export to other_path as JSON, regardless of the
+    #                      live backend.
+    def save(path = nil)
+      backend_path = @storage.respond_to?(:path) ? @storage.path : nil
+      if path.nil? || path == backend_path
+        @storage.save
+      else
+        write_json_dump(path)
+      end
+    end
+
+    def close
+      @storage.close
+    end
+
+    # Wrap many observations in a single backend transaction. For SQLite this
+    # turns thousands of fsyncs into one; for in-memory backends it's a
+    # no-op. Use when ingesting a batch.
+    def batch(&block)
+      @storage.batch(&block)
     end
 
     private
@@ -109,35 +176,32 @@ module Iriq
       input.is_a?(Identifier) ? input : Parser.parse(input)
     end
 
-    def record_aggregates(iri, hinted_entries)
-      @host_counts[iri.host] += 1 if iri.host
-      @path_length_counts[iri.path_segments.size] += 1
-
-      raw = PathShape.new(classifier: @classifier, hints: false).from_entries(hinted_entries)
-      fp  = PathShape.new(classifier: @classifier, hints: true).from_entries(hinted_entries)
-      @raw_shape_counts[raw] += 1
-      @fingerprint_counts[fp] += 1
-
-      record_position_stats(iri, hinted_entries)
-    end
-
-    def record_position_stats(iri, hinted_entries)
-      prefix = ""
-      hinted_entries.each do |entry|
-        key   = [iri.host, prefix]
-        stats = @position_stats[key] ||= PositionStats.new(max_values: @max_values_per_position)
-        stats.observe(entry[:value], entry[:type])
-        prefix = "#{prefix}/#{placeholder(entry)}"
+    # Cluster keys: URL clusters by host + hinted-shape; URNs by ns +
+    # value-shape (mirrors what the standalone Clusterer does).
+    def cluster_key(iri, shape:)
+      if iri.urn?
+        ns, value = (iri.nss || "").split(":", 2)
+        shape = value ? urn_value_shape(ns, value) : nil
+        key   = "urn:#{ns}:#{shape}"
+        [key, nil, "urn", key]
+      else
+        key = "#{iri.scheme}://#{iri.host}#{shape}"
+        [key, iri.host, iri.scheme, shape]
       end
     end
 
-    # Walks the IRI's segments and returns hint-derived entries enriched with
-    # the (host, prefix) PositionStats reference and a :classification symbol.
+    def urn_value_shape(ns, value)
+      entry = SegmentHints.derive([ns, value], @classifier).last
+      return entry[:value] unless entry[:variable]
+
+      "{#{entry[:hint] || entry[:type]}}"
+    end
+
     def annotate_segments(iri)
       hinted = SegmentHints.derive(iri.path_segments, @classifier)
       prefix = ""
       hinted.map do |entry|
-        stats = @position_stats[[iri.host, prefix]]
+        stats = @storage.position_stats(iri.host, prefix)
         out = entry.merge(
           prefix:         prefix,
           classification: classify(entry, stats),
@@ -226,43 +290,54 @@ module Iriq
 
     public
 
-    def dump
-      {
-        "host_counts"             => @host_counts,
-        "path_length_counts"      => @path_length_counts.transform_keys(&:to_s),
-        "raw_shape_counts"        => @raw_shape_counts,
-        "fingerprint_counts"      => @fingerprint_counts,
-        "max_values_per_position" => @max_values_per_position,
-        "position_stats"          => @position_stats.map { |(host, prefix), s| [host, prefix, s.dump] },
-        "clusterer"               => @clusterer.dump,
-      }
-    end
+    # --- Legacy dump/load (JSON shape) ------------------------------------
+    #
+    # The pre-Storage release exposed `Corpus#dump`, `Corpus#save(path)`, and
+    # `Corpus.load(path)` for JSON-backed persistence. Those names still work
+    # but are now thin wrappers around the appropriate Storage backend.
 
-    def save(path)
-      tmp = "#{path}.tmp"
-      File.write(tmp, JSON.generate(dump))
-      File.rename(tmp, path)
+    def dump
+      memory_view.to_dump
     end
 
     def self.from_dump(h, classifier: SegmentClassifier::DEFAULT)
-      c = new(
-        classifier: classifier,
-        max_values_per_position: h.fetch("max_values_per_position", PositionStats::DEFAULT_MAX_VALUES),
-      )
-      c.instance_variable_set(:@host_counts,        Hash.new(0).merge(h["host_counts"]))
-      c.instance_variable_set(:@path_length_counts, Hash.new(0).merge(h["path_length_counts"].transform_keys(&:to_i)))
-      c.instance_variable_set(:@raw_shape_counts,   Hash.new(0).merge(h["raw_shape_counts"]))
-      c.instance_variable_set(:@fingerprint_counts, Hash.new(0).merge(h["fingerprint_counts"]))
-      stats = h["position_stats"].each_with_object({}) do |(host, prefix, sdump), acc|
-        acc[[host, prefix]] = PositionStats.from_dump(sdump)
-      end
-      c.instance_variable_set(:@position_stats, stats)
-      c.instance_variable_set(:@clusterer, Clusterer.from_dump(h["clusterer"], classifier: classifier))
-      c
+      max_values = h.fetch("max_values_per_position", PositionStats::DEFAULT_MAX_VALUES)
+      storage = Storage::Memory.new(classifier: classifier, max_values_per_position: max_values)
+      storage.load_dump!(h)
+      new(classifier: classifier, storage: storage)
     end
 
     def self.load(path, classifier: SegmentClassifier::DEFAULT)
-      from_dump(JSON.parse(File.read(path)), classifier: classifier)
+      open(path, classifier: classifier)
+    end
+
+    private
+
+    def write_json_dump(path)
+      tmp = "#{path}.tmp"
+      File.write(tmp, JSON.generate(memory_view.to_dump))
+      File.rename(tmp, path)
+    end
+
+    # Materialize a Memory snapshot of the current state — used by dump for
+    # backends that don't natively know how to emit the JSON shape.
+    def memory_view
+      return @storage if @storage.respond_to?(:to_dump)
+
+      mem = Storage::Memory.new(
+        classifier: @classifier,
+        max_values_per_position: @storage.max_values_per_position,
+      )
+      mem.instance_variable_set(:@host_counts,        Hash.new(0).merge(@storage.host_counts))
+      mem.instance_variable_set(:@path_length_counts, Hash.new(0).merge(@storage.path_length_counts))
+      mem.instance_variable_set(:@raw_shape_counts,   Hash.new(0).merge(@storage.raw_shape_counts))
+      mem.instance_variable_set(:@fingerprint_counts, Hash.new(0).merge(@storage.fingerprint_counts))
+      ps = {}
+      @storage.each_position_stats { |key, stats| ps[key] = stats }
+      mem.instance_variable_set(:@position_stats, ps)
+      clusters_h = @storage.clusters.each_with_object({}) { |c, h| h[c.key] = c }
+      mem.instance_variable_set(:@clusters, clusters_h)
+      mem
     end
   end
 end

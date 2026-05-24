@@ -6,11 +6,11 @@ import "strings"
 type Classification string
 
 const (
-	ClassStableLiteral           Classification = "stable_literal"
-	ClassVariableIdentifier      Classification = "variable_identifier"
-	ClassRareLiteral             Classification = "rare_literal"
-	ClassAmbiguous               Classification = "ambiguous"
-	ClassCorpusInferredVariable  Classification = "corpus_inferred_variable"
+	ClassStableLiteral          Classification = "stable_literal"
+	ClassVariableIdentifier     Classification = "variable_identifier"
+	ClassRareLiteral            Classification = "rare_literal"
+	ClassAmbiguous              Classification = "ambiguous"
+	ClassCorpusInferredVariable Classification = "corpus_inferred_variable"
 )
 
 const (
@@ -31,50 +31,56 @@ type CorpusEntry struct {
 	Classification Classification
 }
 
-// Corpus is a streaming observer over a (potentially unbounded) corpus of
-// IRIs, maintaining rolling aggregates and per-(host, prefix) frequency
-// stats so classification can improve as more data flows in.
-type Corpus struct {
-	Classifier           *SegmentClassifier
-	MaxValuesPerPosition int
-
-	HostCounts        map[string]int
-	PathLengthCounts  map[int]int
-	RawShapeCounts    map[string]int
-	FingerprintCounts map[string]int
-
-	// position_stats keyed by (host, prefix). Insertion order preserved via positionKeys.
-	positionStats map[positionKey]*PositionStats
-	positionKeys  []positionKey
-
-	clusterer *Clusterer
-}
-
+// positionKey is the (host, prefix) tuple under which observation counts
+// accumulate. Defined here so both the corpus and storage backends share it.
 type positionKey struct {
 	Host   string
 	Prefix string
 }
 
+// Corpus is a streaming observer over a (potentially unbounded) corpus of
+// IRIs, maintaining rolling aggregates and per-(host, prefix) frequency
+// stats so classification can improve as more data flows in.
+//
+// State lives in a Storage backend — MemoryStorage by default, JSONStorage
+// or SqliteStorage when opened against a file via OpenCorpus.
+type Corpus struct {
+	Classifier *SegmentClassifier
+	storage    Storage
+}
+
+// NewCorpus returns a Corpus backed by an in-memory store using default
+// settings.
 func NewCorpus() *Corpus { return NewCorpusWith(DefaultClassifier, DefaultMaxValuesPerPosition) }
 
+// NewCorpusWith returns an in-memory Corpus with explicit classifier and cap.
 func NewCorpusWith(c *SegmentClassifier, maxValues int) *Corpus {
 	if c == nil {
 		c = DefaultClassifier
 	}
-	if maxValues <= 0 {
-		maxValues = DefaultMaxValuesPerPosition
-	}
-	return &Corpus{
-		Classifier:           c,
-		MaxValuesPerPosition: maxValues,
-		HostCounts:           map[string]int{},
-		PathLengthCounts:     map[int]int{},
-		RawShapeCounts:       map[string]int{},
-		FingerprintCounts:    map[string]int{},
-		positionStats:        map[positionKey]*PositionStats{},
-		clusterer:            NewClusterer(c),
-	}
+	return &Corpus{Classifier: c, storage: NewMemoryStorage(maxValues)}
 }
+
+// NewCorpusWithStorage wraps any Storage in a Corpus.
+func NewCorpusWithStorage(c *SegmentClassifier, s Storage) *Corpus {
+	if c == nil {
+		c = DefaultClassifier
+	}
+	return &Corpus{Classifier: c, storage: s}
+}
+
+// OpenCorpus opens a corpus against path; file extension picks the backend
+// (.db/.sqlite/.sqlite3 = SQLite, anything else = JSON).
+func OpenCorpus(path string) (*Corpus, error) {
+	s, err := OpenStorage(path, DefaultMaxValuesPerPosition)
+	if err != nil {
+		return nil, err
+	}
+	return NewCorpusWithStorage(DefaultClassifier, s), nil
+}
+
+// Storage exposes the underlying backend.
+func (cp *Corpus) Storage() Storage { return cp.storage }
 
 // Observe records a single IRI (or string) and returns an Observation.
 func (cp *Corpus) Observe(input interface{}) (*Observation, error) {
@@ -83,9 +89,29 @@ func (cp *Corpus) Observe(input interface{}) (*Observation, error) {
 		return nil, err
 	}
 	hinted := DeriveHints(iri.PathSegments, cp.Classifier)
-	cp.recordAggregates(iri, hinted)
+	rawShape := (&PathShape{Classifier: cp.Classifier, Hints: false}).FromEntries(hinted)
 	hintedShape := (&PathShape{Classifier: cp.Classifier, Hints: true}).FromEntries(hinted)
-	cluster, _ := cp.clusterer.Add(iri, hintedShape)
+
+	var cluster *Cluster
+	err = cp.storage.Transaction(func() error {
+		cp.storage.IncrementHost(iri.Host)
+		cp.storage.IncrementPathLength(len(iri.PathSegments))
+		cp.storage.IncrementRawShape(rawShape)
+		cp.storage.IncrementFingerprint(hintedShape)
+
+		prefix := ""
+		for _, e := range hinted {
+			cp.storage.ObservePosition(iri.Host, prefix, e.Value, e.Type)
+			prefix = prefix + "/" + placeholderFor(e)
+		}
+
+		key, host, scheme, shape := cp.clusterKey(iri, hintedShape)
+		cluster = cp.storage.AddToCluster(key, host, scheme, shape, iri)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 	return &Observation{corpus: cp, Identifier: iri, Cluster: cluster}, nil
 }
 
@@ -138,43 +164,73 @@ func (cp *Corpus) Explain(input interface{}) []CorpusEntry {
 	return out
 }
 
-func (cp *Corpus) Clusters() []*Cluster { return cp.clusterer.Clusters() }
+// HostCounts / PathLengthCounts / RawShapeCounts / FingerprintCounts mirror
+// the Ruby attr_readers. Each call materializes a fresh map from the backend
+// — cheap for Memory, a table scan for SQLite.
+func (cp *Corpus) HostCounts() map[string]int        { return cp.storage.HostCounts() }
+func (cp *Corpus) PathLengthCounts() map[int]int     { return cp.storage.PathLengthCounts() }
+func (cp *Corpus) RawShapeCounts() map[string]int    { return cp.storage.RawShapeCounts() }
+func (cp *Corpus) FingerprintCounts() map[string]int { return cp.storage.FingerprintCounts() }
 
-func (cp *Corpus) Size() int { return cp.clusterer.Size() }
+// MaxValuesPerPosition is the effective per-position cardinality cap.
+func (cp *Corpus) MaxValuesPerPosition() int { return cp.storage.MaxValues() }
+
+func (cp *Corpus) Clusters() []*Cluster { return cp.storage.Clusters() }
+func (cp *Corpus) Size() int            { return cp.storage.ClusterSize() }
 
 // StatsFor returns the PositionStats for (host, prefix) — nil if nothing has
 // been observed there.
 func (cp *Corpus) StatsFor(host, prefix string) *PositionStats {
-	return cp.positionStats[positionKey{host, prefix}]
+	return cp.storage.PositionStatsFor(host, prefix)
 }
 
-func (cp *Corpus) recordAggregates(iri *Identifier, hinted []SegmentHint) {
-	if iri.Host != "" {
-		cp.HostCounts[iri.Host]++
+// Save persists the corpus.
+//
+//	Save("")           → flush the backend in place.
+//	Save(same_path)    → idempotent: backend writes its own file.
+//	Save(other_path)   → export to other_path as JSON, regardless of backend.
+//
+// In particular, calling Save with the SQLite backend's own path is a no-op
+// (data is already on disk); passing a JSON path against a SQLite-backed
+// corpus exports a snapshot.
+func (cp *Corpus) Save(path string) error {
+	backendPath := storagePath(cp.storage)
+	if path == "" || path == backendPath {
+		return cp.storage.Flush()
 	}
-	cp.PathLengthCounts[len(iri.PathSegments)]++
-
-	raw := (&PathShape{Classifier: cp.Classifier, Hints: false}).FromEntries(hinted)
-	fp := (&PathShape{Classifier: cp.Classifier, Hints: true}).FromEntries(hinted)
-	cp.RawShapeCounts[raw]++
-	cp.FingerprintCounts[fp]++
-
-	cp.recordPositionStats(iri, hinted)
+	return cp.storage.SaveTo(path)
 }
 
-func (cp *Corpus) recordPositionStats(iri *Identifier, hinted []SegmentHint) {
-	prefix := ""
-	for _, entry := range hinted {
-		key := positionKey{iri.Host, prefix}
-		stats, ok := cp.positionStats[key]
-		if !ok {
-			stats = NewPositionStats(cp.MaxValuesPerPosition)
-			cp.positionStats[key] = stats
-			cp.positionKeys = append(cp.positionKeys, key)
+// storagePath returns the file path a storage is bound to, or "" if none.
+func storagePath(s Storage) string {
+	type pathed interface{ Path() string }
+	if p, ok := s.(pathed); ok {
+		return p.Path()
+	}
+	return ""
+}
+
+// Close releases backend resources (relevant for SQLite).
+func (cp *Corpus) Close() error { return cp.storage.Close() }
+
+// Batch wraps many observations in a single backend transaction. SQLite
+// batches turn O(observations) fsyncs into one; Memory/JSON are no-ops.
+func (cp *Corpus) Batch(fn func() error) error { return cp.storage.Batch(fn) }
+
+// --- internals --------------------------------------------------------------
+
+func (cp *Corpus) clusterKey(iri *Identifier, shape string) (key, host, scheme, finalShape string) {
+	if iri.IsURN() {
+		ns, value, _ := strings.Cut(iri.NSS, ":")
+		if value != "" {
+			finalShape = urnValueShape(ns, value, cp.Classifier)
 		}
-		stats.Observe(entry.Value, entry.Type)
-		prefix = prefix + "/" + placeholderFor(entry)
+		key = "urn:" + ns + ":" + finalShape
+		return key, "", "urn", key
 	}
+	finalShape = shape
+	key = iri.Scheme + "://" + iri.Host + shape
+	return key, iri.Host, iri.Scheme, shape
 }
 
 type annotated struct {
@@ -188,7 +244,7 @@ func (cp *Corpus) annotateSegments(iri *Identifier) []annotated {
 	out := make([]annotated, len(hinted))
 	prefix := ""
 	for i, entry := range hinted {
-		stats := cp.positionStats[positionKey{iri.Host, prefix}]
+		stats := cp.storage.PositionStatsFor(iri.Host, prefix)
 		cls := cp.classify(entry, stats)
 		out[i] = annotated{hint: entry, prefix: prefix, classification: cls}
 		prefix = prefix + "/" + placeholderFor(entry)
@@ -278,8 +334,6 @@ func (cp *Corpus) placeholderForVariable(a annotated) string {
 		}
 		return "{" + string(a.hint.Type) + "}"
 	}
-	// corpus-inferred variable: classifier said literal, corpus says otherwise.
-	// Derive a hint from the prefix's last literal segment.
 	var lastLiteral string
 	for _, part := range strings.Split(a.prefix, "/") {
 		if part == "" || strings.HasPrefix(part, "{") {
@@ -293,6 +347,17 @@ func (cp *Corpus) placeholderForVariable(a annotated) string {
 	return "{value}"
 }
 
-// positionKeysOrdered exposes the deterministic insertion order — used by the
-// JSON dump path to keep Ruby/Go round-trips identical.
-func (cp *Corpus) positionKeysOrdered() []positionKey { return cp.positionKeys }
+// LoadCorpus loads a JSON corpus (or opens any supported file via the
+// extension-based dispatch). Kept as a top-level for backward compatibility.
+func LoadCorpus(path string) (*Corpus, error) {
+	return OpenCorpus(path)
+}
+
+// LoadCorpusFromBytes parses a JSON-shaped dump from raw bytes.
+func LoadCorpusFromBytes(data []byte) (*Corpus, error) {
+	mem := NewMemoryStorage(DefaultMaxValuesPerPosition)
+	if err := loadMemoryFromJSON(mem, data); err != nil {
+		return nil, err
+	}
+	return NewCorpusWithStorage(DefaultClassifier, mem), nil
+}

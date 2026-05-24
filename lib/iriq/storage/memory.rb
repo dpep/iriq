@@ -1,0 +1,138 @@
+module Iriq
+  module Storage
+    # Memory is the canonical backend — every other backend either wraps it
+    # (Json) or implements the same surface against an external store (Sqlite).
+    #
+    # The contract is small enough to enumerate up top:
+    #
+    #   increment_host(host)
+    #   increment_path_length(length)
+    #   increment_raw_shape(shape)
+    #   increment_fingerprint(shape)
+    #   observe_position(host, prefix, value, type)
+    #   add_to_cluster(key, host, scheme, shape, identifier)
+    #
+    #   host_counts / path_length_counts / raw_shape_counts / fingerprint_counts
+    #   position_stats(host, prefix)
+    #   clusters / cluster_size
+    #
+    #   transaction { ... }    # backends may batch within
+    #   flush                  # commit pending writes (no-op for Memory)
+    #   close                  # release resources
+    class Memory
+      attr_reader :max_values_per_position
+
+      # Path of the underlying file, if any. Memory backends are unpathed;
+      # Json/Sqlite override.
+      def path; nil; end
+
+      def initialize(classifier: SegmentClassifier::DEFAULT,
+                     max_values_per_position: PositionStats::DEFAULT_MAX_VALUES)
+        @classifier              = classifier
+        @max_values_per_position = max_values_per_position
+        @host_counts             = Hash.new(0)
+        @path_length_counts      = Hash.new(0)
+        @raw_shape_counts        = Hash.new(0)
+        @fingerprint_counts      = Hash.new(0)
+        @position_stats          = {}
+        @clusters                = {}
+      end
+
+      def transaction
+        yield self
+      end
+
+      def batch
+        yield
+      end
+
+      def flush;  end
+      def close;  end
+
+      # No-op for in-memory; subclasses override.
+      def save(path = nil); end
+
+      # --- Increments -------------------------------------------------------
+
+      def increment_host(host)
+        @host_counts[host] += 1 if host
+      end
+
+      def increment_path_length(length)
+        @path_length_counts[length] += 1
+      end
+
+      def increment_raw_shape(shape)
+        @raw_shape_counts[shape] += 1
+      end
+
+      def increment_fingerprint(shape)
+        @fingerprint_counts[shape] += 1
+      end
+
+      def observe_position(host, prefix, value, type)
+        stats = @position_stats[[host, prefix]] ||= PositionStats.new(max_values: @max_values_per_position)
+        stats.observe(value, type)
+      end
+
+      def add_to_cluster(key, host, scheme, shape, identifier)
+        cluster = @clusters[key] ||= Cluster.new(key: key, host: host, scheme: scheme, shape: shape)
+        cluster.add(identifier)
+        cluster
+      end
+
+      # --- Reads ------------------------------------------------------------
+
+      def host_counts;        @host_counts;        end
+      def path_length_counts; @path_length_counts; end
+      def raw_shape_counts;   @raw_shape_counts;   end
+      def fingerprint_counts; @fingerprint_counts; end
+
+      def position_stats(host, prefix)
+        @position_stats[[host, prefix]]
+      end
+
+      def each_position_stats(&block)
+        @position_stats.each(&block)
+      end
+
+      def clusters
+        @clusters.values
+      end
+
+      def cluster_size
+        @clusters.size
+      end
+
+      # --- Bulk load (used by JSON backend) --------------------------------
+
+      def load_dump!(h)
+        @host_counts        = Hash.new(0).merge(h["host_counts"])
+        @path_length_counts = Hash.new(0).merge(h["path_length_counts"].transform_keys(&:to_i))
+        @raw_shape_counts   = Hash.new(0).merge(h["raw_shape_counts"])
+        @fingerprint_counts = Hash.new(0).merge(h["fingerprint_counts"])
+        @max_values_per_position = h.fetch("max_values_per_position", PositionStats::DEFAULT_MAX_VALUES)
+        @position_stats = h["position_stats"].each_with_object({}) do |(host, prefix, sdump), acc|
+          acc[[host, prefix]] = PositionStats.from_dump(sdump)
+        end
+        cdump = h.fetch("clusterer", { "clusters" => {} })
+        @clusters = cdump["clusters"].transform_values { |c| Cluster.from_dump(c) }
+        self
+      end
+
+      def to_dump
+        {
+          "host_counts"             => @host_counts,
+          "path_length_counts"      => @path_length_counts.transform_keys(&:to_s),
+          "raw_shape_counts"        => @raw_shape_counts,
+          "fingerprint_counts"      => @fingerprint_counts,
+          "max_values_per_position" => @max_values_per_position,
+          "position_stats"          => @position_stats.map { |(host, prefix), s| [host, prefix, s.dump] },
+          "clusterer"               => {
+            "clusters" => @clusters.transform_values(&:dump),
+          },
+        }
+      end
+    end
+  end
+end
