@@ -53,12 +53,6 @@ jobs:
           go-version: "1.22"
           cache: true
 
-      - name: environment
-        run: |
-          echo "ruby: $(ruby --version)"
-          echo "go:   $(go version)"
-          ruby -e 'require "sqlite3"; puts "sqlite3 gem: " + SQLite3::VERSION'
-
       # Regenerate fixtures from Ruby, then run the Go fixture tests against
       # them. Any drift between implementations fails the job.
       - name: regenerate fixtures
