@@ -81,7 +81,9 @@
       "extracted": [
         "https://foo.com/users"
       ],
-      "strict": []
+      "strict": [
+
+      ]
     },
     {
       "text": "1,https://a.com,2,https://b.com,3",
@@ -105,18 +107,30 @@
     },
     {
       "text": "user@host:port/path",
-      "extracted": [],
-      "strict": []
+      "extracted": [
+
+      ],
+      "strict": [
+
+      ]
     },
     {
       "text": "rsync user@host.com:/var/log/ to backup",
-      "extracted": [],
-      "strict": []
+      "extracted": [
+
+      ],
+      "strict": [
+
+      ]
     },
     {
       "text": "see ./README.md and /usr/local/bin",
-      "extracted": [],
-      "strict": []
+      "extracted": [
+
+      ],
+      "strict": [
+
+      ]
     }
   ]
 }

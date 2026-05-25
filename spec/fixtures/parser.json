@@ -12,7 +12,8 @@
           "users",
           "123"
         ],
-        "query_params": {},
+        "query_params": {
+        },
         "fragment": null,
         "nss": null,
         "canonical": "https://foo.com/users/123"
@@ -29,7 +30,8 @@
         "path_segments": [
           "Bar"
         ],
-        "query_params": {},
+        "query_params": {
+        },
         "fragment": null,
         "nss": null,
         "canonical": "https://foo.com/Bar"
@@ -43,8 +45,11 @@
         "scheme": "https",
         "host": "foo.com",
         "port": null,
-        "path_segments": [],
-        "query_params": {},
+        "path_segments": [
+
+        ],
+        "query_params": {
+        },
         "fragment": null,
         "nss": null,
         "canonical": "https://foo.com"
@@ -58,8 +63,11 @@
         "scheme": "http",
         "host": "foo.com",
         "port": null,
-        "path_segments": [],
-        "query_params": {},
+        "path_segments": [
+
+        ],
+        "query_params": {
+        },
         "fragment": null,
         "nss": null,
         "canonical": "http://foo.com"
@@ -73,8 +81,11 @@
         "scheme": "https",
         "host": "foo.com",
         "port": 8443,
-        "path_segments": [],
-        "query_params": {},
+        "path_segments": [
+
+        ],
+        "query_params": {
+        },
         "fragment": null,
         "nss": null,
         "canonical": "https://foo.com:8443"
@@ -88,8 +99,11 @@
         "scheme": "https",
         "host": "foo.com",
         "port": null,
-        "path_segments": [],
-        "query_params": {},
+        "path_segments": [
+
+        ],
+        "query_params": {
+        },
         "fragment": null,
         "nss": null,
         "canonical": "https://foo.com"
@@ -107,7 +121,8 @@
           "a",
           "c"
         ],
-        "query_params": {},
+        "query_params": {
+        },
         "fragment": null,
         "nss": null,
         "canonical": "https://foo.com/a/c"
@@ -125,7 +140,8 @@
           "a",
           "b"
         ],
-        "query_params": {},
+        "query_params": {
+        },
         "fragment": null,
         "nss": null,
         "canonical": "https://foo.com/a/b"
@@ -163,7 +179,8 @@
         "path_segments": [
           "x"
         ],
-        "query_params": {},
+        "query_params": {
+        },
         "fragment": "top",
         "nss": null,
         "canonical": "https://foo.com/x#top"
@@ -181,7 +198,8 @@
           "users",
           "456"
         ],
-        "query_params": {},
+        "query_params": {
+        },
         "fragment": null,
         "nss": null,
         "canonical": "https://foo.com/users/456"
@@ -195,8 +213,11 @@
         "scheme": "urn",
         "host": null,
         "port": null,
-        "path_segments": [],
-        "query_params": {},
+        "path_segments": [
+
+        ],
+        "query_params": {
+        },
         "fragment": null,
         "nss": "isbn:0451450523",
         "canonical": "urn:isbn:0451450523"
@@ -210,8 +231,11 @@
         "scheme": "urn",
         "host": null,
         "port": null,
-        "path_segments": [],
-        "query_params": {},
+        "path_segments": [
+
+        ],
+        "query_params": {
+        },
         "fragment": null,
         "nss": "uuid:f47ac10b-58cc-4372-a567-0e02b2c3d479",
         "canonical": "urn:uuid:f47ac10b-58cc-4372-a567-0e02b2c3d479"
@@ -228,7 +252,8 @@
         "path_segments": [
           "こんにちは"
         ],
-        "query_params": {},
+        "query_params": {
+        },
         "fragment": null,
         "nss": null,
         "canonical": "https://例え.テスト/こんにちは"
@@ -265,7 +290,8 @@
         "path_segments": [
           "x"
         ],
-        "query_params": {},
+        "query_params": {
+        },
         "fragment": null,
         "nss": null,
         "canonical": "https://127.0.0.1:8080/x"
@@ -282,7 +308,8 @@
         "path_segments": [
           "о-нас"
         ],
-        "query_params": {},
+        "query_params": {
+        },
         "fragment": null,
         "nss": null,
         "canonical": "https://россия.рф/о-нас"
