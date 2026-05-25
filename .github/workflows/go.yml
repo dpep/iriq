@@ -42,23 +42,21 @@ jobs:
     env:
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
+      # ruby/setup-ruby with bundler-cache populates vendor/bundle/, which
+      # leaves a vendor/ directory at the module root. Go's default is to
+      # auto-detect vendor mode from that path — force module mode so it
+      # ignores the bundler artifacts.
+      GOFLAGS: "-mod=mod"
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.22"
-          cache: false
-
-      - name: Go build (before Ruby setup)
-        run: |
-          go version
-          go env GOPATH GOMODCACHE
-          go build -v ./... 2>&1
-
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.3"
           bundler-cache: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: false
 
       # Regenerate fixtures from Ruby, then run the Go fixture tests against
       # them. Any drift between implementations fails the job.
@@ -74,25 +72,7 @@ jobs:
           fi
 
       - name: Go fixture tests
-        run: |
-          set +e
-          go test -count=1 -run Fixture -v ./... > /tmp/gotest.out 2>&1
-          rc=$?
-          # Emit EVERY line as an annotation so something visible reaches
-          # the run page even when log streams aren't accessible.
-          while IFS= read -r line; do
-            echo "::warning::$line"
-          done < /tmp/gotest.out
-          cat /tmp/gotest.out
-          echo "::error::go test exited with $rc"
-          exit $rc
-
-      - name: upload go test output
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gotest-output
-          path: /tmp/gotest.out
+        run: go test -count=1 -run Fixture -v ./...
 
       - name: CLI parity
         run: script/cli_parity.sh
