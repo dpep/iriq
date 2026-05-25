@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/dpep/iriq"
 )
 
 // stringReader satisfies emptyReporter so the CLI's pipedStdin check works
@@ -48,7 +50,7 @@ func TestHelp(t *testing.T) {
 
 func TestVersion(t *testing.T) {
 	r := runCLI(t, "", "--version")
-	if r.code != 0 || strings.TrimSpace(r.stdout) != "0.1.0" {
+	if r.code != 0 || strings.TrimSpace(r.stdout) != iriq.Version {
 		t.Errorf("got code=%d stdout=%q", r.code, r.stdout)
 	}
 }

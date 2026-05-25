@@ -105,7 +105,7 @@ func (cp *Corpus) Observe(input interface{}) (*Observation, error) {
 			prefix = prefix + "/" + placeholderFor(e)
 		}
 
-		key, host, scheme, shape := cp.clusterKey(iri, hintedShape)
+		key, host, scheme, shape := ClusterKeyFor(iri, cp.Classifier, hintedShape)
 		cluster = cp.storage.AddToCluster(key, host, scheme, shape, iri)
 		return nil
 	})
@@ -218,20 +218,6 @@ func (cp *Corpus) Close() error { return cp.storage.Close() }
 func (cp *Corpus) Batch(fn func() error) error { return cp.storage.Batch(fn) }
 
 // --- internals --------------------------------------------------------------
-
-func (cp *Corpus) clusterKey(iri *Identifier, shape string) (key, host, scheme, finalShape string) {
-	if iri.IsURN() {
-		ns, value, _ := strings.Cut(iri.NSS, ":")
-		if value != "" {
-			finalShape = urnValueShape(ns, value, cp.Classifier)
-		}
-		key = "urn:" + ns + ":" + finalShape
-		return key, "", "urn", key
-	}
-	finalShape = shape
-	key = iri.Scheme + "://" + iri.Host + shape
-	return key, iri.Host, iri.Scheme, shape
-}
 
 type annotated struct {
 	hint           SegmentHint

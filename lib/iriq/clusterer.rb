@@ -3,31 +3,28 @@ module Iriq
   # `clusters` to read out the groups. `explain` annotates a single identifier
   # against the cluster it would fall into, including which positions are
   # stable across all observed members.
+  #
+  # Implemented as a thin wrapper over Storage::Memory — the same code path
+  # Corpus uses for the cluster portion of its state, so there's only one
+  # place that knows how clusters get stored.
   class Clusterer
     def initialize(classifier: SegmentClassifier::DEFAULT)
       @classifier = classifier
-      @clusters   = {}
+      @storage    = Storage::Memory.new(classifier: classifier)
     end
 
     def add(input, shape: nil)
       iri = coerce(input)
-      key, host, scheme, shape = cluster_key(iri, shape: shape)
-      cluster = @clusters[key] ||= Cluster.new(
-        key:    key,
-        host:   host,
-        scheme: scheme,
-        shape:  shape,
-      )
-      cluster.add(iri)
-      cluster
+      key, host, scheme, derived = Cluster.key_for(iri, classifier: @classifier, shape: shape)
+      @storage.add_to_cluster(key, host, scheme, derived, iri)
     end
 
     def clusters
-      @clusters.values
+      @storage.clusters
     end
 
     def size
-      @clusters.size
+      @storage.cluster_size
     end
 
     # Returns a per-segment explanation for the input, merging classifier
@@ -36,8 +33,8 @@ module Iriq
     # would otherwise call them variable).
     def explain(input)
       iri = coerce(input)
-      key, * = cluster_key(iri)
-      cluster = @clusters[key]
+      key, * = Cluster.key_for(iri, classifier: @classifier)
+      cluster = clusters.find { |c| c.key == key }
       stats   = cluster ? cluster.segment_stats : []
       hinted  = SegmentHints.derive(iri.path_segments, @classifier)
 
@@ -50,43 +47,21 @@ module Iriq
       end
     end
 
-    private
-
-    def coerce(input)
-      input.is_a?(Identifier) ? input : Parser.parse(input)
-    end
-
-    def cluster_key(iri, shape: nil)
-      if iri.urn?
-        ns, value = (iri.nss || "").split(":", 2)
-        shape = value ? urn_value_shape(ns, value) : nil
-        key   = "urn:#{ns}:#{shape}"
-        [key, nil, "urn", key]
-      else
-        shape ||= PathShape.new(classifier: @classifier).for(iri.path_segments)
-        key   = "#{iri.scheme}://#{iri.host}#{shape}"
-        [key, iri.host, iri.scheme, shape]
-      end
-    end
-
-    def urn_value_shape(ns, value)
-      entry = SegmentHints.derive([ns, value], @classifier).last
-      return entry[:value] unless entry[:variable]
-
-      "{#{entry[:hint] || entry[:type]}}"
-    end
-
-    public
-
     def dump
-      { "clusters" => @clusters.transform_values(&:dump) }
+      { "clusters" => clusters.each_with_object({}) { |c, h| h[c.key] = c.dump } }
     end
 
     def self.from_dump(h, classifier: SegmentClassifier::DEFAULT)
       c = new(classifier: classifier)
       restored = h["clusters"].transform_values { |cdump| Cluster.from_dump(cdump) }
-      c.instance_variable_set(:@clusters, restored)
+      c.instance_variable_get(:@storage).instance_variable_set(:@clusters, restored)
       c
+    end
+
+    private
+
+    def coerce(input)
+      input.is_a?(Identifier) ? input : Parser.parse(input)
     end
   end
 end

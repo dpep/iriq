@@ -85,7 +85,7 @@ module Iriq
           prefix = "#{prefix}/#{placeholder(entry)}"
         end
 
-        key, host, scheme, shape = cluster_key(iri, shape: hinted_shape)
+        key, host, scheme, shape = Cluster.key_for(iri, classifier: @classifier, shape: hinted_shape)
         cluster = s.add_to_cluster(key, host, scheme, shape, iri)
       end
 
@@ -174,27 +174,6 @@ module Iriq
 
     def coerce(input)
       input.is_a?(Identifier) ? input : Parser.parse(input)
-    end
-
-    # Cluster keys: URL clusters by host + hinted-shape; URNs by ns +
-    # value-shape (mirrors what the standalone Clusterer does).
-    def cluster_key(iri, shape:)
-      if iri.urn?
-        ns, value = (iri.nss || "").split(":", 2)
-        shape = value ? urn_value_shape(ns, value) : nil
-        key   = "urn:#{ns}:#{shape}"
-        [key, nil, "urn", key]
-      else
-        key = "#{iri.scheme}://#{iri.host}#{shape}"
-        [key, iri.host, iri.scheme, shape]
-      end
-    end
-
-    def urn_value_shape(ns, value)
-      entry = SegmentHints.derive([ns, value], @classifier).last
-      return entry[:value] unless entry[:variable]
-
-      "{#{entry[:hint] || entry[:type]}}"
     end
 
     def annotate_segments(iri)

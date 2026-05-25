@@ -1,3 +1,12 @@
+###  0.2.0  (2026-05-25)
+- Corpus storage backends: JSON (default) and SQLite, dispatched by file extension
+- Go: `iriq.OpenCorpus(path)`; Ruby: `Iriq::Corpus.open(path)`
+- SQLite backend: incremental UPSERTs, WAL mode, concurrent-safe via busy_timeout + BEGIN IMMEDIATE; checkpoints on close so the WAL sidecar doesn't grow unbounded
+- Batch mode: `corpus.batch { ... }` (Ruby) / `corpus.Batch(fn)` (Go) wraps many observations in one transaction
+- Clusterer now wraps the in-memory Storage backend; only one cluster code path
+- script/bench_storage.sh — JSON vs SQLite timing across single-process, incremental, and concurrent workloads
+- **Breaking (Go)**: `Corpus.HostCounts` / `PathLengthCounts` / `RawShapeCounts` / `FingerprintCounts` are methods now, not fields
+
 ###  0.1.0  (2026-05-24)
 - CLI: auto-detect file argument, retire --extract flag
 - CLI: section flags work in pipe mode + clean up help text
