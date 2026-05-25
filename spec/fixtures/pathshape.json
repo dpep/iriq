@@ -1,9 +1,7 @@
 {
   "cases": [
     {
-      "segments": [
-
-      ],
+      "segments": [],
       "hints": true,
       "shape": "/"
     },

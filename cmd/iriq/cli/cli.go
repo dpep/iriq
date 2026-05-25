@@ -349,7 +349,8 @@ func readText(stdin io.Reader, args []string) (string, error) {
 
 // identifierMap returns a JSON-ready representation of an Identifier with key
 // order matching the Ruby CLI (original, kind, scheme, host, port,
-// path_segments, query_params, fragment, nss, canonical).
+// path_segments, query_params, fragment, nss, canonical). Null/empty fields
+// are dropped via `omitempty` on identifierJSON.
 func identifierMap(iri *iriq.Identifier) *identifierJSON {
 	out := &identifierJSON{
 		Original:     iri.Original,
@@ -357,12 +358,6 @@ func identifierMap(iri *iriq.Identifier) *identifierJSON {
 		PathSegments: iri.PathSegments,
 		QueryParams:  iri.QueryParams.ToMap(),
 		Canonical:    iri.Canonical(),
-	}
-	if out.PathSegments == nil {
-		out.PathSegments = []string{}
-	}
-	if out.QueryParams == nil {
-		out.QueryParams = map[string]string{}
 	}
 	if iri.Scheme != "" {
 		s := iri.Scheme
@@ -387,19 +382,19 @@ func identifierMap(iri *iriq.Identifier) *identifierJSON {
 	return out
 }
 
-// identifierJSON exists purely to pin the JSON field order to Ruby's. The
-// nullable string/int fields are pointers so json.Marshal emits `null` for
-// absent values rather than the zero string.
+// identifierJSON pins the JSON field order to Ruby's and drops null/empty
+// values via omitempty so URN dumps don't carry empty host/path/query slots
+// and URL dumps don't include null fragment/nss.
 type identifierJSON struct {
 	Original     string            `json:"original"`
 	Kind         string            `json:"kind"`
-	Scheme       *string           `json:"scheme"`
-	Host         *string           `json:"host"`
-	Port         *int              `json:"port"`
-	PathSegments []string          `json:"path_segments"`
-	QueryParams  map[string]string `json:"query_params"`
-	Fragment     *string           `json:"fragment"`
-	NSS          *string           `json:"nss"`
+	Scheme       *string           `json:"scheme,omitempty"`
+	Host         *string           `json:"host,omitempty"`
+	Port         *int              `json:"port,omitempty"`
+	PathSegments []string          `json:"path_segments,omitempty"`
+	QueryParams  map[string]string `json:"query_params,omitempty"`
+	Fragment     *string           `json:"fragment,omitempty"`
+	NSS          *string           `json:"nss,omitempty"`
 	Canonical    string            `json:"canonical"`
 }
 
@@ -466,8 +461,7 @@ func emitParseHuman(stdout io.Writer, h map[string]interface{}) {
 	if v := h["port"]; v != nil {
 		fmt.Fprintf(stdout, "port:          %v\n", v)
 	}
-	if h["kind"] == "url" {
-		segs := h["path_segments"].([]string)
+	if segs, ok := h["path_segments"].([]string); ok && len(segs) > 0 {
 		fmt.Fprintf(stdout, "path_segments: %s\n", inspectStrings(segs))
 	}
 	if qp, ok := h["query_params"].(map[string]string); ok && len(qp) > 0 {

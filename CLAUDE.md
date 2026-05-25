@@ -1,5 +1,18 @@
 # Iriq development conventions
 
+> **⚠️ Behavior changes touch BOTH runtimes.** Ruby is the reference; Go mirrors
+> it. Before committing any change to parser/normalizer/extractor/CLI/etc:
+>
+>   1. Update Ruby + specs.
+>   2. `bundle exec ruby script/generate_fixtures.rb` (regenerate JSON parity fixtures).
+>   3. Port the change to Go.
+>   4. `go test ./...` — fixture tests should still pass.
+>   5. `make build && script/cli_parity.sh` — CLI parity should still pass.
+>   6. Commit the regenerated fixtures alongside the code change.
+>
+> CI's `Ruby ↔ Go parity` job will fail if any step is skipped. Local
+> pre-push: `bundle exec rspec && go test ./... && script/cli_parity.sh`.
+
 ## Repo layout — Ruby and Go intermixed at the root
 
 We chose to mix Ruby and Go at the repo root rather than nest the Go module
