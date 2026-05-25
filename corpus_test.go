@@ -36,16 +36,16 @@ func TestCorpusAggregates(t *testing.T) {
 	} {
 		_, _ = c.Observe(in)
 	}
-	if !reflect.DeepEqual(c.HostCounts, map[string]int{"foo.com": 3, "bar.com": 1}) {
-		t.Errorf("host_counts = %#v", c.HostCounts)
+	if !reflect.DeepEqual(c.HostCounts(), map[string]int{"foo.com": 3, "bar.com": 1}) {
+		t.Errorf("host_counts = %#v", c.HostCounts())
 	}
-	if !reflect.DeepEqual(c.PathLengthCounts, map[int]int{2: 3, 1: 1}) {
-		t.Errorf("path_length_counts = %#v", c.PathLengthCounts)
+	if !reflect.DeepEqual(c.PathLengthCounts(), map[int]int{2: 3, 1: 1}) {
+		t.Errorf("path_length_counts = %#v", c.PathLengthCounts())
 	}
-	if got := c.RawShapeCounts["/users/{integer_id}"]; got != 2 {
+	if got := c.RawShapeCounts()["/users/{integer_id}"]; got != 2 {
 		t.Errorf("/users/{integer_id} = %d", got)
 	}
-	if got := c.FingerprintCounts["/users/{user_id}"]; got != 2 {
+	if got := c.FingerprintCounts()["/users/{user_id}"]; got != 2 {
 		t.Errorf("/users/{user_id} = %d", got)
 	}
 }
@@ -184,13 +184,13 @@ func TestCorpusSaveLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(restored.HostCounts, c.HostCounts) {
-		t.Errorf("host_counts mismatch: %#v vs %#v", restored.HostCounts, c.HostCounts)
+	if !reflect.DeepEqual(restored.HostCounts(), c.HostCounts()) {
+		t.Errorf("host_counts mismatch: %#v vs %#v", restored.HostCounts(), c.HostCounts())
 	}
-	if !reflect.DeepEqual(restored.RawShapeCounts, c.RawShapeCounts) {
+	if !reflect.DeepEqual(restored.RawShapeCounts(), c.RawShapeCounts()) {
 		t.Errorf("raw_shape_counts mismatch")
 	}
-	if !reflect.DeepEqual(restored.FingerprintCounts, c.FingerprintCounts) {
+	if !reflect.DeepEqual(restored.FingerprintCounts(), c.FingerprintCounts()) {
 		t.Errorf("fingerprint_counts mismatch")
 	}
 	if restored.Size() != c.Size() {
@@ -198,8 +198,8 @@ func TestCorpusSaveLoad(t *testing.T) {
 	}
 	// Continue observing after load — should accumulate.
 	_, _ = restored.Observe("https://foo.com/users/3")
-	if restored.HostCounts["foo.com"] != 4 {
-		t.Errorf("foo.com count after re-observe = %d", restored.HostCounts["foo.com"])
+	if restored.HostCounts()["foo.com"] != 4 {
+		t.Errorf("foo.com count after re-observe = %d", restored.HostCounts()["foo.com"])
 	}
 	_ = os.Remove(path)
 }

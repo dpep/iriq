@@ -150,9 +150,7 @@ module Iriq
     end
 
     def load_corpus(path)
-      return Corpus.load(path) if File.exist?(path)
-
-      Corpus.new
+      Corpus.open(path)
     end
 
     def print_usage(io, code)
@@ -193,7 +191,7 @@ module Iriq
     def cmd_batch(args, opts, corpus, explicit_cluster: false)
       corpus ||= Corpus.new
       iris = extract_text(read_text(args.first), opts)
-      iris.each { |iri| corpus.observe(iri) }
+      corpus.batch { iris.each { |iri| corpus.observe(iri) } }
 
       if opts[:sections].any?
         emit_per_iri_sections(iris, opts)

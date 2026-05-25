@@ -88,6 +88,29 @@ script/cli_parity.sh     # CLI parity (13+ scenarios)
 - Update `Formula/iriq.rb` in the homebrew-tools tap to the new version.
 - Go consumers pick up the tag automatically via `go get @vX.Y.Z`.
 
+## Corpus storage backends
+
+The `Corpus` class delegates state to a `Storage` backend; three backends ship:
+
+- **Memory** — default, in-process only.
+- **JSON** — Memory wrapped with atomic load/save against a JSON file
+  (`.json` by default). Same shape both runtimes have always written.
+- **SQLite** — incremental UPSERTs against a `.db` / `.sqlite` / `.sqlite3`
+  file with WAL journaling. Supports concurrent observers and avoids
+  loading the whole corpus into memory.
+
+`Corpus.open(path)` (Ruby) / `iriq.OpenCorpus(path)` (Go) picks the backend
+by file extension. `corpus.save(other_path)` exports as JSON regardless of
+the live backend; `corpus.save(same_path)` is idempotent (no clobbering a
+SQLite file with JSON, etc.).
+
+The Ruby `sqlite3` gem is loaded lazily (only when a `.db` path is opened),
+keeping the iriq install footprint minimal for users that stick with JSON.
+On the Go side we use `modernc.org/sqlite` (pure Go — no cgo).
+
+When adding a new backend, replicate the contract in both languages and
+add a parity scenario in `script/cli_parity.sh`'s `corpus_pair` section.
+
 ## What lives where in scripts
 
 - `script/benchmark.rb` — Ruby-only throughput benchmark.
@@ -95,3 +118,4 @@ script/cli_parity.sh     # CLI parity (13+ scenarios)
 - `script/generate_fixtures.rb` — produces `spec/fixtures/*.json` for cross-runtime parity.
 - `script/cli_parity.sh` — Ruby ↔ Go CLI diff.
 - `script/bench_compare.sh` — Ruby vs Go CLI wall-time comparison.
+- `script/bench_storage.sh` — JSON vs SQLite backend timing (single-process, incremental, concurrent).

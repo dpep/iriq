@@ -75,6 +75,36 @@ run_pair "pipe -n --json" \
 run_pair "pipe cluster auto" \
   $'https://foo.com/users/1\nhttps://foo.com/users/2\nhttps://foo.com/users/3\nhttps://foo.com/users/4\nhttps://foo.com/users/5\nhttps://foo.com/users/6\nhttps://foo.com/users/7\nhttps://foo.com/users/8\nhttps://foo.com/users/9\nhttps://foo.com/users/10\n'
 
+# Corpus mode parity — observe the same stream under JSON storage in one run
+# and SQLite storage in another, then dump stats from each and diff.
+corpus_dir="$(mktemp -d)"
+trap "rm -rf '$corpus_dir'" EXIT
+corpus_stream=$'https://foo.com/users/1\nhttps://foo.com/users/2\nhttps://foo.com/users/3\nhttps://bar.com/x\n'
+
+corpus_pair() {
+  local label="$1" ext="$2"
+  local ruby_path="$corpus_dir/ruby$ext"
+  local go_path="$corpus_dir/go$ext"
+  echo -n "$corpus_stream" | (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path") > /dev/null
+  echo -n "$corpus_stream" | "$GO_BIN" --corpus "$go_path" > /dev/null
+  # Force piped stdin (closed) so both CLIs treat the second invocation as
+  # batch mode → stats path rather than waiting on the terminal.
+  local ruby_out go_out
+  ruby_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" --stats --json < /dev/null) )
+  go_out=$( "$GO_BIN" --corpus "$go_path" --stats --json < /dev/null )
+  if [[ "$ruby_out" == "$go_out" ]]; then
+    pass_count=$((pass_count + 1))
+  else
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH: corpus $label"
+    diff <(echo "$ruby_out") <(echo "$go_out") | sed 's/^/    /'
+  fi
+}
+
+corpus_pair "JSON storage"   ".json"
+corpus_pair "SQLite storage" ".db"
+
 echo
 echo "Passed: $pass_count"
 echo "Failed: $fail_count"

@@ -3,7 +3,6 @@ package cli
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/dpep/iriq"
+	"golang.org/x/term"
 )
 
 const (
@@ -137,6 +137,9 @@ func Run(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 			return 1
 		}
 	}
+	if corpus != nil {
+		_ = corpus.Close()
+	}
 	return code
 }
 
@@ -146,21 +149,18 @@ func parseableIRI(input string) bool {
 }
 
 func loadCorpus(path string) (*iriq.Corpus, error) {
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		return iriq.NewCorpus(), nil
-	} else if err != nil {
-		return nil, err
-	}
-	return iriq.LoadCorpus(path)
+	// OpenCorpus handles both create and load — picks the backend by file
+	// extension and creates the file (with schema, for SQLite) if it doesn't
+	// yet exist.
+	return iriq.OpenCorpus(path)
 }
 
 func pipedStdin(stdin io.Reader) bool {
 	if f, ok := stdin.(*os.File); ok {
-		info, err := f.Stat()
-		if err != nil {
-			return true
-		}
-		return (info.Mode() & os.ModeCharDevice) == 0
+		// True isatty check — pipe, regular file, and /dev/null all read as
+		// "not a TTY" and should put the CLI in batch mode (matching Ruby's
+		// !stdin.tty? behavior).
+		return !term.IsTerminal(int(f.Fd()))
 	}
 	// Non-file readers (e.g. tests passing a bytes.Buffer with data) are
 	// treated as piped only when they have data — best we can do without
@@ -303,9 +303,12 @@ func cmdBatch(stdin io.Reader, stdout, stderr io.Writer, args []string, opts *op
 	}
 	extractor := &iriq.Extractor{SchemeLess: opts.schemeLess}
 	iris := extractor.Extract(text)
-	for _, iri := range iris {
-		_, _ = corpus.Observe(iri)
-	}
+	_ = corpus.Batch(func() error {
+		for _, iri := range iris {
+			_, _ = corpus.Observe(iri)
+		}
+		return nil
+	})
 
 	switch {
 	case len(opts.sections) > 0:
@@ -691,23 +694,23 @@ func rawShapeFor(c *iriq.Cluster) string {
 }
 
 func emitStats(stdout io.Writer, corpus *iriq.Corpus, opts *options) {
+	hostCounts := corpus.HostCounts()
 	observations := 0
-	for _, v := range corpus.HostCounts {
+	for _, v := range hostCounts {
 		observations += v
 	}
-	hosts := topNMap(corpus.HostCounts, topNStats)
-	shapes := topNMap(corpus.FingerprintCounts, topNStats)
-	raw := topNMap(corpus.RawShapeCounts, topNStats)
+	hosts := topNMap(hostCounts, topNStats)
+	shapes := topNMap(corpus.FingerprintCounts(), topNStats)
+	raw := topNMap(corpus.RawShapeCounts(), topNStats)
 
 	if opts.json {
-		payload := map[string]interface{}{
-			"observations": observations,
-			"clusters":     corpus.Size(),
-			"hosts":        mapFromPairs(hosts),
-			"shapes":       mapFromPairs(shapes),
-			"raw_shapes":   mapFromPairs(raw),
-		}
-		writeJSON(stdout, payload)
+		writeJSON(stdout, &statsJSON{
+			Observations: observations,
+			Clusters:     corpus.Size(),
+			Hosts:        orderedKVList(hosts),
+			Shapes:       orderedKVList(shapes),
+			RawShapes:    orderedKVList(raw),
+		})
 		return
 	}
 
@@ -732,6 +735,45 @@ func emitStats(stdout io.Writer, corpus *iriq.Corpus, opts *options) {
 type kv struct {
 	key   string
 	value int
+}
+
+// statsJSON pins JSON field order for --stats --json to match the Ruby
+// implementation (Ruby Hash#to_json preserves insertion order; Go's
+// map[string]interface{} sorts keys alphabetically).
+type statsJSON struct {
+	Observations int           `json:"observations"`
+	Clusters     int           `json:"clusters"`
+	Hosts        orderedKVList `json:"hosts"`
+	Shapes       orderedKVList `json:"shapes"`
+	RawShapes    orderedKVList `json:"raw_shapes"`
+}
+
+// orderedKVList is a sequence of (key, value) pairs that marshals as a JSON
+// object preserving insertion order — Go's map[string]int sorts keys
+// alphabetically, which breaks parity with Ruby's count-descending iteration.
+type orderedKVList []kv
+
+func (o orderedKVList) MarshalJSON() ([]byte, error) {
+	var b strings.Builder
+	b.WriteByte('{')
+	for i, p := range o {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		kb, err := json.Marshal(p.key)
+		if err != nil {
+			return nil, err
+		}
+		b.Write(kb)
+		b.WriteByte(':')
+		vb, err := json.Marshal(p.value)
+		if err != nil {
+			return nil, err
+		}
+		b.Write(vb)
+	}
+	b.WriteByte('}')
+	return []byte(b.String()), nil
 }
 
 func topNMap(m map[string]int, n int) []kv {

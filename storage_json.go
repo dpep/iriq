@@ -1,0 +1,232 @@
+package iriq
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"strconv"
+)
+
+// JSONStorage wraps a MemoryStorage with load/save against a JSON file.
+// The on-disk shape matches the Ruby Corpus#dump output byte-for-byte
+// (modulo key ordering, which neither runtime preserves through json
+// marshal/unmarshal).
+type JSONStorage struct {
+	*MemoryStorage
+	path string
+}
+
+// OpenJSONStorage creates or opens a JSON-backed corpus. If the file exists
+// and is non-empty, its contents are loaded.
+func OpenJSONStorage(path string, maxValues int) (*JSONStorage, error) {
+	s := &JSONStorage{MemoryStorage: NewMemoryStorage(maxValues), path: path}
+	info, err := os.Stat(path)
+	if err == nil && info.Size() > 0 {
+		if err := s.loadFromFile(path); err != nil {
+			return nil, err
+		}
+	} else if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	return s, nil
+}
+
+func (s *JSONStorage) Path() string { return s.path }
+
+func (s *JSONStorage) Flush() error { return s.SaveTo(s.path) }
+
+func (s *JSONStorage) SaveTo(path string) error {
+	return dumpMemoryToJSON(s.MemoryStorage, path)
+}
+
+func (s *JSONStorage) loadFromFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	return loadMemoryFromJSON(s.MemoryStorage, data)
+}
+
+// --- On-disk format ---------------------------------------------------------
+
+// corpusDump is the JSON shape. Lower-cased struct is intentional — this is
+// purely an implementation detail of the JSON backend.
+type corpusDump struct {
+	HostCounts           map[string]int     `json:"host_counts"`
+	PathLengthCounts     map[string]int     `json:"path_length_counts"`
+	RawShapeCounts       map[string]int     `json:"raw_shape_counts"`
+	FingerprintCounts    map[string]int     `json:"fingerprint_counts"`
+	MaxValuesPerPosition int                `json:"max_values_per_position"`
+	PositionStats        [][]interface{}    `json:"position_stats"`
+	Clusterer            clustererDumpShape `json:"clusterer"`
+}
+
+type clustererDumpShape struct {
+	Clusters map[string]clusterDumpShape `json:"clusters"`
+}
+
+type clusterDumpShape struct {
+	Key           string           `json:"key"`
+	Host          string           `json:"host"`
+	Scheme        string           `json:"scheme"`
+	Shape         string           `json:"shape"`
+	Count         int              `json:"count"`
+	Examples      []string         `json:"examples"`
+	SegmentCounts []map[string]int `json:"segment_counts"`
+}
+
+type positionStatsDumpShape struct {
+	ValueCounts map[string]int `json:"value_counts"`
+	TypeCounts  map[string]int `json:"type_counts"`
+	Total       int            `json:"total"`
+	MaxValues   int            `json:"max_values"`
+}
+
+func dumpMemoryToJSON(m *MemoryStorage, path string) error {
+	plc := make(map[string]int, len(m.pathLengthCounts))
+	for k, v := range m.pathLengthCounts {
+		plc[strconv.Itoa(k)] = v
+	}
+	ps := make([][]interface{}, 0, len(m.positionKeys))
+	for _, k := range m.positionKeys {
+		stats := m.positionStats[k]
+		ps = append(ps, []interface{}{k.Host, k.Prefix, positionStatsDumpFrom(stats)})
+	}
+	clu := clustererDumpShape{Clusters: map[string]clusterDumpShape{}}
+	for _, key := range m.clusterKeys {
+		c := m.clusters[key]
+		examples := make([]string, len(c.Examples))
+		for i, e := range c.Examples {
+			examples[i] = e.Canonical()
+		}
+		seg := c.SegmentCounts()
+		if seg == nil {
+			seg = []map[string]int{}
+		}
+		clu.Clusters[key] = clusterDumpShape{
+			Key: c.Key, Host: c.Host, Scheme: c.Scheme, Shape: c.Shape,
+			Count: c.Count, Examples: examples, SegmentCounts: seg,
+		}
+	}
+	d := &corpusDump{
+		HostCounts:           m.hostCounts,
+		PathLengthCounts:     plc,
+		RawShapeCounts:       m.rawShapeCounts,
+		FingerprintCounts:    m.fingerprintCounts,
+		MaxValuesPerPosition: m.maxValues,
+		PositionStats:        ps,
+		Clusterer:            clu,
+	}
+	data, err := json.Marshal(d)
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+func positionStatsDumpFrom(p *PositionStats) positionStatsDumpShape {
+	tc := make(map[string]int, len(p.TypeCounts))
+	for k, v := range p.TypeCounts {
+		tc[string(k)] = v
+	}
+	return positionStatsDumpShape{
+		ValueCounts: p.ValueCounts,
+		TypeCounts:  tc,
+		Total:       p.Total,
+		MaxValues:   p.MaxValues,
+	}
+}
+
+func loadMemoryFromJSON(m *MemoryStorage, data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if msg, ok := raw["max_values_per_position"]; ok {
+		_ = json.Unmarshal(msg, &m.maxValues)
+		if m.maxValues <= 0 {
+			m.maxValues = DefaultMaxValuesPerPosition
+		}
+	}
+	if msg, ok := raw["host_counts"]; ok {
+		_ = json.Unmarshal(msg, &m.hostCounts)
+	}
+	if msg, ok := raw["raw_shape_counts"]; ok {
+		_ = json.Unmarshal(msg, &m.rawShapeCounts)
+	}
+	if msg, ok := raw["fingerprint_counts"]; ok {
+		_ = json.Unmarshal(msg, &m.fingerprintCounts)
+	}
+	if msg, ok := raw["path_length_counts"]; ok {
+		var plc map[string]int
+		if err := json.Unmarshal(msg, &plc); err != nil {
+			return err
+		}
+		for k, v := range plc {
+			n, err := strconv.Atoi(k)
+			if err != nil {
+				return fmt.Errorf("path_length_counts key %q: %w", k, err)
+			}
+			m.pathLengthCounts[n] = v
+		}
+	}
+	if msg, ok := raw["position_stats"]; ok {
+		var entries [][]interface{}
+		if err := json.Unmarshal(msg, &entries); err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if len(e) != 3 {
+				continue
+			}
+			host, _ := e[0].(string)
+			prefix, _ := e[1].(string)
+			subRaw, err := json.Marshal(e[2])
+			if err != nil {
+				return err
+			}
+			var sd positionStatsDumpShape
+			if err := json.Unmarshal(subRaw, &sd); err != nil {
+				return err
+			}
+			ps := NewPositionStats(sd.MaxValues)
+			ps.Total = sd.Total
+			ps.ValueCounts = sd.ValueCounts
+			if ps.ValueCounts == nil {
+				ps.ValueCounts = map[string]int{}
+			}
+			ps.TypeCounts = map[SegmentType]int{}
+			for k, v := range sd.TypeCounts {
+				ps.TypeCounts[SegmentType(k)] = v
+			}
+			key := positionKey{host, prefix}
+			m.positionStats[key] = ps
+			m.positionKeys = append(m.positionKeys, key)
+		}
+	}
+	if msg, ok := raw["clusterer"]; ok {
+		var cd clustererDumpShape
+		if err := json.Unmarshal(msg, &cd); err != nil {
+			return err
+		}
+		for key, c := range cd.Clusters {
+			cluster := NewCluster(c.Key, c.Host, c.Scheme, c.Shape)
+			cluster.Count = c.Count
+			for _, s := range c.Examples {
+				iri, err := Parse(s)
+				if err != nil {
+					return err
+				}
+				cluster.Examples = append(cluster.Examples, iri)
+			}
+			cluster.SetSegmentCounts(c.SegmentCounts)
+			m.clusters[key] = cluster
+			m.clusterKeys = append(m.clusterKeys, key)
+		}
+	}
+	return nil
+}
