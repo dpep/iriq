@@ -156,6 +156,9 @@ module Iriq
       end
 
       def close
+        # Checkpoint + truncate the WAL so the .db-wal sidecar doesn't grow
+        # unbounded across long-lived `iriq --corpus c.db` sessions.
+        @db.execute("PRAGMA wal_checkpoint(TRUNCATE)") rescue nil
         @db.close
       end
 

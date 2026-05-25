@@ -77,5 +77,29 @@ module Iriq
       cluster.instance_variable_set(:@segment_counts, h["segment_counts"].map { |sub| Hash.new(0).merge(sub) })
       cluster
     end
+
+    # Shared cluster-key derivation. Returns [key, host, scheme, shape] —
+    # callers that already have a hinted shape can pass it in to skip the
+    # recomputation; URN inputs ignore the override and always derive their
+    # own shape from the NSS value.
+    def self.key_for(iri, classifier:, shape: nil)
+      if iri.urn?
+        ns, value = (iri.nss || "").split(":", 2)
+        derived = value ? urn_value_shape(ns, value, classifier) : nil
+        key     = "urn:#{ns}:#{derived}"
+        [key, nil, "urn", key]
+      else
+        shape ||= PathShape.new(classifier: classifier).for(iri.path_segments)
+        key = "#{iri.scheme}://#{iri.host}#{shape}"
+        [key, iri.host, iri.scheme, shape]
+      end
+    end
+
+    def self.urn_value_shape(ns, value, classifier)
+      entry = SegmentHints.derive([ns, value], classifier).last
+      return entry[:value] unless entry[:variable]
+
+      "{#{entry[:hint] || entry[:type]}}"
+    end
   end
 end

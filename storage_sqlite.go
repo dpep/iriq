@@ -223,7 +223,12 @@ func (s *SqliteStorage) Batch(fn func() error) error { return s.Transaction(fn) 
 
 func (s *SqliteStorage) Flush() error { return nil }
 
-func (s *SqliteStorage) Close() error { return s.db.Close() }
+func (s *SqliteStorage) Close() error {
+	// Checkpoint + truncate the WAL so the .db-wal sidecar doesn't grow
+	// unbounded across long-lived `iriq --corpus c.db` sessions.
+	_, _ = s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	return s.db.Close()
+}
 
 func (s *SqliteStorage) SaveTo(path string) error {
 	// Export by materializing a Memory snapshot and writing JSON.
