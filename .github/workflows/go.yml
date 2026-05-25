@@ -25,7 +25,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
-          cache: true
+          cache: false
 
       - name: build
         run: go build ./...
@@ -51,7 +51,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
-          cache: true
+          cache: false
 
       # Regenerate fixtures from Ruby, then run the Go fixture tests against
       # them. Any drift between implementations fails the job.
