@@ -44,14 +44,21 @@ jobs:
       LC_ALL: C.UTF-8
     steps:
       - uses: actions/checkout@v6
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.3"
-          bundler-cache: true
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
           cache: false
+
+      - name: Go build (before Ruby setup)
+        run: |
+          go version
+          go env GOPATH GOMODCACHE
+          go build -v ./... 2>&1
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
 
       # Regenerate fixtures from Ruby, then run the Go fixture tests against
       # them. Any drift between implementations fails the job.
@@ -65,9 +72,6 @@ jobs:
             git --no-pager diff spec/fixtures
             exit 1
           fi
-
-      - name: Go build (surface compile errors early)
-        run: go build ./...
 
       - name: Go fixture tests
         run: go test -run Fixture -v ./...
