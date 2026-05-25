@@ -75,11 +75,17 @@ jobs:
 
       - name: Go fixture tests
         run: |
-          set -x
+          echo "===== pwd / fixtures ====="
           pwd
-          ls -la spec/fixtures/ | head -5
-          go test -run Fixture -v ./... 2>&1
-          echo "exit=$?"
+          ls -la spec/fixtures/
+          echo "===== go env ====="
+          go env GOPATH GOMODCACHE GOROOT
+          echo "===== running tests ====="
+          # Force unbuffered output and capture both streams.
+          go test -count=1 -run Fixture -v ./... 2>&1 | tee /tmp/gotest.out
+          rc=${PIPESTATUS[0]}
+          echo "===== exit code: $rc ====="
+          exit $rc
 
       - name: CLI parity
         run: script/cli_parity.sh
