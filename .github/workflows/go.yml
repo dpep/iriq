@@ -78,15 +78,20 @@ jobs:
           set +e
           go test -count=1 -run Fixture -v ./... > /tmp/gotest.out 2>&1
           rc=$?
-          {
-            echo "## Go fixture tests output (exit=$rc)"
-            echo
-            echo '```'
-            cat /tmp/gotest.out
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
           cat /tmp/gotest.out
+          # Emit each FAIL/ERROR line as an Actions annotation so it
+          # surfaces on the run page even when the log viewer fails.
+          grep -E '^(--- FAIL|FAIL|panic:|Error:|\s+.*\.go:[0-9]+:)' /tmp/gotest.out | while IFS= read -r line; do
+            echo "::error::$line"
+          done
           exit $rc
+
+      - name: upload go test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gotest-output
+          path: /tmp/gotest.out
 
       - name: CLI parity
         run: script/cli_parity.sh
