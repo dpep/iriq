@@ -17,15 +17,29 @@ Go — same behavior, enforced by parity tests).
 The CLI is available three ways. Pick whichever fits your workflow:
 
 ```sh
-# Homebrew (recommended)
+# Homebrew (recommended) — slim build, JSON corpora only
 brew install dpep/tools/iriq
+
+# Homebrew with the SQLite corpus backend
+brew install dpep/tools/iriq-sqlite
 
 # RubyGems — installs the CLI shim and the library
 gem install iriq
 
-# Go — installs the CLI binary into $GOBIN
+# Go — slim build, JSON corpora only
 go install github.com/dpep/iriq/cmd/iriq@latest
+
+# Go with SQLite corpora — needs source checkout + build flag
+git clone https://github.com/dpep/iriq && cd iriq
+go build -tags sqlite -o $GOBIN/iriq ./cmd/iriq
 ```
+
+The slim build supports `.json` corpus files; SQLite corpora (`.db` /
+`.sqlite` / `.sqlite3`) require the SQLite-enabled build. Check what
+your binary supports with `iriq --help` (look for the `Build:` line).
+The Ruby gem loads the `sqlite3` gem lazily when a `.db` path is
+opened — install it via `gem install sqlite3` if you need SQLite
+corpora.
 
 For library use, depend on whichever runtime you're working in:
 

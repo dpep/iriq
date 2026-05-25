@@ -1,3 +1,9 @@
+###  0.3.0  (2026-05-25)
+- Go: SQLite backend is now opt-in via `-tags sqlite`. Default `go install` and the `iriq` Homebrew formula ship a slim binary (~30% smaller) with JSON corpora only. SQLite users compile with `-tags sqlite` or install `dpep/tools/iriq-sqlite`.
+- Makefile: `release` / `release-sqlite` targets strip debug symbols and use `-trimpath` for reproducible builds.
+- CLI: `iriq --help` reports the active build (slim vs sqlite).
+- Slim build returns a friendly error when a `.db` corpus path is opened, pointing at the iriq-sqlite formula.
+
 ###  0.2.0  (2026-05-25)
 - Corpus storage backends: JSON (default) and SQLite, dispatched by file extension
 - Go: `iriq.OpenCorpus(path)`; Ruby: `Iriq::Corpus.open(path)`

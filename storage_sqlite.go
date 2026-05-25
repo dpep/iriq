@@ -1,3 +1,5 @@
+//go:build sqlite
+
 package iriq
 
 import (
@@ -7,6 +9,10 @@ import (
 
 	_ "modernc.org/sqlite"
 )
+
+// HasSqlite reports whether this build includes the SQLite storage backend.
+// Compiled-in when `-tags sqlite` is set.
+const HasSqlite = true
 
 const sqliteSchemaVersion = 1
 

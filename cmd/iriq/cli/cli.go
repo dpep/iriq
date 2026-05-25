@@ -53,6 +53,16 @@ Examples:
   cat README.md | iriq --corpus c.json
 `
 
+// buildLabel summarizes which corpus backends are compiled in. Surfaces on
+// --help so users can tell which build they have without having to trigger
+// a "this build doesn't support .db files" error.
+func buildLabel() string {
+	if iriq.HasSqlite {
+		return "sqlite (json + .db/.sqlite/.sqlite3 corpus support)"
+	}
+	return "slim (json corpus only — install iriq-sqlite or build with -tags sqlite for .db support)"
+}
+
 type section int
 
 const (
@@ -84,6 +94,7 @@ func Run(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 	}
 	if opts.help {
 		fmt.Fprint(stdout, usage)
+		fmt.Fprintf(stdout, "\nBuild: %s\n", buildLabel())
 		return 0
 	}
 	if opts.version {
