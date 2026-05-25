@@ -75,16 +75,17 @@ jobs:
 
       - name: Go fixture tests
         run: |
-          echo "===== pwd / fixtures ====="
-          pwd
-          ls -la spec/fixtures/
-          echo "===== go env ====="
-          go env GOPATH GOMODCACHE GOROOT
-          echo "===== running tests ====="
-          # Force unbuffered output and capture both streams.
-          go test -count=1 -run Fixture -v ./... 2>&1 | tee /tmp/gotest.out
-          rc=${PIPESTATUS[0]}
-          echo "===== exit code: $rc ====="
+          set +e
+          go test -count=1 -run Fixture -v ./... > /tmp/gotest.out 2>&1
+          rc=$?
+          {
+            echo "## Go fixture tests output (exit=$rc)"
+            echo
+            echo '```'
+            cat /tmp/gotest.out
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/gotest.out
           exit $rc
 
       - name: CLI parity
