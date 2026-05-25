@@ -296,6 +296,9 @@ module Iriq
       end
     end
 
+    # Compact identifier hash for parse output (both JSON and human). Drops
+    # nil values and empty collections so URN dumps don't carry empty
+    # host/path/query slots, and URL dumps don't include null fragment/nss.
     def identifier_hash(iri)
       {
         original:      iri.original,
@@ -308,7 +311,7 @@ module Iriq
         fragment:      iri.fragment,
         nss:           iri.nss,
         canonical:     iri.canonical,
-      }
+      }.reject { |_, v| v.nil? || (v.respond_to?(:empty?) && v.empty?) }
     end
 
     def emit_sections(data, sections)
@@ -323,17 +326,13 @@ module Iriq
       end
     end
 
+    # Render the compact identifier_hash. Keys/values are already filtered;
+    # array/hash values get .inspect, everything else .to_s.
     def emit_parse_human(h)
-      stdout.puts "original:      #{h[:original]}"
-      stdout.puts "kind:          #{h[:kind]}"
-      stdout.puts "scheme:        #{h[:scheme]}" if h[:scheme]
-      stdout.puts "host:          #{h[:host]}"   if h[:host]
-      stdout.puts "port:          #{h[:port]}"   if h[:port]
-      stdout.puts "path_segments: #{h[:path_segments].inspect}" if h[:kind] == :url
-      stdout.puts "query_params:  #{h[:query_params].inspect}" if h[:query_params] && !h[:query_params].empty?
-      stdout.puts "fragment:      #{h[:fragment]}" if h[:fragment]
-      stdout.puts "nss:           #{h[:nss]}"      if h[:nss]
-      stdout.puts "canonical:     #{h[:canonical]}"
+      h.each do |key, value|
+        rendered = value.is_a?(Array) || value.is_a?(Hash) ? value.inspect : value.to_s
+        stdout.puts "#{"#{key}:".ljust(15)}#{rendered}"
+      end
     end
 
     def emit_clusters(clusters, opts)
