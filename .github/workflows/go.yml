@@ -74,7 +74,12 @@ jobs:
           fi
 
       - name: Go fixture tests
-        run: go test -run Fixture -v ./...
+        run: |
+          set -x
+          pwd
+          ls -la spec/fixtures/ | head -5
+          go test -run Fixture -v ./... 2>&1
+          echo "exit=$?"
 
       - name: CLI parity
         run: script/cli_parity.sh
