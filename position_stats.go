@@ -1,7 +1,9 @@
 package iriq
 
 // DefaultMaxValuesPerPosition mirrors PositionStats::DEFAULT_MAX_VALUES.
-const DefaultMaxValuesPerPosition = 1_000
+// Existing tracked values still receive increments after the cap is hit;
+// only NEW distinct values are dropped.
+const DefaultMaxValuesPerPosition = 5_000
 
 // PositionStats holds rolling frequency counts for a single
 // (host, prefix-shape, position). Value cardinality is capped so a
