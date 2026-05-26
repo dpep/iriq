@@ -3,8 +3,10 @@ module Iriq
   # Value cardinality is capped so a high-entropy position (UUIDs, timestamps)
   # doesn't grow memory without bound — `total` keeps growing accurately, but
   # only the first `max_values` distinct values are tracked individually.
+  # Existing tracked values still receive increments after the cap is hit;
+  # only NEW distinct values are dropped.
   class PositionStats
-    DEFAULT_MAX_VALUES = 1_000
+    DEFAULT_MAX_VALUES = 5_000
 
     attr_reader :value_counts, :type_counts, :total, :max_values
 

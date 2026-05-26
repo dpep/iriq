@@ -3,6 +3,7 @@
 - Makefile: `release` / `release-sqlite` targets strip debug symbols and use `-trimpath` for reproducible builds.
 - CLI: `iriq --help` reports the active build (slim vs sqlite).
 - Slim build returns a friendly error when a `.db` corpus path is opened, pointing at the iriq-sqlite formula.
+- `PositionStats::DEFAULT_MAX_VALUES` / `DefaultMaxValuesPerPosition` raised from 1000 → 5000. Existing corpora keep whatever cap they were created with (the cap is persisted in the dump / SQLite meta table); only freshly-constructed corpora pick up the new default.
 
 ###  0.2.0  (2026-05-25)
 - Corpus storage backends: JSON (default) and SQLite, dispatched by file extension

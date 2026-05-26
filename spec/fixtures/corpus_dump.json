@@ -17,7 +17,7 @@
     "/posts/{post_id}": 1,
     "/x": 1
   },
-  "max_values_per_position": 1000,
+  "max_values_per_position": 5000,
   "position_stats": [
     [
       "foo.com",
@@ -31,7 +31,7 @@
           "literal": 4
         },
         "total": 4,
-        "max_values": 1000
+        "max_values": 5000
       }
     ],
     [
@@ -47,7 +47,7 @@
           "integer_id": 3
         },
         "total": 3,
-        "max_values": 1000
+        "max_values": 5000
       }
     ],
     [
@@ -61,7 +61,7 @@
           "slug": 1
         },
         "total": 1,
-        "max_values": 1000
+        "max_values": 5000
       }
     ],
     [
@@ -75,7 +75,7 @@
           "literal": 1
         },
         "total": 1,
-        "max_values": 1000
+        "max_values": 5000
       }
     ]
   ],
