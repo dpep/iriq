@@ -1,3 +1,5 @@
+require "set"
+
 module Iriq
   # Heuristic classifier for individual path segments and query values.
   #
