@@ -36,6 +36,10 @@ const (
 	TypeJWT        SegmentType = "jwt"
 	TypeMIME       SegmentType = "mime"
 	TypeFile       SegmentType = "file"
+	TypeColor      SegmentType = "color"
+	TypeCoordinate SegmentType = "coordinate"
+	TypeCountry    SegmentType = "country"
+	TypeBase64     SegmentType = "base64"
 	TypeYear       SegmentType = "year"
 	// TypeHTTPStatus is a corpus-only umbrella for positions whose values
 	// cluster in the 100..599 HTTP status window. Same range-promotion
@@ -115,6 +119,18 @@ var (
 	// stem can be a slug/opaque-id/literal; the meaningful signal is
 	// the extension. See computeClassification → classifyFile.
 	fileRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_\-.~]*\.([A-Za-z0-9]{1,8})$`)
+	// Hex color — `#fff`, `#ffff`, `#ffffff`, `#ffffff80`. Other color
+	// formats aren't recognized yet.
+	colorHexRE = regexp.MustCompile(`^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$`)
+	// Coordinate pair — `lat,lng`, both signed decimals.
+	coordinateRE = regexp.MustCompile(`^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$`)
+	// 2-letter uppercase token, validated against countryCodes in
+	// classifyCountry so random codes like `OK` don't promote.
+	countryRE = regexp.MustCompile(`^[A-Z]{2}$`)
+	// Standard base64 — ≥ 16 chars of base64 alphabet, with optional
+	// `=` padding. Disambiguating chars (`+`/`/`/`=`) are checked
+	// pre-regex so plain alphanumeric stays as :opaque_id.
+	base64RE = regexp.MustCompile(`^[A-Za-z0-9+/]{16,}={0,2}$`)
 	// JWT — three base64url-encoded parts separated by dots; header starts
 	// with `ey` (`{` JSON prefix base64url-encoded).
 	jwtRE = regexp.MustCompile(`^ey[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+$`)
@@ -129,6 +145,46 @@ const (
 	httpStatusMin = 100
 	httpStatusMax = 599
 )
+
+// countryCodes mirrors Ruby's COUNTRY_CODES — the ISO 3166-1 alpha-2
+// allowlist used by classifyCountry to gate the promotion.
+var countryCodes = map[string]struct{}{
+	"AD": {}, "AE": {}, "AF": {}, "AG": {}, "AL": {}, "AM": {}, "AO": {}, "AR": {}, "AT": {}, "AU": {}, "AZ": {},
+	"BA": {}, "BB": {}, "BD": {}, "BE": {}, "BG": {}, "BH": {}, "BJ": {}, "BM": {}, "BN": {}, "BO": {}, "BR": {}, "BS": {}, "BT": {}, "BW": {}, "BY": {}, "BZ": {},
+	"CA": {}, "CD": {}, "CG": {}, "CH": {}, "CI": {}, "CL": {}, "CM": {}, "CN": {}, "CO": {}, "CR": {}, "CU": {}, "CY": {}, "CZ": {},
+	"DE": {}, "DJ": {}, "DK": {}, "DM": {}, "DO": {}, "DZ": {},
+	"EC": {}, "EE": {}, "EG": {}, "ER": {}, "ES": {}, "ET": {},
+	"FI": {}, "FJ": {}, "FK": {}, "FM": {}, "FO": {}, "FR": {},
+	"GA": {}, "GB": {}, "GE": {}, "GH": {}, "GI": {}, "GL": {}, "GM": {}, "GN": {}, "GR": {}, "GT": {}, "GU": {}, "GW": {}, "GY": {},
+	"HK": {}, "HN": {}, "HR": {}, "HT": {}, "HU": {},
+	"ID": {}, "IE": {}, "IL": {}, "IM": {}, "IN": {}, "IQ": {}, "IR": {}, "IS": {}, "IT": {},
+	"JM": {}, "JO": {}, "JP": {},
+	"KE": {}, "KG": {}, "KH": {}, "KM": {}, "KN": {}, "KP": {}, "KR": {}, "KW": {}, "KY": {}, "KZ": {},
+	"LA": {}, "LB": {}, "LC": {}, "LI": {}, "LK": {}, "LR": {}, "LS": {}, "LT": {}, "LU": {}, "LV": {}, "LY": {},
+	"MA": {}, "MC": {}, "MD": {}, "ME": {}, "MG": {}, "MK": {}, "ML": {}, "MM": {}, "MN": {}, "MO": {}, "MR": {}, "MT": {}, "MU": {}, "MV": {}, "MW": {}, "MX": {}, "MY": {}, "MZ": {},
+	"NA": {}, "NE": {}, "NG": {}, "NI": {}, "NL": {}, "NO": {}, "NP": {}, "NR": {}, "NU": {}, "NZ": {},
+	"OM": {},
+	"PA": {}, "PE": {}, "PF": {}, "PG": {}, "PH": {}, "PK": {}, "PL": {}, "PR": {}, "PT": {}, "PW": {}, "PY": {},
+	"QA": {},
+	"RE": {}, "RO": {}, "RS": {}, "RU": {}, "RW": {},
+	"SA": {}, "SB": {}, "SC": {}, "SD": {}, "SE": {}, "SG": {}, "SI": {}, "SK": {}, "SL": {}, "SM": {}, "SN": {}, "SO": {}, "SR": {}, "SS": {}, "ST": {}, "SV": {}, "SY": {}, "SZ": {},
+	"TD": {}, "TG": {}, "TH": {}, "TJ": {}, "TM": {}, "TN": {}, "TO": {}, "TR": {}, "TT": {}, "TV": {}, "TW": {}, "TZ": {},
+	"UA": {}, "UG": {}, "US": {}, "UY": {}, "UZ": {},
+	"VA": {}, "VC": {}, "VE": {}, "VG": {}, "VI": {}, "VN": {}, "VU": {},
+	"WS": {},
+	"YE": {},
+	"ZA": {}, "ZM": {}, "ZW": {},
+}
+
+// ColorKind mirrors Ruby's color_kind helper — returns "hex" for
+// hex-shaped color values, "" otherwise. Placeholder for future named /
+// rgb / hsl support.
+func ColorKind(value string) string {
+	if colorHexRE.MatchString(value) {
+		return "hex"
+	}
+	return ""
+}
 
 // FileKind is the per-extension category for :file values — surfaced
 // via FileKind(value) for verbose displays.
@@ -232,6 +288,22 @@ var paramNameHints = map[string]SegmentType{
 	"mime":         TypeMIME,
 	"content_type": TypeMIME,
 	"media_type":   TypeMIME,
+	"color":        TypeColor,
+	"colour":       TypeColor,
+	"bg":           TypeColor,
+	"background":   TypeColor,
+	"fg":           TypeColor,
+	"foreground":   TypeColor,
+	"coords":       TypeCoordinate,
+	"coordinates":  TypeCoordinate,
+	"geo":          TypeCoordinate,
+	"location":     TypeCoordinate,
+	"position":     TypeCoordinate,
+	"latlng":       TypeCoordinate,
+	"latlon":       TypeCoordinate,
+	"country":      TypeCountry,
+	"country_code": TypeCountry,
+	"nation":       TypeCountry,
 }
 
 // paramHintOverridable lists the generic types eligible for param-name
@@ -357,12 +429,17 @@ func computeClassification(segment string) SegmentType {
 	hasAt := strings.IndexByte(segment, '@') >= 0
 	hasUnder := strings.IndexByte(segment, '_') >= 0
 	hasSep := hasDash || hasUnder
+	hasComma := strings.IndexByte(segment, ',') >= 0
+	hasEq := strings.IndexByte(segment, '=') >= 0
+	hasPlus := strings.IndexByte(segment, '+') >= 0
 
 	switch {
 	case size == 36 && hasDash && uuidRE.MatchString(segment):
 		return TypeUUID
 	case size > 4 && segment[0] == 'e' && segment[1] == 'y' && strings.Count(segment, ".") == 2 && jwtRE.MatchString(segment):
 		return TypeJWT
+	case first == '#' && colorHexRE.MatchString(segment):
+		return TypeColor
 	// Network / structured types take precedence over the generic opaqueRE
 	// catch-all (which would otherwise grab IPv4) and the literal fallback
 	// (which today swallows email + URL + IPv6).
@@ -380,6 +457,8 @@ func computeClassification(segment string) SegmentType {
 		return TypeIPv6
 	case hasColon && strings.Contains(segment, "::") && ipv6CompressedRE.MatchString(segment):
 		return TypeIPv6
+	case hasComma && coordinateRE.MatchString(segment):
+		return classifyCoordinate(segment)
 	case size >= 32 && hashRE.MatchString(segment):
 		return TypeHash
 	case first == 'v' && versionRE.MatchString(segment):
@@ -404,6 +483,10 @@ func computeClassification(segment string) SegmentType {
 		return TypeFloat
 	case size == 3 && currencyRE.MatchString(segment):
 		return classifyCurrency(segment)
+	case size == 2 && countryRE.MatchString(segment):
+		return classifyCountry(segment)
+	case size >= 16 && (hasEq || hasPlus || hasSlash) && base64RE.MatchString(segment):
+		return TypeBase64
 	case hasDot && fileRE.MatchString(segment):
 		return classifyFile(segment)
 	case hasSep && slugRE.MatchString(segment):
@@ -412,6 +495,35 @@ func computeClassification(segment string) SegmentType {
 		return TypeLiteral
 	case opaqueRE.MatchString(segment):
 		return TypeOpaqueID
+	}
+	return TypeLiteral
+}
+
+// classifyCoordinate validates a `lat,lng` pair — both components must
+// land in plausible lat/lng bounds. Accepts either ordering since we
+// can't tell which is which from one value.
+func classifyCoordinate(segment string) SegmentType {
+	m := coordinateRE.FindStringSubmatch(segment)
+	if m == nil {
+		return TypeOpaqueID
+	}
+	a, errA := strconv.ParseFloat(m[1], 64)
+	b, errB := strconv.ParseFloat(m[2], 64)
+	if errA != nil || errB != nil {
+		return TypeOpaqueID
+	}
+	if (a >= -90 && a <= 90 && b >= -180 && b <= 180) ||
+		(a >= -180 && a <= 180 && b >= -90 && b <= 90) {
+		return TypeCoordinate
+	}
+	return TypeOpaqueID
+}
+
+// classifyCountry promotes a 2-letter uppercase token to TypeCountry
+// only when it's in the ISO 3166-1 alpha-2 allowlist.
+func classifyCountry(segment string) SegmentType {
+	if _, ok := countryCodes[segment]; ok {
+		return TypeCountry
 	}
 	return TypeLiteral
 }

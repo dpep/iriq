@@ -64,6 +64,10 @@ CLASSIFIER_INPUTS = [
   "foo.com/bar", "sub.foo.com/",
   "image.png", "report.pdf", "data.csv", "user-photo.jpg",
   "archive.tar.gz", "no-known-ext.qwerty",
+  "#fff", "#ffffff", "#ffffff80", "#abc1", "#zz",
+  "37.7749,-122.4194", "0,0", "200,200",
+  "US", "CA", "GB", "XX", "OK",
+  "TWFuIGlzIGRpc3Rpbmd1aXNoZWQ=", "AAAAAAAAAAAAAA+/==",
   "こんにちは", "",
 ].freeze
 
@@ -99,6 +103,9 @@ NORMALIZE_INPUTS = [
   ["https://foo.com/contact/555-666-7777",                   true],
   ["https://foo.com/x?phone=unknown&email=tbd",              true],
   ["https://foo.com/x?phone=12345",                          true],
+  ["https://foo.com/ui?bg=%23ff00ff",                        true],
+  ["https://foo.com/maps?coords=37.7749,-122.4194",          true],
+  ["https://foo.com/orders?country=US&color=%23fff",         true],
 ].freeze
 
 PATH_SHAPE_INPUTS = [

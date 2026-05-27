@@ -265,6 +265,66 @@
       "type": "opaque_id"
     },
     {
+      "input": "#fff",
+      "type": "color"
+    },
+    {
+      "input": "#ffffff",
+      "type": "color"
+    },
+    {
+      "input": "#ffffff80",
+      "type": "color"
+    },
+    {
+      "input": "#abc1",
+      "type": "color"
+    },
+    {
+      "input": "#zz",
+      "type": "literal"
+    },
+    {
+      "input": "37.7749,-122.4194",
+      "type": "coordinate"
+    },
+    {
+      "input": "0,0",
+      "type": "coordinate"
+    },
+    {
+      "input": "200,200",
+      "type": "opaque_id"
+    },
+    {
+      "input": "US",
+      "type": "country"
+    },
+    {
+      "input": "CA",
+      "type": "country"
+    },
+    {
+      "input": "GB",
+      "type": "country"
+    },
+    {
+      "input": "XX",
+      "type": "literal"
+    },
+    {
+      "input": "OK",
+      "type": "literal"
+    },
+    {
+      "input": "TWFuIGlzIGRpc3Rpbmd1aXNoZWQ=",
+      "type": "base64"
+    },
+    {
+      "input": "AAAAAAAAAAAAAA+/==",
+      "type": "base64"
+    },
+    {
       "input": "こんにちは",
       "type": "literal"
     },

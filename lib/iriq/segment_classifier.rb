@@ -17,7 +17,7 @@ module Iriq
     # Cluster::ENUM_* thresholds).
     TYPES = %i[literal integer float number uuid date year timestamp hash slug
                ipv4 ipv6 url email boolean version locale currency phone jwt mime
-               file http_status enum opaque_id].freeze
+               file color coordinate country base64 http_status enum opaque_id].freeze
 
     UUID_RE      = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/.freeze
     INTEGER_RE   = /\A\d+\z/.freeze
@@ -146,6 +146,55 @@ module Iriq
       exts.each { |e| h[e] = kind }
     }.freeze
 
+    # Hex color — `#fff`, `#ffffff`, `#ffffff80` (with alpha). 3/4/6/8
+    # hex chars after the leading `#`. Other color formats (named, rgb(),
+    # hsl()) aren't recognized yet; this is the only one common in URL
+    # path/query positions.
+    COLOR_HEX_RE = /\A#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\z/.freeze
+    # Coordinate pair — `lat,lng`, both signed decimals. The extractor's
+    # comma boundary means this only survives when present at classify
+    # time (e.g. query values fed in already-parsed). Each component
+    # validated for plausible lat/lng range in classify_coordinate.
+    COORDINATE_RE = /\A(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)\z/.freeze
+    # ISO 3166-1 alpha-2 — 2 letters, validated against the inline
+    # allowlist below (so random 2-letter uppercase tokens like `OK` or
+    # `NO` don't unconditionally promote). Lowercase tokens are routed
+    # through :locale by LOCALE_BARE_RE.
+    COUNTRY_RE = /\A[A-Z]{2}\z/.freeze
+    COUNTRY_CODES = %w[
+      AD AE AF AG AL AM AO AR AT AU AZ
+      BA BB BD BE BG BH BJ BM BN BO BR BS BT BW BY BZ
+      CA CD CG CH CI CL CM CN CO CR CU CY CZ
+      DE DJ DK DM DO DZ
+      EC EE EG ER ES ET
+      FI FJ FK FM FO FR
+      GA GB GE GH GI GL GM GN GR GT GU GW GY
+      HK HN HR HT HU
+      ID IE IL IM IN IQ IR IS IT
+      JM JO JP
+      KE KG KH KM KN KP KR KW KY KZ
+      LA LB LC LI LK LR LS LT LU LV LY
+      MA MC MD ME MG MK ML MM MN MO MR MT MU MV MW MX MY MZ
+      NA NE NG NI NL NO NP NR NU NZ
+      OM
+      PA PE PF PG PH PK PL PR PT PW PY
+      QA
+      RE RO RS RU RW
+      SA SB SC SD SE SG SI SK SL SM SN SO SR SS ST SV SY SZ
+      TD TG TH TJ TM TN TO TR TT TV TW TZ
+      UA UG US UY UZ
+      VA VC VE VG VI VN VU
+      WS
+      YE
+      ZA ZM ZW
+    ].to_set.freeze
+    # Standard base64 — at least 16 chars, made up of base64 alphabet,
+    # AND contains one of the disambiguating chars (`+`, `/`, trailing
+    # `=` padding) so we don't shadow plain alphanumeric :opaque_id
+    # blobs. URL-safe base64 (which uses `-`/`_`) overlaps too heavily
+    # with :slug to discriminate from shape alone.
+    BASE64_RE = %r{\A[A-Za-z0-9+/]{16,}={0,2}\z}.freeze
+
     # HTTP status — bare 3-digit integer in the 100..599 window. Same
     # corpus-promotion pattern as :year: a single 3-digit int is ambiguous,
     # but a position whose values cluster inside the HTTP status window is
@@ -201,18 +250,21 @@ module Iriq
       has_slash = segment.include?("/")
       has_at    = segment.include?("@")
       has_sep   = has_dash || segment.include?("_")
+      has_comma = segment.include?(",")
 
       # Network / structured-value types take precedence over the generic
       # OPAQUE_RE catch-all (which would otherwise grab IPv4) and the
       # LITERAL fallback (which today swallows email + URL + IPv6).
       return :uuid                 if size == 36 && has_dash && UUID_RE.match?(segment)
       return :jwt                  if segment.start_with?("ey") && segment.count(".") == 2 && JWT_RE.match?(segment)
+      return classify_color(segment) if first == 0x23 && COLOR_HEX_RE.match?(segment)  # '#'
       return :url                  if has_colon && segment.include?("://") && URL_RE.match?(segment)
       return :email                if has_at && EMAIL_RE.match?(segment)
       return :mime                 if has_slash && MIME_RE.match?(segment)
       return :url                  if has_dot && has_slash && SCHEMELESS_URL_RE.match?(segment)
       return classify_ipv4(segment) if digit0 && has_dot && IPV4_RE.match?(segment)
       return :ipv6                 if has_colon && IPV6_RE.match?(segment)
+      return classify_coordinate(segment) if has_comma && COORDINATE_RE.match?(segment)
       return :hash                 if size >= 32 && HASH_RE.match?(segment)
       return :version              if first == 0x76 && VERSION_RE.match?(segment) # 'v'
       return :boolean              if (size >= 4 && size <= 5) && BOOLEAN_RE.match?(segment)
@@ -227,6 +279,8 @@ module Iriq
       return classify_integer(segment) if digit0 && INTEGER_RE.match?(segment)
       return :float                if has_dot && FLOAT_RE.match?(segment)
       return classify_currency(segment) if size == 3 && CURRENCY_RE.match?(segment)
+      return classify_country(segment)  if size == 2 && COUNTRY_RE.match?(segment)
+      return :base64                    if size >= 16 && (segment.include?("=") || segment.include?("+") || segment.include?("/")) && BASE64_RE.match?(segment)
       return classify_file(segment) if has_dot && FILE_RE.match?(segment)
       return :slug                 if has_sep && SLUG_RE.match?(segment)
       return :literal              if LITERAL_RE.match?(segment)
@@ -252,6 +306,42 @@ module Iriq
       return :phone if digits.between?(7, 15)
 
       :opaque_id
+    end
+
+    # Color — only the hex form is recognized for now. Returns :color
+    # when the value matches COLOR_HEX_RE. Future extensions (named
+    # colors, rgb(), hsl()) can plug in via classify_color without
+    # rearranging compute_classification.
+    def classify_color(segment)
+      return :color if COLOR_HEX_RE.match?(segment)
+
+      :opaque_id
+    end
+
+    # Coordinate pair — both numbers must land in plausible lat/lng
+    # bounds: latitude ±90, longitude ±180. We accept either ordering
+    # (lat,lng OR lng,lat) by checking both. Pairs outside the range
+    # fall back to :opaque_id so generic CSV-shaped values aren't
+    # promoted.
+    def classify_coordinate(segment)
+      m = segment.match(COORDINATE_RE) or return :opaque_id
+      a = m[1].to_f
+      b = m[2].to_f
+      if (a.between?(-90, 90) && b.between?(-180, 180)) ||
+         (a.between?(-180, 180) && b.between?(-90, 90))
+        return :coordinate
+      end
+
+      :opaque_id
+    end
+
+    # Country — promote to :country only when the 2-letter token is in
+    # the ISO 3166-1 alpha-2 allowlist. Otherwise fall through to
+    # :literal (matches LITERAL_RE).
+    def classify_country(segment)
+      return :country if COUNTRY_CODES.include?(segment)
+
+      :literal
     end
 
     # File classification — only promote when the trailing extension is
@@ -344,6 +434,17 @@ module Iriq
       ext && FILE_EXTENSION_KIND[ext]
     end
 
+    # Return the kind (`:hex` for now — placeholder for future named /
+    # rgb / hsl support) of a color-shaped value, or nil if the value
+    # isn't a recognized color. Used by verbose displays alongside the
+    # `:color` type itself.
+    def self.color_kind(value)
+      return nil if value.nil?
+      return :hex if COLOR_HEX_RE.match?(value)
+
+      nil
+    end
+
     # Param-name hints — when a value's classifier output is too generic
     # (`:literal`, `:opaque_id`, `:slug`) to be informative, the param name
     # can supply the type. `?phone=unknown` becomes `:phone` even though
@@ -380,6 +481,22 @@ module Iriq
       "mime"         => :mime,
       "content_type" => :mime,
       "media_type"   => :mime,
+      "color"        => :color,
+      "colour"       => :color,
+      "bg"           => :color,
+      "background"   => :color,
+      "fg"           => :color,
+      "foreground"   => :color,
+      "coords"       => :coordinate,
+      "coordinates"  => :coordinate,
+      "geo"          => :coordinate,
+      "location"     => :coordinate,
+      "position"     => :coordinate,
+      "latlng"       => :coordinate,
+      "latlon"       => :coordinate,
+      "country"      => :country,
+      "country_code" => :country,
+      "nation"       => :country,
     }.freeze
     # Types the param-name hint is allowed to override. Anything more
     # specific (`:integer`, `:uuid`, etc.) already carries useful info —

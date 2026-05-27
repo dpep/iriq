@@ -82,6 +82,11 @@ run_pair "explain currency upcase" "" -e "https://shop.com/pricing/usd?currency=
 run_pair "explain param-name lift" "" -e "https://foo.com/x?phone=unknown&email=tbd"
 run_pair "explain combined parse+explain" "" -pe "https://foo.com/users/123"
 run_pair "explain json" "" -e -j "https://foo.com/api/v1/status"
+run_pair "normalize color path"    "" -n "https://foo.com/themes/%23ff00ff"
+run_pair "normalize color param"   "" -n "https://foo.com/ui?bg=%23ff00ff"
+run_pair "normalize coordinate"    "" -n "https://foo.com/m/37.7749,-122.4194"
+run_pair "normalize country"       "" -n "https://foo.com/orders?country=US"
+run_pair "normalize base64 token"  "" -n "https://foo.com/x?t=TWFuIGlzIGRpc3Rpbmd1aXNoZWQ%3D"
 
 # Pipe modes
 run_pair "pipe URL list" \

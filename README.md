@@ -204,6 +204,10 @@ Iriq::Inflector.reset_adapter!
 - `:jwt` — three base64url segments separated by dots
 - `:mime` — `image/png`, `application/vnd.api+json`
 - `:file` — `name.ext` for known extensions; per-kind grouping (image/document/data/...) via `SegmentClassifier.file_kind`
+- `:color` — hex form (`#fff`, `#ffffff`, `#ffffff80`); kind via `SegmentClassifier.color_kind`
+- `:coordinate` — `lat,lng` pair with plausible-range validation
+- `:country` — ISO 3166-1 alpha-2 codes (`US`, `JP`, `GB`)
+- `:base64` — standard base64 blobs with disambiguating `+`/`/`/`=`
 - `:enum` — corpus-only umbrella for bounded value sets
 - `:opaque_id` — short alphanumeric mix that doesn't fit elsewhere
 

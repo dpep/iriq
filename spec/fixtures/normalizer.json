@@ -94,6 +94,21 @@
       "input": "https://foo.com/x?phone=12345",
       "hints": true,
       "output": "https://foo.com/x?phone={integer}"
+    },
+    {
+      "input": "https://foo.com/ui?bg=%23ff00ff",
+      "hints": true,
+      "output": "https://foo.com/ui?bg={color}"
+    },
+    {
+      "input": "https://foo.com/maps?coords=37.7749,-122.4194",
+      "hints": true,
+      "output": "https://foo.com/maps?coords={coordinate}"
+    },
+    {
+      "input": "https://foo.com/orders?country=US&color=%23fff",
+      "hints": true,
+      "output": "https://foo.com/orders?color={color}&country={country}"
     }
   ]
 }

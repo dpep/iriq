@@ -1,3 +1,12 @@
+###  0.11.0  (2026-05-27)
+- New classifier types: `:color` (hex form `#fff`/`#ffffff`/`#ffffff80`), `:coordinate` (`lat,lng` pair with plausible-range validation), `:country` (ISO 3166-1 alpha-2, allowlisted), `:base64` (≥16 chars with `+`/`/`/`=` to disambiguate from `:opaque_id`).
+- `SegmentClassifier.color_kind(value)` / `ColorKind(value)` returns `:hex` for hex-shaped colors — placeholder for future named / rgb / hsl support, mirrors the file_kind pattern.
+- Param-name hint map extended: `color`/`bg`/`fg`/`background`/`foreground` → `:color`, `coords`/`coordinates`/`geo`/`location`/`position`/`latlng` → `:coordinate`, `country`/`country_code`/`nation` → `:country`.
+- `-J` is now a short alias for `--ndjson` (combinable: `iriq -nJ < file`).
+- New CLI `-e/--explain` flag — annotated normalization trace. For each path segment / query param, shows the value, type, output (placeholder or canonical value), and notes for every non-obvious transformation (hint suppression for semantic types, currency upcase, IP umbrella collapse, canonical date, param-name lift). JSON via `-e -j` returns the same structure.
+- Library API: `Iriq::Trace.for(input)` (Ruby) / `iriq.Trace(input)` (Go) returns the same trace data structure.
+- Classifier perf: each regex test is now gated on a cheap composition check (`String#include?` / `IndexByte` / `size`) so a literal like `"users"` skips ~20 regex matches instead of walking the full chain. Measured: Ruby normalize +12%, extract +27%; Go CLI wall time -25%.
+
 ###  0.10.0  (2026-05-27)
 - New classifier type `:file` — `name.ext` shape where `ext` is in a curated allowlist spanning image / document / data / text / web / audio / video / archive / code kinds. `image.png` and `report.pdf` classify as `:file` instead of falling through to `:opaque_id`. The per-extension kind (`:image`, `:document`, etc.) is surfaced via `SegmentClassifier.file_kind(value)` / `FileKindOf(value)` for verbose displays.
 - `Cluster#param_summary` adds `:kind_distribution` for `:file`-typed params — buckets observed values by kind. Best-effort: only reflects values within the tracking cap.
