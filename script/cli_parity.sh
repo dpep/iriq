@@ -77,6 +77,11 @@ run_pair "normalize file segment"   "" -n "https://foo.com/uploads/image.png"
 run_pair "normalize NANP phone"     "" -n "https://foo.com/contact/555-666-7777"
 run_pair "normalize param hints"    "" -n "https://foo.com/x?phone=unknown&email=tbd&redirect=somepath"
 run_pair "normalize hint vs specific" "" -n "https://foo.com/x?phone=12345"
+run_pair "explain version + ip" "" -e "https://foo.com/api/v1/probe/192.168.1.1"
+run_pair "explain currency upcase" "" -e "https://shop.com/pricing/usd?currency=eur"
+run_pair "explain param-name lift" "" -e "https://foo.com/x?phone=unknown&email=tbd"
+run_pair "explain combined parse+explain" "" -pe "https://foo.com/users/123"
+run_pair "explain json" "" -e -j "https://foo.com/api/v1/status"
 
 # Pipe modes
 run_pair "pipe URL list" \

@@ -30,6 +30,8 @@ text via stdin.
 Sections (combine freely):
   -n, --normalize       Shape-normalized form
   -p, --parse           Parsed fields
+  -e, --explain         Annotated trace — per-segment notes about why
+                        each placeholder / canonical value was chosen
 
 Corpus + stats:
       --corpus PATH     Load/create a JSON corpus; observe and save atomically.
@@ -73,6 +75,7 @@ type section int
 const (
 	sectionParse section = iota
 	sectionNormalize
+	sectionExplain
 )
 
 type options struct {
@@ -247,6 +250,8 @@ func parseOptions(argv []string) ([]string, *options, error) {
 			opts.sections = append(opts.sections, sectionParse)
 		case a == "-n" || a == "--normalize":
 			opts.sections = append(opts.sections, sectionNormalize)
+		case a == "-e" || a == "--explain":
+			opts.sections = append(opts.sections, sectionExplain)
 		case a == "--corpus":
 			if i+1 >= len(argv) {
 				return nil, nil, fmt.Errorf("missing argument: --corpus PATH")
@@ -281,6 +286,8 @@ func parseOptions(argv []string) ([]string, *options, error) {
 					opts.sections = append(opts.sections, sectionParse)
 				case 'n':
 					opts.sections = append(opts.sections, sectionNormalize)
+				case 'e':
+					opts.sections = append(opts.sections, sectionExplain)
 				case 'j':
 					opts.json = true
 				case 'J':
@@ -333,6 +340,8 @@ func cmdSummary(stdout, stderr io.Writer, args []string, opts *options, corpus *
 			} else {
 				data["normalize"] = iriq.NormalizeIdentifier(iri, nil, opts.hints)
 			}
+		case sectionExplain:
+			data["explain"] = iriq.TraceIdentifier(iri, nil, opts.hints)
 		}
 	}
 
@@ -496,15 +505,68 @@ func emitSections(stdout io.Writer, data map[string]interface{}, sections []sect
 			emitParseHuman(stdout, data["parse"].(*identifierJSON).ParseHuman())
 		case sectionNormalize:
 			fmt.Fprintln(stdout, data["normalize"])
+		case sectionExplain:
+			emitExplainHuman(stdout, data["explain"].(*iriq.TraceResult))
 		}
 	}
 }
 
 func sectionName(s section) string {
-	if s == sectionParse {
+	switch s {
+	case sectionParse:
 		return "parse"
+	case sectionExplain:
+		return "explain"
 	}
 	return "normalize"
+}
+
+func emitExplainHuman(stdout io.Writer, tr *iriq.TraceResult) {
+	fmt.Fprintln(stdout, tr.Normalized)
+	emitTraceSection(stdout, "path", tr.Path)
+	if len(tr.Query) > 0 {
+		emitTraceSection(stdout, "query", tr.Query)
+	}
+}
+
+func emitTraceSection(stdout io.Writer, label string, rows []iriq.TraceRow) {
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Fprintln(stdout)
+	fmt.Fprintf(stdout, "%s:\n", label)
+	nameWidth, typeWidth, outWidth := 0, 0, 0
+	for _, r := range rows {
+		l := traceRowLabel(r)
+		if len(l) > nameWidth {
+			nameWidth = len(l)
+		}
+		if len(r.Type) > typeWidth {
+			typeWidth = len(string(r.Type))
+		}
+		if len(r.Output) > outWidth {
+			outWidth = len(r.Output)
+		}
+	}
+	for _, r := range rows {
+		notes := ""
+		if len(r.Notes) > 0 {
+			notes = "  (" + strings.Join(r.Notes, "; ") + ")"
+		}
+		fmt.Fprintf(stdout, "  %-*s  %-*s  %-*s%s\n",
+			nameWidth, traceRowLabel(r),
+			typeWidth, r.Type,
+			outWidth, r.Output,
+			notes,
+		)
+	}
+}
+
+func traceRowLabel(r iriq.TraceRow) string {
+	if r.Name != "" {
+		return r.Name + "=" + r.Value
+	}
+	return r.Value
 }
 
 func emitParseHuman(stdout io.Writer, h map[string]interface{}) {

@@ -28,6 +28,8 @@ module Iriq
       Sections (combine freely):
         -n, --normalize       Shape-normalized form
         -p, --parse           Parsed fields
+        -e, --explain         Annotated trace — per-segment notes about why
+                              each placeholder / canonical value was chosen
 
       Corpus + stats:
             --corpus PATH     Load/create a JSON corpus; observe and save atomically.
@@ -130,6 +132,7 @@ module Iriq
       parser = OptionParser.new do |o|
         o.on("-p", "--parse")        { opts[:sections] << :parse }
         o.on("-n", "--normalize")    { opts[:sections] << :normalize }
+        o.on("-e", "--explain")      { opts[:sections] << :explain }
         o.on("-j", "--json")         { opts[:json]    = true }
         o.on("-J", "--ndjson")       { opts[:json]    = true; opts[:ndjson] = true }
         o.on("--[no-]hints")         { |v| opts[:hints] = v }
@@ -193,6 +196,9 @@ module Iriq
       data[:parse]     = identifier_hash(iri) if sections.include?(:parse)
       if sections.include?(:normalize)
         data[:normalize] = corpus ? corpus.normalize(iri) : Normalizer.normalize_identifier(iri, hints: opts[:hints])
+      end
+      if sections.include?(:explain)
+        data[:explain] = Trace.for(iri, hints: opts[:hints])
       end
 
       if opts[:json]
@@ -355,8 +361,40 @@ module Iriq
         case sec
         when :parse     then emit_parse_human(data[:parse])
         when :normalize then stdout.puts data[:normalize]
+        when :explain   then emit_explain_human(data[:explain])
         end
       end
+    end
+
+    # Render the trace hash as a vertically-aligned per-segment table.
+    # path rows first, then query rows.
+    def emit_explain_human(trace)
+      stdout.puts trace[:normalized]
+      emit_trace_section("path",  trace[:path])
+      emit_trace_section("query", trace[:query]) if trace[:query]
+    end
+
+    def emit_trace_section(label, rows)
+      return if rows.nil? || rows.empty?
+
+      stdout.puts
+      stdout.puts "#{label}:"
+      name_width  = rows.map { |r| trace_label(r).length }.max
+      type_width  = rows.map { |r| r[:type].to_s.length }.max
+      out_width   = rows.map { |r| r[:output].to_s.length }.max
+      rows.each do |r|
+        stdout.puts "  #{trace_label(r).ljust(name_width)}  #{r[:type].to_s.ljust(type_width)}  #{r[:output].to_s.ljust(out_width)}#{format_notes(r[:notes])}"
+      end
+    end
+
+    def trace_label(row)
+      # Path rows have :value, query rows have :name=:value.
+      row[:name] ? "#{row[:name]}=#{row[:value]}" : row[:value].to_s
+    end
+
+    def format_notes(notes)
+      return "" if notes.nil? || notes.empty?
+      "  (" + notes.join("; ") + ")"
     end
 
     # Render the compact identifier_hash. Keys/values are already filtered;
