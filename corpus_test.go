@@ -192,6 +192,87 @@ func TestCanonicalDate(t *testing.T) {
 	}
 }
 
+func TestCorpusFloatAndNumeric(t *testing.T) {
+	// Pure floats stay :float.
+	c := NewCorpus()
+	for i := 0; i < 20; i++ {
+		_, _ = c.Observe("https://foo.com/api?amt=" + itoa(i+1) + ".99")
+	}
+	got, _ := c.Normalize("https://foo.com/api?amt=99.99")
+	if got != "https://foo.com/api?amt={float}" {
+		t.Errorf("pure float: got %q", got)
+	}
+
+	// Mixed ints + floats promote to :numeric.
+	c2 := NewCorpus()
+	for i := 0; i < 60; i++ {
+		_, _ = c2.Observe("https://foo.com/api?amt=" + itoa(i+1) + ".5")
+	}
+	for i := 0; i < 40; i++ {
+		_, _ = c2.Observe("https://foo.com/api?amt=" + itoa(i+100))
+	}
+	got2, _ := c2.Normalize("https://foo.com/api?amt=12.34")
+	if got2 != "https://foo.com/api?amt={numeric}" {
+		t.Errorf("mixed: got %q", got2)
+	}
+	ps := c2.ParamsFor("https://foo.com/api")
+	if len(ps) != 1 || ps[0].Type != TypeNumeric {
+		t.Errorf("ParamsFor: got %+v", ps)
+	}
+}
+
+func TestCorpusHostStrategy(t *testing.T) {
+	// Registrable collapses subdomains.
+	c := NewCorpus()
+	c.HostStrategy = HostStrategyRegistrable
+	_, _ = c.Observe("https://api.foo.com/users/1")
+	_, _ = c.Observe("https://app.foo.com/users/2")
+	if got := c.HostCounts(); got["foo.com"] != 2 {
+		t.Errorf("registrable host_counts: %v", got)
+	}
+	if c.Size() != 1 {
+		t.Errorf("registrable clusters: %d, want 1", c.Size())
+	}
+
+	// Multi-label TLD.
+	c2 := NewCorpus()
+	c2.HostStrategy = HostStrategyRegistrable
+	_, _ = c2.Observe("https://blog.example.co.uk/posts/1")
+	_, _ = c2.Observe("https://news.example.co.uk/posts/2")
+	if got := c2.HostCounts(); got["example.co.uk"] != 2 {
+		t.Errorf("co.uk host_counts: %v", got)
+	}
+
+	// None pools across hosts.
+	c3 := NewCorpus()
+	c3.HostStrategy = HostStrategyNone
+	_, _ = c3.Observe("https://foo.com/users/1")
+	_, _ = c3.Observe("https://bar.io/users/2")
+	if c3.Size() != 1 {
+		t.Errorf("none clusters: %d, want 1", c3.Size())
+	}
+}
+
+func TestRegistrableDomain(t *testing.T) {
+	cases := map[string]string{
+		"foo.com":            "foo.com",
+		"api.foo.com":        "foo.com",
+		"deep.api.foo.com":   "foo.com",
+		"example.co.uk":      "example.co.uk",
+		"news.example.co.uk": "example.co.uk",
+		"foo.gov.au":         "foo.gov.au",
+		"app.foo.gov.au":     "foo.gov.au",
+		"localhost":          "localhost",
+		"192.168.1.1":        "192.168.1.1",
+		"":                   "",
+	}
+	for in, want := range cases {
+		if got := RegistrableDomain(in); got != want {
+			t.Errorf("RegistrableDomain(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestCorpusClusterExamplesCap(t *testing.T) {
 	c := NewCorpus()
 	for i := 0; i < 30; i++ {

@@ -73,6 +73,12 @@ func (c *Clusterer) Explain(input interface{}) ([]ExplainEntry, error) {
 // namespace + value shape. Pass a non-empty shape override to skip the
 // recomputation (URN inputs always derive their own).
 func ClusterKeyFor(iri *Identifier, c *SegmentClassifier, shape string) (key, host, scheme, finalShape string) {
+	return ClusterKeyForHost(iri, c, shape, iri.Host)
+}
+
+// ClusterKeyForHost lets callers (Corpus, when HostStrategy collapses
+// subdomains or ignores the host) override iri.Host in the key.
+func ClusterKeyForHost(iri *Identifier, c *SegmentClassifier, shape, hostOverride string) (key, host, scheme, finalShape string) {
 	if iri.IsURN() {
 		ns, value, _ := strings.Cut(iri.NSS, ":")
 		if value != "" {
@@ -85,9 +91,9 @@ func ClusterKeyFor(iri *Identifier, c *SegmentClassifier, shape string) (key, ho
 		shape = (&PathShape{Classifier: c, Hints: true}).For(iri.PathSegments)
 	}
 	finalShape = shape
-	host = iri.Host
+	host = hostOverride
 	scheme = iri.Scheme
-	key = iri.Scheme + "://" + iri.Host + shape
+	key = iri.Scheme + "://" + host + shape
 	return
 }
 

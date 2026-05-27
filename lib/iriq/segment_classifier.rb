@@ -4,10 +4,19 @@ module Iriq
   # Returns a symbol from the known TYPES set. Order matters: the first
   # matching rule wins.
   class SegmentClassifier
-    TYPES = %i[literal integer_id uuid date timestamp hash slug opaque_id].freeze
+    # `:numeric` is a corpus-only umbrella surfaced by Cluster#param_type
+    # when both `:integer_id` and `:float` are observed at the same position
+    # without either hitting a clear majority. The classifier never returns
+    # `:numeric` for an individual value — every value is unambiguously one
+    # or the other.
+    TYPES = %i[literal integer_id float numeric uuid date timestamp hash slug opaque_id].freeze
 
     UUID_RE      = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/.freeze
     INTEGER_RE   = /\A\d+\z/.freeze
+    # A float requires a decimal point and digits on both sides. Sign is
+    # optional. Bare integers and 4+ char hex/UUID-shaped tokens fall through
+    # to their own rules.
+    FLOAT_RE     = /\A-?\d+\.\d+\z/.freeze
     # Date formats we'll canonicalize. Deliberately conservative — we only
     # accept forms where the year position is unambiguous (so DD/MM/YYYY is
     # NOT recognized; we can't tell it apart from MM/DD/YYYY from the segment
@@ -61,6 +70,7 @@ module Iriq
       when DATE_RE, DATE_SLASH_RE, DATE_US_RE then :date
       when ISO_TIME_RE then :timestamp
       when INTEGER_RE  then classify_integer(segment)
+      when FLOAT_RE    then :float
       when HASH_RE     then :hash
       when SLUG_RE     then :slug
       when LITERAL_RE  then :literal
