@@ -188,36 +188,51 @@ module Iriq
     private
 
     def compute_classification(segment)
+      # Cheap composition checks short-circuit regex matches that can't
+      # possibly fire. Each `_RE` test below is preceded by a `String#include?`
+      # / `start_with?` / `size` guard so a literal like "users" walks
+      # past 20-odd `_RE`s in O(len) instead of O(len * n_regexes).
+      size      = segment.size
+      first     = segment.getbyte(0)
+      digit0    = first && first >= 0x30 && first <= 0x39
+      has_dash  = segment.include?("-")
+      has_dot   = segment.include?(".")
+      has_colon = segment.include?(":")
+      has_slash = segment.include?("/")
+      has_at    = segment.include?("@")
+      has_sep   = has_dash || segment.include?("_")
+
       # Network / structured-value types take precedence over the generic
       # OPAQUE_RE catch-all (which would otherwise grab IPv4) and the
       # LITERAL fallback (which today swallows email + URL + IPv6).
-      case segment
-      when UUID_RE     then :uuid
-      when JWT_RE      then :jwt
-      when URL_RE      then :url
-      when EMAIL_RE    then :email
-      when MIME_RE     then :mime
-      when SCHEMELESS_URL_RE then :url
-      when IPV4_RE     then classify_ipv4(segment)
-      when IPV6_RE     then :ipv6
-      when HASH_RE     then :hash
-      when VERSION_RE  then :version
-      when BOOLEAN_RE  then :boolean
-      when LOCALE_RE   then classify_locale_pair(segment)
-      when LOCALE_BARE_RE then classify_locale(segment)
-      when DATE_RE, DATE_SLASH_RE, DATE_US_RE then :date
-      when ISO_TIME_RE then :timestamp
-      when PHONE_RE        then classify_phone(segment)
-      when PHONE_NANP_RE   then :phone
-      when INTEGER_RE  then classify_integer(segment)
-      when FLOAT_RE    then :float
-      when CURRENCY_RE then classify_currency(segment)
-      when FILE_RE     then classify_file(segment)
-      when SLUG_RE     then :slug
-      when LITERAL_RE  then :literal
-      when OPAQUE_RE   then :opaque_id
-      else :literal
+      return :uuid                 if size == 36 && has_dash && UUID_RE.match?(segment)
+      return :jwt                  if segment.start_with?("ey") && segment.count(".") == 2 && JWT_RE.match?(segment)
+      return :url                  if has_colon && segment.include?("://") && URL_RE.match?(segment)
+      return :email                if has_at && EMAIL_RE.match?(segment)
+      return :mime                 if has_slash && MIME_RE.match?(segment)
+      return :url                  if has_dot && has_slash && SCHEMELESS_URL_RE.match?(segment)
+      return classify_ipv4(segment) if digit0 && has_dot && IPV4_RE.match?(segment)
+      return :ipv6                 if has_colon && IPV6_RE.match?(segment)
+      return :hash                 if size >= 32 && HASH_RE.match?(segment)
+      return :version              if first == 0x76 && VERSION_RE.match?(segment) # 'v'
+      return :boolean              if (size >= 4 && size <= 5) && BOOLEAN_RE.match?(segment)
+      return classify_locale_pair(segment) if has_sep && LOCALE_RE.match?(segment)
+      return classify_locale(segment) if size == 2 && LOCALE_BARE_RE.match?(segment)
+      if (has_dash || has_slash) && (DATE_RE.match?(segment) || DATE_SLASH_RE.match?(segment) || DATE_US_RE.match?(segment))
+        return :date
       end
+      return :timestamp            if has_colon && ISO_TIME_RE.match?(segment)
+      return classify_phone(segment) if first == 0x2B && PHONE_RE.match?(segment)  # '+'
+      return :phone                if (has_dash || has_dot || segment.include?("(")) && PHONE_NANP_RE.match?(segment)
+      return classify_integer(segment) if digit0 && INTEGER_RE.match?(segment)
+      return :float                if has_dot && FLOAT_RE.match?(segment)
+      return classify_currency(segment) if size == 3 && CURRENCY_RE.match?(segment)
+      return classify_file(segment) if has_dot && FILE_RE.match?(segment)
+      return :slug                 if has_sep && SLUG_RE.match?(segment)
+      return :literal              if LITERAL_RE.match?(segment)
+      return :opaque_id            if OPAQUE_RE.match?(segment)
+
+      :literal
     end
 
     # IPV4_RE only checks shape (1-3 digits between dots). Validate each

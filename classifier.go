@@ -340,55 +340,73 @@ func (c *SegmentClassifier) Variable(t SegmentType) bool {
 }
 
 func computeClassification(segment string) SegmentType {
+	// Cheap composition checks short-circuit regex matches that can't
+	// possibly fire. Each `xRE.MatchString` below is preceded by an
+	// `IndexByte` / `size` guard so a literal like "users" walks past
+	// 20-odd regex tests in O(len) instead of O(len * n_regexes).
+	size := len(segment)
+	first := byte(0)
+	if size > 0 {
+		first = segment[0]
+	}
+	digit0 := first >= '0' && first <= '9'
+	hasDash := strings.IndexByte(segment, '-') >= 0
+	hasDot := strings.IndexByte(segment, '.') >= 0
+	hasColon := strings.IndexByte(segment, ':') >= 0
+	hasSlash := strings.IndexByte(segment, '/') >= 0
+	hasAt := strings.IndexByte(segment, '@') >= 0
+	hasUnder := strings.IndexByte(segment, '_') >= 0
+	hasSep := hasDash || hasUnder
+
 	switch {
-	case uuidRE.MatchString(segment):
+	case size == 36 && hasDash && uuidRE.MatchString(segment):
 		return TypeUUID
-	case jwtRE.MatchString(segment):
+	case size > 4 && segment[0] == 'e' && segment[1] == 'y' && strings.Count(segment, ".") == 2 && jwtRE.MatchString(segment):
 		return TypeJWT
 	// Network / structured types take precedence over the generic opaqueRE
 	// catch-all (which would otherwise grab IPv4) and the literal fallback
 	// (which today swallows email + URL + IPv6).
-	case urlRE.MatchString(segment):
+	case hasColon && strings.Contains(segment, "://") && urlRE.MatchString(segment):
 		return TypeURL
-	case emailRE.MatchString(segment):
+	case hasAt && emailRE.MatchString(segment):
 		return TypeEmail
-	case mimeRE.MatchString(segment):
+	case hasSlash && mimeRE.MatchString(segment):
 		return TypeMIME
-	case schemelessURLRE.MatchString(segment):
+	case hasDot && hasSlash && schemelessURLRE.MatchString(segment):
 		return TypeURL
-	case ipv4RE.MatchString(segment):
+	case digit0 && hasDot && ipv4RE.MatchString(segment):
 		return classifyIPv4(segment)
-	case ipv6FullRE.MatchString(segment):
+	case hasColon && ipv6FullRE.MatchString(segment):
 		return TypeIPv6
-	case strings.Contains(segment, "::") && ipv6CompressedRE.MatchString(segment):
+	case hasColon && strings.Contains(segment, "::") && ipv6CompressedRE.MatchString(segment):
 		return TypeIPv6
-	case hashRE.MatchString(segment):
+	case size >= 32 && hashRE.MatchString(segment):
 		return TypeHash
-	case versionRE.MatchString(segment):
+	case first == 'v' && versionRE.MatchString(segment):
 		return TypeVersion
-	case booleanRE.MatchString(segment):
+	case (size >= 4 && size <= 5) && booleanRE.MatchString(segment):
 		return TypeBoolean
-	case localeRE.MatchString(segment):
+	case hasSep && localeRE.MatchString(segment):
 		return classifyLocalePair(segment)
-	case localeBareRE.MatchString(segment):
+	case size == 2 && localeBareRE.MatchString(segment):
 		return classifyLocaleBare(segment)
-	case dateRE.MatchString(segment), dateSlashRE.MatchString(segment), dateUSRE.MatchString(segment):
+	case (hasDash || hasSlash) && (dateRE.MatchString(segment) || dateSlashRE.MatchString(segment) || dateUSRE.MatchString(segment)):
 		return TypeDate
-	case isoTimeRE.MatchString(segment):
+	case hasColon && isoTimeRE.MatchString(segment):
 		return TypeTimestamp
-	case phoneRE.MatchString(segment):
+	case first == '+' && phoneRE.MatchString(segment):
 		return classifyPhone(segment)
-	case phoneNANPRE.MatchString(segment):
+	case (hasDash || hasDot || segment[0] == '(') && phoneNANPRE.MatchString(segment):
 		return TypePhone
-	case integerRE.MatchString(segment):
+	case digit0 && integerRE.MatchString(segment):
 		return classifyInteger(segment)
-	case floatRE.MatchString(segment):
+	case hasDot && floatRE.MatchString(segment):
 		return TypeFloat
-	case currencyRE.MatchString(segment):
+	case size == 3 && currencyRE.MatchString(segment):
 		return classifyCurrency(segment)
-	case fileRE.MatchString(segment):
+	case hasDot && fileRE.MatchString(segment):
 		return classifyFile(segment)
-	case slugRE.MatchString(segment):
+	case hasSep && slugRE.MatchString(segment):
 		return TypeSlug
 	case literalRE.MatchString(segment):
 		return TypeLiteral
