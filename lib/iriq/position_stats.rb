@@ -44,9 +44,26 @@ module Iriq
       (@value_counts[value] || 0).to_f / @total
     end
 
+    # Most common type. On count ties, breaks lexicographically by type
+    # symbol name so the result is deterministic and matches Go's
+    # DominantType (Go's map iteration is randomized).
+    def dominant_type
+      best = nil
+      best_count = -1
+      @type_counts.each do |t, n|
+        if n > best_count || (n == best_count && t.to_s < best.to_s)
+          best = t
+          best_count = n
+        end
+      end
+      best
+    end
+
     def dump
+      # Dup the hashes so callers can mutate the dump structure (test
+      # fixtures, post-processing) without aliasing the live state.
       {
-        "value_counts" => @value_counts,
+        "value_counts" => @value_counts.dup,
         "type_counts"  => @type_counts.transform_keys(&:to_s),
         "total"        => @total,
         "max_values"   => @max_values,

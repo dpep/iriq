@@ -76,8 +76,11 @@ module Iriq
       end
 
       def add_to_cluster(key, host, scheme, shape, identifier)
-        cluster = @clusters[key] ||= Cluster.new(key: key, host: host, scheme: scheme, shape: shape)
-        cluster.add(identifier)
+        cluster = @clusters[key] ||= Cluster.new(
+          key: key, host: host, scheme: scheme, shape: shape,
+          max_values: @max_values_per_position,
+        )
+        cluster.add(identifier, classifier: @classifier)
         cluster
       end
 
@@ -104,6 +107,13 @@ module Iriq
         @clusters.size
       end
 
+      # O(1) lookup by cluster key — used by Corpus#normalize to pull the
+      # cluster's param_stats for the URL being normalized. nil if no cluster
+      # has been observed under this key yet.
+      def cluster_for(key)
+        @clusters[key]
+      end
+
       # --- Bulk load (used by JSON backend) --------------------------------
 
       def load_dump!(h)
@@ -116,7 +126,7 @@ module Iriq
           acc[[host, prefix]] = PositionStats.from_dump(sdump)
         end
         cdump = h.fetch("clusterer", { "clusters" => {} })
-        @clusters = cdump["clusters"].transform_values { |c| Cluster.from_dump(c) }
+        @clusters = cdump["clusters"].transform_values { |c| Cluster.from_dump(c, max_values: @max_values_per_position) }
         self
       end
 

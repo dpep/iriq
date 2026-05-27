@@ -16,10 +16,17 @@ type JSONStorage struct {
 	path string
 }
 
-// OpenJSONStorage creates or opens a JSON-backed corpus. If the file exists
-// and is non-empty, its contents are loaded.
+// OpenJSONStorage creates or opens a JSON-backed corpus using the default
+// classifier; pass a custom one via OpenJSONStorageWith.
 func OpenJSONStorage(path string, maxValues int) (*JSONStorage, error) {
-	s := &JSONStorage{MemoryStorage: NewMemoryStorage(maxValues), path: path}
+	return OpenJSONStorageWith(path, maxValues, DefaultClassifier)
+}
+
+// OpenJSONStorageWith creates or opens a JSON-backed corpus with an explicit
+// classifier — used so cluster.ParamStats classify values consistently with
+// the surrounding corpus.
+func OpenJSONStorageWith(path string, maxValues int, c *SegmentClassifier) (*JSONStorage, error) {
+	s := &JSONStorage{MemoryStorage: NewMemoryStorageWith(maxValues, c), path: path}
 	info, err := os.Stat(path)
 	if err == nil && info.Size() > 0 {
 		if err := s.loadFromFile(path); err != nil {
@@ -66,13 +73,16 @@ type clustererDumpShape struct {
 }
 
 type clusterDumpShape struct {
-	Key           string           `json:"key"`
-	Host          string           `json:"host"`
-	Scheme        string           `json:"scheme"`
-	Shape         string           `json:"shape"`
-	Count         int              `json:"count"`
-	Examples      []string         `json:"examples"`
-	SegmentCounts []map[string]int `json:"segment_counts"`
+	Key           string                            `json:"key"`
+	Host          string                            `json:"host"`
+	Scheme        string                            `json:"scheme"`
+	Shape         string                            `json:"shape"`
+	Count         int                               `json:"count"`
+	Examples      []string                          `json:"examples"`
+	SegmentCounts []map[string]int                  `json:"segment_counts"`
+	// Always emit param_stats (even when empty) so Ruby-saved and Go-saved
+	// dumps match byte-for-byte. Ruby's Cluster#dump always renders the key.
+	ParamStats map[string]positionStatsDumpShape `json:"param_stats"`
 }
 
 type positionStatsDumpShape struct {
@@ -103,9 +113,16 @@ func dumpMemoryToJSON(m *MemoryStorage, path string) error {
 		if seg == nil {
 			seg = []map[string]int{}
 		}
+		// Always allocate the map so the JSON output renders `{}` rather than
+		// nothing for paramless clusters (matches Ruby's Cluster#dump).
+		params := make(map[string]positionStatsDumpShape, len(c.ParamStats))
+		for name, stats := range c.ParamStats {
+			params[name] = positionStatsDumpFrom(stats)
+		}
 		clu.Clusters[key] = clusterDumpShape{
 			Key: c.Key, Host: c.Host, Scheme: c.Scheme, Shape: c.Shape,
 			Count: c.Count, Examples: examples, SegmentCounts: seg,
+			ParamStats: params,
 		}
 	}
 	d := &corpusDump{
@@ -214,7 +231,7 @@ func loadMemoryFromJSON(m *MemoryStorage, data []byte) error {
 			return err
 		}
 		for key, c := range cd.Clusters {
-			cluster := NewCluster(c.Key, c.Host, c.Scheme, c.Shape)
+			cluster := NewClusterWith(c.Key, c.Host, c.Scheme, c.Shape, m.maxValues)
 			cluster.Count = c.Count
 			for _, s := range c.Examples {
 				iri, err := Parse(s)
@@ -224,6 +241,20 @@ func loadMemoryFromJSON(m *MemoryStorage, data []byte) error {
 				cluster.Examples = append(cluster.Examples, iri)
 			}
 			cluster.SetSegmentCounts(c.SegmentCounts)
+			if len(c.ParamStats) > 0 {
+				for name, sd := range c.ParamStats {
+					ps := NewPositionStats(sd.MaxValues)
+					ps.Total = sd.Total
+					if sd.ValueCounts != nil {
+						ps.ValueCounts = sd.ValueCounts
+					}
+					ps.TypeCounts = map[SegmentType]int{}
+					for k, v := range sd.TypeCounts {
+						ps.TypeCounts[SegmentType(k)] = v
+					}
+					cluster.ParamStats[name] = ps
+				}
+			}
 			m.clusters[key] = cluster
 			m.clusterKeys = append(m.clusterKeys, key)
 		}

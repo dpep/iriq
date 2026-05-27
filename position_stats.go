@@ -57,3 +57,23 @@ func (p *PositionStats) ValueFraction(value string) float64 {
 	}
 	return float64(p.ValueCounts[value]) / float64(p.Total)
 }
+
+// DominantType returns the SegmentType with the largest count in TypeCounts.
+// On ties, returns the lexicographically smallest type so the answer is
+// deterministic across runs (Go's map iteration order is randomized;
+// Ruby's max_by returns the first-inserted max, which is also deterministic
+// per-process — and lexicographic tie-break keeps Ruby↔Go behavior aligned
+// without requiring insertion order).
+func (p *PositionStats) DominantType() SegmentType {
+	var dom SegmentType
+	var domN int
+	first := true
+	for t, n := range p.TypeCounts {
+		if first || n > domN || (n == domN && string(t) < string(dom)) {
+			dom = t
+			domN = n
+			first = false
+		}
+	}
+	return dom
+}

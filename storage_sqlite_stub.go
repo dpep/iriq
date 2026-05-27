@@ -17,3 +17,8 @@ type SqliteStorage struct{}
 func OpenSqliteStorage(path string, maxValues int) (Storage, error) {
 	return nil, errors.New("iriq was built without SQLite support — rebuild with -tags sqlite or install iriq-sqlite")
 }
+
+// OpenSqliteStorageWith mirrors the tagged-build signature; same error.
+func OpenSqliteStorageWith(path string, maxValues int, c *SegmentClassifier) (Storage, error) {
+	return OpenSqliteStorage(path, maxValues)
+}

@@ -5,9 +5,15 @@ import "strings"
 // PathShape converts a sequence of path segments into a route-shape string by
 // replacing variable segments with {hint} placeholders (or {type} if hints
 // are disabled / no hint is available).
+//
+// With CanonicalDates set, date-typed segments render in canonical ISO form
+// (2024/01/15 → 2024-01-15) instead of as a {date} placeholder. Used by the
+// normalizer for display output; the clusterer keeps the placeholder form so
+// dated routes still group together.
 type PathShape struct {
-	Classifier *SegmentClassifier
-	Hints      bool
+	Classifier     *SegmentClassifier
+	Hints          bool
+	CanonicalDates bool
 }
 
 // NewPathShape returns a PathShape with the default classifier and hints on.
@@ -45,6 +51,11 @@ func (p *PathShape) FromEntries(entries []SegmentHint) string {
 func (p *PathShape) shapeToken(e SegmentHint) string {
 	if !e.Variable {
 		return e.Value
+	}
+	if p.CanonicalDates && e.Type == TypeDate {
+		if canon := CanonicalDate(e.Value); canon != "" {
+			return canon
+		}
 	}
 	if p.Hints {
 		if e.Hint != "" {

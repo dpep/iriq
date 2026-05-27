@@ -1,3 +1,12 @@
+###  0.4.0  (2026-05-27)
+- Query-param clustering: each `Cluster` now tracks per-param presence, value cardinality, and type via `param_stats`. Surfaced on `cluster.to_h[:params]` (and the JSON cluster view), persisted in both JSON and SQLite backends.
+- `Corpus#normalize` (Ruby) / `Corpus.NormalizeIdentifier` (Go) now include query params, rendered with corpus-informed types when available (falls back to mechanical classification otherwise).
+- New `corpus.params_for(url)` / `Corpus.ParamsFor(url)` — returns the inferred params for the cluster `url` would fall into. Useful for "what params might this URL accept?" tooling.
+- Date detection expanded to include `YYYY/MM/DD` and `YYYYMMDD` (with year/month/day sanity bounds) alongside the existing `YYYY-MM-DD`.
+- `SegmentClassifier.canonical_date(value)` / `CanonicalDate(value)` returns the ISO form for any recognized date.
+- `--normalize` output canonicalizes recognized date values to `YYYY-MM-DD` (path segments and query params). Cluster keys still use `{date}` placeholders so dated routes still group together.
+- `PositionStats::DEFAULT_MAX_VALUES` is now the value cap for `cluster.param_stats[name]` too.
+
 ###  0.3.0  (2026-05-25)
 - Go: SQLite backend is now opt-in via `-tags sqlite`. Default `go install` and the `iriq` Homebrew formula ship a slim binary (~30% smaller) with JSON corpora only. SQLite users compile with `-tags sqlite` or install `dpep/tools/iriq-sqlite`.
 - Makefile: `release` / `release-sqlite` targets strip debug symbols and use `-trimpath` for reproducible builds.

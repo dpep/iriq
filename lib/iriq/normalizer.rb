@@ -18,7 +18,9 @@ module Iriq
         if iri.scheme == "urn" && iri.nss && iri.nss.include?(":")
           ns, value = iri.nss.split(":", 2)
           entry     = SegmentHints.derive([ns, value], classifier).last
-          shaped    = if entry[:variable]
+          shaped    = if entry[:type] == :date && (canon = SegmentClassifier.canonical_date(entry[:value]))
+                        canon
+                      elsif entry[:variable]
                         "{#{(hints && entry[:hint]) || entry[:type]}}"
                       else
                         entry[:value]
@@ -32,7 +34,7 @@ module Iriq
         out << "#{iri.scheme}://" if iri.scheme
         out << iri.host if iri.host
         out << ":#{iri.port}" if iri.port
-        out << PathShape.new(classifier: classifier, hints: hints).for(iri.path_segments)
+        out << PathShape.new(classifier: classifier, hints: hints, canonical_dates: true).for(iri.path_segments)
         if iri.query_params && !iri.query_params.empty?
           out << "?" + shape_query(iri.query_params, classifier)
         end
@@ -42,9 +44,15 @@ module Iriq
 
     def shape_query(params, classifier)
       params.keys.sort.map do |k|
-        v    = params[k]
-        type = classifier.classify(v.to_s)
-        shaped = classifier.variable?(type) ? "{#{type}}" : v
+        v      = params[k]
+        type   = classifier.classify(v.to_s)
+        shaped = if type == :date && (canon = SegmentClassifier.canonical_date(v.to_s))
+                   canon
+                 elsif classifier.variable?(type)
+                   "{#{type}}"
+                 else
+                   v
+                 end
         "#{k}=#{shaped}"
       end.join("&")
     end

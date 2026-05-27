@@ -78,16 +78,37 @@ CREATE TABLE IF NOT EXISTS cluster_segments (
   count       INTEGER NOT NULL,
   PRIMARY KEY (cluster_key, position, value)
 );
+CREATE TABLE IF NOT EXISTS cluster_params (
+  cluster_key TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  total       INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (cluster_key, name)
+);
+CREATE TABLE IF NOT EXISTS cluster_param_values (
+  cluster_key TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  value       TEXT NOT NULL,
+  count       INTEGER NOT NULL,
+  PRIMARY KEY (cluster_key, name, value)
+);
+CREATE TABLE IF NOT EXISTS cluster_param_types (
+  cluster_key TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  type        TEXT NOT NULL,
+  count       INTEGER NOT NULL,
+  PRIMARY KEY (cluster_key, name, type)
+);
 `
 
 // SqliteStorage is the incremental-write backend. Each observation is a
 // short transaction of UPSERTs against a long-lived connection. WAL mode
 // lets multiple processes observe against the same file concurrently.
 type SqliteStorage struct {
-	db        *sql.DB
-	maxValues int
-	path      string
-	tx        *sqliteTx // non-nil while inside Batch/Transaction
+	db         *sql.DB
+	maxValues  int
+	path       string
+	classifier *SegmentClassifier
+	tx         *sqliteTx // non-nil while inside Batch/Transaction
 }
 
 // We pin the pool to one connection so PRAGMA settings and the busy_timeout
@@ -112,8 +133,17 @@ func (s *SqliteStorage) ex() sqliteExec {
 // Path returns the file path the SQLite database is bound to.
 func (s *SqliteStorage) Path() string { return s.path }
 
-// OpenSqliteStorage creates or opens a SQLite-backed corpus at path.
+// OpenSqliteStorage creates or opens a SQLite-backed corpus at path. Uses
+// the DefaultClassifier for param-type classification; pass a custom one via
+// OpenSqliteStorageWith.
 func OpenSqliteStorage(path string, maxValues int) (*SqliteStorage, error) {
+	return OpenSqliteStorageWith(path, maxValues, DefaultClassifier)
+}
+
+// OpenSqliteStorageWith lets callers (Corpus.OpenCorpus, tests) thread a
+// specific classifier into the storage so ClusterParamStats classification
+// matches the rest of the corpus.
+func OpenSqliteStorageWith(path string, maxValues int, c *SegmentClassifier) (*SqliteStorage, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, err
@@ -124,7 +154,10 @@ func OpenSqliteStorage(path string, maxValues int) (*SqliteStorage, error) {
 	if maxValues <= 0 {
 		maxValues = DefaultMaxValuesPerPosition
 	}
-	s := &SqliteStorage{db: db, maxValues: maxValues, path: path}
+	if c == nil {
+		c = DefaultClassifier
+	}
+	s := &SqliteStorage{db: db, maxValues: maxValues, path: path, classifier: c}
 	if err := s.setup(); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -283,11 +316,14 @@ func (s *SqliteStorage) ObservePosition(host, prefix, value string, t SegmentTyp
 	`, host, prefix, string(t))
 
 	// Value counts are capped — UPDATE first, INSERT only if under the cap.
-	res, _ := s.ex().Exec(
+	res, err := s.ex().Exec(
 		"UPDATE position_values SET count = count + 1 WHERE host = ? AND prefix = ? AND value = ?",
 		host, prefix, value,
 	)
-	if affected, _ := res.RowsAffected(); affected == 0 {
+	// err != nil ⇒ res may be nil; treat the update as a no-op (zero rows
+	// affected) so the INSERT path runs. If the INSERT also fails, the outer
+	// transaction will roll back.
+	if affected := rowsAffected(res, err); affected == 0 {
 		var card int
 		_ = s.ex().QueryRow(
 			"SELECT COUNT(*) FROM position_values WHERE host = ? AND prefix = ?", host, prefix,
@@ -324,15 +360,57 @@ func (s *SqliteStorage) AddToCluster(key, host, scheme, shape string, iri *Ident
 		`, key, i, seg)
 	}
 
-	// Return a lightweight cluster ref — full Examples / SegmentCounts are
-	// materialized lazily via Storage.Clusters(). Skipping loadCluster here
-	// removes 3+ SELECTs per observation in the hot batch path.
+	// Per-param stats — presence + value cardinality + type.
+	if iri.QueryParams != nil {
+		classifier := s.classifier
+		if classifier == nil {
+			classifier = DefaultClassifier
+		}
+		for _, name := range iri.QueryParams.Keys() {
+			v, _ := iri.QueryParams.Get(name)
+			t := classifier.Classify(v)
+
+			_, _ = s.ex().Exec(`
+				INSERT INTO cluster_params (cluster_key, name, total) VALUES (?, ?, 1)
+				ON CONFLICT(cluster_key, name) DO UPDATE SET total = total + 1
+			`, key, name)
+			_, _ = s.ex().Exec(`
+				INSERT INTO cluster_param_types (cluster_key, name, type, count) VALUES (?, ?, ?, 1)
+				ON CONFLICT(cluster_key, name, type) DO UPDATE SET count = count + 1
+			`, key, name, string(t))
+			res, err := s.ex().Exec(
+				"UPDATE cluster_param_values SET count = count + 1 WHERE cluster_key = ? AND name = ? AND value = ?",
+				key, name, v,
+			)
+			if affected := rowsAffected(res, err); affected == 0 {
+				var card int
+				_ = s.ex().QueryRow(
+					"SELECT COUNT(*) FROM cluster_param_values WHERE cluster_key = ? AND name = ?", key, name,
+				).Scan(&card)
+				if card < s.maxValues {
+					_, _ = s.ex().Exec(
+						"INSERT INTO cluster_param_values (cluster_key, name, value, count) VALUES (?, ?, ?, 1)",
+						key, name, v,
+					)
+				}
+			}
+		}
+	}
+
+	// Return a lightweight cluster ref — full Examples / SegmentCounts /
+	// ParamStats are materialized lazily via Storage.Clusters() /
+	// Storage.ClusterFor(). Skipping loadCluster here removes 3+ SELECTs per
+	// observation in the hot batch path.
 	var count int
 	_ = s.ex().QueryRow("SELECT count FROM clusters WHERE key = ?", key).Scan(&count)
 	c := NewCluster(key, host, scheme, shape)
 	c.Count = count
 	return c
 }
+
+// ClusterFor is the lookup used by Corpus.Normalize / ParamsFor. Materializes
+// examples + segment counts + param stats.
+func (s *SqliteStorage) ClusterFor(key string) *Cluster { return s.loadCluster(key) }
 
 // --- Reads ------------------------------------------------------------------
 
@@ -468,41 +546,106 @@ func (s *SqliteStorage) loadCluster(key string) *Cluster {
 		return nil
 	}
 
-	rows, err := s.ex().Query(
-		"SELECT canonical FROM cluster_examples WHERE cluster_key = ? ORDER BY position", key,
-	)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
+	// Each rows query gets its own scoped closure so `defer Close()` releases
+	// the (singleton) connection at block-end rather than at function-end —
+	// otherwise the next Query in this same function would block forever on
+	// the pinned connection (SetMaxOpenConns(1)) if a prior loop short-
+	// circuited before draining Rows.
+	s.scanRows(
+		"SELECT canonical FROM cluster_examples WHERE cluster_key = ? ORDER BY position",
+		[]interface{}{key},
+		func(rows *sql.Rows) {
 			var canonical string
-			if err := rows.Scan(&canonical); err == nil {
-				if iri, perr := Parse(canonical); perr == nil {
-					c.Examples = append(c.Examples, iri)
-				}
+			if err := rows.Scan(&canonical); err != nil {
+				return
 			}
-		}
-	}
-
-	segRows, err := s.ex().Query(
-		"SELECT position, value, count FROM cluster_segments WHERE cluster_key = ? ORDER BY position", key,
+			if iri, perr := Parse(canonical); perr == nil {
+				c.Examples = append(c.Examples, iri)
+			}
+		},
 	)
+
 	var segCounts []map[string]int
-	if err == nil {
-		defer segRows.Close()
-		for segRows.Next() {
+	s.scanRows(
+		"SELECT position, value, count FROM cluster_segments WHERE cluster_key = ? ORDER BY position",
+		[]interface{}{key},
+		func(rows *sql.Rows) {
 			var pos, count int
 			var value string
-			if err := segRows.Scan(&pos, &value, &count); err != nil {
-				continue
+			if err := rows.Scan(&pos, &value, &count); err != nil {
+				return
 			}
 			for len(segCounts) <= pos {
 				segCounts = append(segCounts, map[string]int{})
 			}
 			segCounts[pos][value] = count
-		}
-	}
+		},
+	)
 	c.SetSegmentCounts(segCounts)
+
+	c.ParamStats = map[string]*PositionStats{}
+	s.scanRows(
+		"SELECT name, total FROM cluster_params WHERE cluster_key = ?",
+		[]interface{}{key},
+		func(rows *sql.Rows) {
+			var name string
+			var total int
+			if err := rows.Scan(&name, &total); err != nil {
+				return
+			}
+			stats := NewPositionStats(s.maxValues)
+			stats.Total = total
+			c.ParamStats[name] = stats
+		},
+	)
+	s.scanRows(
+		"SELECT name, value, count FROM cluster_param_values WHERE cluster_key = ?",
+		[]interface{}{key},
+		func(rows *sql.Rows) {
+			var name, value string
+			var count int
+			if err := rows.Scan(&name, &value, &count); err != nil {
+				return
+			}
+			if stats, ok := c.ParamStats[name]; ok {
+				stats.ValueCounts[value] = count
+			}
+		},
+	)
+	s.scanRows(
+		"SELECT name, type, count FROM cluster_param_types WHERE cluster_key = ?",
+		[]interface{}{key},
+		func(rows *sql.Rows) {
+			var name, t string
+			var count int
+			if err := rows.Scan(&name, &t, &count); err != nil {
+				return
+			}
+			if stats, ok := c.ParamStats[name]; ok {
+				stats.TypeCounts[SegmentType(t)] = count
+			}
+		},
+	)
 	return &c
+}
+
+// scanRows runs query, defers Close at block end, calls onRow for each row.
+// Keeps the (singleton) SQLite connection-release scope tight so adjacent
+// queries in the same function don't deadlock on each other.
+func (s *SqliteStorage) scanRows(query string, args []interface{}, onRow func(*sql.Rows)) {
+	rows, err := s.ex().Query(query, args...)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		onRow(rows)
+	}
+	// Discarded — surfacing it would require changing the function signature
+	// and propagating partial-failure semantics through every caller. Worth
+	// revisiting if a corrupted cluster_param table starts showing up in
+	// practice.
+	_ = rows.Err()
 }
 
 // mirrorIntoMemory walks every row of an SQLite store and replays the data
@@ -529,4 +672,19 @@ func mirrorIntoMemory(src Storage, dst *MemoryStorage) {
 		dst.clusters[c.Key] = c
 		dst.clusterKeys = append(dst.clusterKeys, c.Key)
 	}
+}
+
+// rowsAffected safely extracts the affected-row count from an Exec result,
+// guarding against a nil sql.Result returned together with an error (the
+// modernc.org/sqlite driver does this on some prepare failures). Treats
+// any error as "zero rows", letting the caller's INSERT fallback run.
+func rowsAffected(res sql.Result, err error) int64 {
+	if err != nil || res == nil {
+		return 0
+	}
+	n, ierr := res.RowsAffected()
+	if ierr != nil {
+		return 0
+	}
+	return n
 }

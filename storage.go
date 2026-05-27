@@ -29,6 +29,7 @@ type Storage interface {
 	PositionStatsFor(host, prefix string) *PositionStats
 	EachPositionStats(func(host, prefix string, stats *PositionStats))
 	Clusters() []*Cluster
+	ClusterFor(key string) *Cluster
 	ClusterSize() int
 
 	// Lifecycle.
@@ -49,13 +50,19 @@ type Storage interface {
 // OpenStorage opens (or creates) a Storage at path, picking the backend by
 // file extension. Pass "" for an in-memory backend.
 func OpenStorage(path string, maxValues int) (Storage, error) {
+	return OpenStorageWith(path, maxValues, DefaultClassifier)
+}
+
+// OpenStorageWith lets callers thread a specific classifier into the backend
+// so cluster.ParamStats type counts use the same classifier as the corpus.
+func OpenStorageWith(path string, maxValues int, c *SegmentClassifier) (Storage, error) {
 	if path == "" {
-		return NewMemoryStorage(maxValues), nil
+		return NewMemoryStorageWith(maxValues, c), nil
 	}
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".db", ".sqlite", ".sqlite3":
-		return OpenSqliteStorage(path, maxValues)
+		return OpenSqliteStorageWith(path, maxValues, c)
 	default:
-		return OpenJSONStorage(path, maxValues)
+		return OpenJSONStorageWith(path, maxValues, c)
 	}
 }

@@ -156,7 +156,7 @@ Iriq::Inflector.reset_adapter!
 - `:literal` — plain word (`users`, `orders`, `Profile`, `こんにちは`)
 - `:integer_id` — pure digits below the timestamp range (`1`, `123`, `42`)
 - `:uuid` — `f47ac10b-58cc-4372-a567-0e02b2c3d479`
-- `:date` — `2024-05-23`
+- `:date` — `2024-05-23`, `2024/05/23`, `20240523`, `05/23/2024` (US, query-params only — slashes can't appear in path segments). Canonicalized to ISO in `--normalize` output.
 - `:timestamp` — ISO 8601, or 10/13-digit UNIX epoch
 - `:hash` — 32+ hex chars (md5 / sha)
 - `:slug` — `my-cool-post`, `my_cool_post`
