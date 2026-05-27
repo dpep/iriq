@@ -284,11 +284,12 @@ module Iriq
     end
 
     def inferred_param_type(cluster, name, value)
-      # Prefer the cluster's most common type for this param when we have
-      # enough samples; otherwise classify the current value directly.
+      # Prefer the cluster's confident type when we have enough samples;
+      # otherwise classify the current value directly. Cluster#param_type
+      # applies the :date quorum gate (see Cluster::DATE_CONFIDENCE_THRESHOLD).
       stats = cluster && cluster.param_stats[name]
       if stats && stats.total >= MIN_OBSERVATIONS_FOR_INFERENCE
-        stats.dominant_type
+        cluster.param_type(name) || @classifier.classify(value)
       else
         @classifier.classify(value)
       end

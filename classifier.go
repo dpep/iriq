@@ -24,11 +24,13 @@ var (
 	uuidRE    = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 	integerRE = regexp.MustCompile(`^\d+$`)
 	// Date formats we'll canonicalize. Deliberately conservative — only the
-	// unambiguous forms where the year position is fixed. MM/DD/YYYY and
-	// DD/MM/YYYY are not recognized since they can't be told apart from a
-	// segment alone.
+	// unambiguous forms where the year position is fixed. DD/MM/YYYY isn't
+	// recognized (can't be told apart from MM/DD/YYYY from a segment alone).
+	// Slash forms only show up in query-param values — URL path separators
+	// rule them out for path segments.
 	dateRE        = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 	dateSlashRE   = regexp.MustCompile(`^\d{4}/\d{2}/\d{2}$`)
+	dateUSRE      = regexp.MustCompile(`^(\d{1,2})/(\d{1,2})/(\d{4})$`)
 	dateCompactRE = regexp.MustCompile(`^\d{8}$`)
 	isoTimeRE = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+\-]\d{2}:?\d{2})?$`)
 	hashRE    = regexp.MustCompile(`^[0-9a-fA-F]{32,}$`)
@@ -94,7 +96,7 @@ func computeClassification(segment string) SegmentType {
 	switch {
 	case uuidRE.MatchString(segment):
 		return TypeUUID
-	case dateRE.MatchString(segment), dateSlashRE.MatchString(segment):
+	case dateRE.MatchString(segment), dateSlashRE.MatchString(segment), dateUSRE.MatchString(segment):
 		return TypeDate
 	case isoTimeRE.MatchString(segment):
 		return TypeTimestamp
@@ -153,12 +155,26 @@ func CanonicalDate(value string) string {
 		if plausibleDate(value[0:4], value[5:7], value[8:10]) {
 			return value[0:4] + "-" + value[5:7] + "-" + value[8:10]
 		}
+	case dateUSRE.MatchString(value):
+		// MM/DD/YYYY with 1-2 digit month and day — zero-pad both for output.
+		m := dateUSRE.FindStringSubmatch(value)
+		mon, day, year := pad2(m[1]), pad2(m[2]), m[3]
+		if plausibleDate(year, mon, day) {
+			return year + "-" + mon + "-" + day
+		}
 	case dateCompactRE.MatchString(value):
 		if plausibleDate(value[0:4], value[4:6], value[6:8]) {
 			return value[0:4] + "-" + value[4:6] + "-" + value[6:8]
 		}
 	}
 	return ""
+}
+
+func pad2(s string) string {
+	if len(s) == 1 {
+		return "0" + s
+	}
+	return s
 }
 
 // plausibleDate is a fast bounds check on year/month/day. Doesn't validate

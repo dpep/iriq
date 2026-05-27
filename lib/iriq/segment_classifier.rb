@@ -9,12 +9,13 @@ module Iriq
     UUID_RE      = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/.freeze
     INTEGER_RE   = /\A\d+\z/.freeze
     # Date formats we'll canonicalize. Deliberately conservative — we only
-    # accept forms where the year position is unambiguous (so MM/DD/YYYY and
-    # DD/MM/YYYY are NOT recognized; we can't tell them apart from the
-    # segment alone and silently picking US-default would corrupt international
-    # logs).
+    # accept forms where the year position is unambiguous (so DD/MM/YYYY is
+    # NOT recognized; we can't tell it apart from MM/DD/YYYY from the segment
+    # alone). The slash forms only occur in query-param values — URL path
+    # separators rule them out for path segments.
     DATE_RE         = /\A\d{4}-\d{2}-\d{2}\z/.freeze
     DATE_SLASH_RE   = %r{\A\d{4}/\d{2}/\d{2}\z}.freeze
+    DATE_US_RE      = %r{\A(\d{1,2})/(\d{1,2})/(\d{4})\z}.freeze
     DATE_COMPACT_RE = /\A\d{8}\z/.freeze
     ISO_TIME_RE     = /\A\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+\-]\d{2}:?\d{2})?\z/.freeze
     HASH_RE      = /\A\h{32,}\z/.freeze
@@ -57,7 +58,7 @@ module Iriq
     def compute_classification(segment)
       case segment
       when UUID_RE     then :uuid
-      when DATE_RE, DATE_SLASH_RE then :date
+      when DATE_RE, DATE_SLASH_RE, DATE_US_RE then :date
       when ISO_TIME_RE then :timestamp
       when INTEGER_RE  then classify_integer(segment)
       when HASH_RE     then :hash
@@ -105,6 +106,9 @@ module Iriq
         plausible_date?(value[0, 4], value[5, 2], value[8, 2]) ? value : nil
       when DATE_SLASH_RE
         plausible_date?(value[0, 4], value[5, 2], value[8, 2]) ? value.tr("/", "-") : nil
+      when DATE_US_RE
+        m, d, y = $~[1].rjust(2, "0"), $~[2].rjust(2, "0"), $~[3]
+        plausible_date?(y, m, d) ? "#{y}-#{m}-#{d}" : nil
       when DATE_COMPACT_RE
         y, m, d = value[0, 4], value[4, 2], value[6, 2]
         plausible_date?(y, m, d) ? "#{y}-#{m}-#{d}" : nil

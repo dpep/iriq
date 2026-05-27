@@ -3,6 +3,12 @@ package iriq
 // MaxClusterExamples mirrors Cluster::MAX_EXAMPLES.
 const MaxClusterExamples = 10
 
+// DateConfidenceThreshold mirrors Ruby's Cluster::DATE_CONFIDENCE_THRESHOLD.
+// Share of date-typed observations a param needs before the corpus promotes
+// it to :date — 8-digit IDs in the 1900..2100 range look like YYYYMMDD by
+// accident, so we require quorum before canonicalizing.
+const DateConfidenceThreshold = 0.8
+
 // SegmentPositionStat is the per-position summary surfaced via
 // Cluster.SegmentStats — one entry per path position.
 type SegmentPositionStat struct {
@@ -67,13 +73,39 @@ func (c *Cluster) ParamSummary() []ParamSummary {
 			presence = float64(stats.Total) / float64(c.Count)
 		}
 		out = append(out, ParamSummary{
-			Name: name, Count: stats.Total, Type: stats.DominantType(),
+			Name: name, Count: stats.Total, Type: c.ParamType(name),
 			Cardinality: stats.Cardinality(), Presence: presence,
 		})
 	}
 	// Stable order: by descending count, name asc.
 	sortParamSummary(out)
 	return out
+}
+
+// ParamType returns the type the corpus is confident enough to call this
+// param. Equals stats.DominantType() unless :date is dominant but below
+// DateConfidenceThreshold, in which case it falls back to the most-common
+// non-date type (or TypeLiteral when none exists). Shared by ParamSummary
+// and Corpus.inferredParamType so both views agree.
+func (c *Cluster) ParamType(name string) SegmentType {
+	stats := c.ParamStats[name]
+	if stats == nil {
+		return ""
+	}
+	t := stats.DominantType()
+	if t != TypeDate {
+		return t
+	}
+	if stats.Total == 0 {
+		return t
+	}
+	if float64(stats.TypeCounts[TypeDate])/float64(stats.Total) >= DateConfidenceThreshold {
+		return t
+	}
+	if alt := dominantNonDateType(stats); alt != "" {
+		return alt
+	}
+	return TypeLiteral
 }
 
 func (c *Cluster) Add(iri *Identifier) { c.AddWith(iri, DefaultClassifier) }

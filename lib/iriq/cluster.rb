@@ -8,6 +8,11 @@ module Iriq
 
     MAX_EXAMPLES = 10
 
+    # Share of date-typed observations required before the corpus promotes
+    # a param to :date. 8-digit IDs in the 1900..2100 range look like
+    # YYYYMMDD by accident — without quorum we'd canonicalize random IDs.
+    DATE_CONFIDENCE_THRESHOLD = 0.8
+
     def initialize(key:, host:, scheme:, shape:, max_values: PositionStats::DEFAULT_MAX_VALUES)
       @key            = key
       @host           = host
@@ -74,15 +79,42 @@ module Iriq
     def param_summary
       return [] if @param_stats.empty?
 
-      @param_stats.map { |name, stats|
+      @param_stats.map { |name, _stats|
+        stats = @param_stats[name]
         {
           name:        name,
           count:       stats.total,
-          type:        stats.dominant_type,
+          type:        param_type(name),
           cardinality: stats.cardinality,
           presence:    @count.positive? ? stats.total.to_f / @count : 0.0,
         }
       }.sort_by { |row| [-row[:count], row[:name]] }
+    end
+
+    # Returns the type the corpus is confident enough to call this param.
+    # Equals stats.dominant_type when the dominant type isn't :date; when
+    # :date is dominant but below DATE_CONFIDENCE_THRESHOLD, falls back to
+    # the most-common non-date type (or :literal if none exists). Shared
+    # by Cluster#param_summary and Corpus#inferred_param_type so both views
+    # agree on what the corpus "thinks" about a param.
+    def param_type(name)
+      stats = @param_stats[name]
+      return nil unless stats
+
+      type = stats.dominant_type
+      return type unless type == :date
+
+      date_frac = stats.total.positive? ? stats.type_counts[:date].to_f / stats.total : 0.0
+      return type if date_frac >= DATE_CONFIDENCE_THRESHOLD
+
+      best, best_count = nil, -1
+      stats.type_counts.each do |t, n|
+        next if t == :date
+        if n > best_count || (n == best_count && t.to_s < best.to_s)
+          best, best_count = t, n
+        end
+      end
+      best || :literal
     end
 
     # JSON-friendly dump for persistence (distinct from #to_h which is a

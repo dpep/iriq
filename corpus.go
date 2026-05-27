@@ -192,10 +192,33 @@ func (cp *Corpus) renderQuery(iri *Identifier) string {
 	return strings.Join(parts, "&")
 }
 
+// dominantNonDateType returns the SegmentType with the highest count in
+// TypeCounts excluding TypeDate. Returns "" when only date observations
+// exist. Lex tie-break for cross-runtime determinism.
+func dominantNonDateType(stats *PositionStats) SegmentType {
+	var best SegmentType
+	var bestN int
+	first := true
+	for t, n := range stats.TypeCounts {
+		if t == TypeDate {
+			continue
+		}
+		if first || n > bestN || (n == bestN && string(t) < string(best)) {
+			best = t
+			bestN = n
+			first = false
+		}
+	}
+	return best
+}
+
 func (cp *Corpus) inferredParamType(cluster *Cluster, name, value string) SegmentType {
 	if cluster != nil {
 		if stats := cluster.ParamStats[name]; stats != nil && stats.Total >= MinObservationsForInference {
-			return stats.DominantType()
+			// Cluster.ParamType applies the :date quorum gate
+			// (DateConfidenceThreshold). Both ParamSummary and corpus
+			// normalize go through it so the views agree.
+			return cluster.ParamType(name)
 		}
 	}
 	return cp.Classifier.Classify(value)

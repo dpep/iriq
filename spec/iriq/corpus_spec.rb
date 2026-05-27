@@ -286,5 +286,40 @@ describe Iriq::Corpus do
       expect(Iriq.normalize("https://foo.com/events?since=2024/01/15"))
         .to eq("https://foo.com/events?since=2024-01-15")
     end
+
+    it "renders MM/DD/YYYY (US) param dates as ISO" do
+      expect(Iriq.normalize("https://foo.com/events?since=01/15/2024"))
+        .to eq("https://foo.com/events?since=2024-01-15")
+    end
+
+    it "zero-pads single-digit MM/DD/YYYY components" do
+      expect(Iriq.normalize("https://foo.com/events?since=1/5/2024"))
+        .to eq("https://foo.com/events?since=2024-01-05")
+    end
+  end
+
+  describe ":date quorum threshold" do
+    it "does NOT promote a param to :date when date-typed observations are below 80%" do
+      corpus = described_class.new
+      70.times { |i| corpus.observe("https://foo.com/p?d=2024-01-#{((i % 28) + 1).to_s.rjust(2, "0")}") }
+      30.times { corpus.observe("https://foo.com/p?d=tbd") }
+
+      summary = corpus.params_for("https://foo.com/p").first
+      expect(summary[:type]).to eq(:literal)
+      # A clear date value is NOT canonicalized — the corpus isn't confident
+      # enough to treat this param as a date.
+      expect(corpus.normalize("https://foo.com/p?d=2024/06/15"))
+        .to eq("https://foo.com/p?d=2024/06/15")
+    end
+
+    it "promotes to :date at or above 80% confidence" do
+      corpus = described_class.new
+      90.times { |i| corpus.observe("https://foo.com/p?d=2024-01-#{((i % 28) + 1).to_s.rjust(2, "0")}") }
+      10.times { corpus.observe("https://foo.com/p?d=tbd") }
+
+      expect(corpus.params_for("https://foo.com/p").first[:type]).to eq(:date)
+      expect(corpus.normalize("https://foo.com/p?d=2024/06/15"))
+        .to eq("https://foo.com/p?d=2024-06-15")
+    end
   end
 end
