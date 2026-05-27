@@ -28,7 +28,7 @@
     {
       "input": "https://foo.com/search?q=hi&page=2",
       "hints": true,
-      "output": "https://foo.com/search?page={integer}&q=hi"
+      "output": "https://foo.com/search?page={integer}&q={locale}"
     },
     {
       "input": "urn:isbn:0451450523",

@@ -47,7 +47,11 @@
           "integer": 3
         },
         "total": 3,
-        "max_values": 5000
+        "max_values": 5000,
+        "numeric_count": 3,
+        "numeric_min": 1.0,
+        "numeric_max": 3.0,
+        "numeric_sum": 6.0
       }
     ],
     [

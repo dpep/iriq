@@ -8,13 +8,24 @@ module Iriq
   class PositionStats
     DEFAULT_MAX_VALUES = 5_000
 
-    attr_reader :value_counts, :type_counts, :total, :max_values
+    attr_reader :value_counts, :type_counts, :total, :max_values,
+                :numeric_count, :numeric_min, :numeric_max, :numeric_sum
+
+    NUMERIC_TYPES = %i[integer float].freeze
 
     def initialize(max_values: DEFAULT_MAX_VALUES)
-      @value_counts = Hash.new(0)
-      @type_counts  = Hash.new(0)
-      @total        = 0
-      @max_values   = max_values
+      @value_counts  = Hash.new(0)
+      @type_counts   = Hash.new(0)
+      @total         = 0
+      @max_values    = max_values
+      # Range stats for numeric observations only. Lets the corpus
+      # promote /articles/2024 etc. to :year when all values land in
+      # 1900..2100, and surfaces min/max/avg on ParamSummary for
+      # general numeric params.
+      @numeric_count = 0
+      @numeric_min   = nil
+      @numeric_max   = nil
+      @numeric_sum   = 0.0
     end
 
     def observe(value, type)
@@ -23,7 +34,30 @@ module Iriq
       if @value_counts.size < @max_values || @value_counts.key?(value)
         @value_counts[value] += 1
       end
+      record_numeric(value, type)
     end
+
+    def numeric_avg
+      return nil if @numeric_count.zero?
+
+      @numeric_sum / @numeric_count
+    end
+
+    private
+
+    def record_numeric(value, type)
+      return unless NUMERIC_TYPES.include?(type)
+
+      n = Float(value) rescue nil
+      return unless n
+
+      @numeric_count += 1
+      @numeric_min = n if @numeric_min.nil? || n < @numeric_min
+      @numeric_max = n if @numeric_max.nil? || n > @numeric_max
+      @numeric_sum += n
+    end
+
+    public
 
     def cardinality
       @value_counts.size
@@ -62,12 +96,19 @@ module Iriq
     def dump
       # Dup the hashes so callers can mutate the dump structure (test
       # fixtures, post-processing) without aliasing the live state.
-      {
+      out = {
         "value_counts" => @value_counts.dup,
         "type_counts"  => @type_counts.transform_keys(&:to_s),
         "total"        => @total,
         "max_values"   => @max_values,
       }
+      if @numeric_count.positive?
+        out["numeric_count"] = @numeric_count
+        out["numeric_min"]   = @numeric_min
+        out["numeric_max"]   = @numeric_max
+        out["numeric_sum"]   = @numeric_sum
+      end
+      out
     end
 
     def self.from_dump(h)
@@ -77,6 +118,12 @@ module Iriq
       tc = Hash.new(0).merge(h["type_counts"].transform_keys(&:to_sym))
       stats.instance_variable_set(:@value_counts, vc)
       stats.instance_variable_set(:@type_counts, tc)
+      if h["numeric_count"]
+        stats.instance_variable_set(:@numeric_count, h["numeric_count"])
+        stats.instance_variable_set(:@numeric_min, h["numeric_min"])
+        stats.instance_variable_set(:@numeric_max, h["numeric_max"])
+        stats.instance_variable_set(:@numeric_sum, h["numeric_sum"])
+      end
       stats
     end
   end

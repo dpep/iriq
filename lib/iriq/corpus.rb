@@ -237,11 +237,20 @@ module Iriq
       "{#{entry[:hint] || entry[:type]}}"
     end
 
+    # Shape-y types whose values are often a small fixed set (e.g.
+    # /api/v1/... where only `v1` ever appears). For these, run through
+    # the same cardinality/value-fraction analysis literals get — a
+    # dominant value gets preserved as :stable_literal instead of
+    # being placeholdered as a generic {version}/{locale}/{currency}.
+    STABLE_VARIABLE_TYPES = %i[version locale currency boolean].freeze
+
     def classify(entry, stats)
       variable = entry[:variable]
 
       return variable ? :variable_identifier : :ambiguous if stats.nil? || stats.total.zero?
-      return :variable_identifier if variable
+      if variable && !STABLE_VARIABLE_TYPES.include?(entry[:type])
+        return :variable_identifier
+      end
 
       value            = entry[:value]
       total            = stats.total
@@ -249,6 +258,17 @@ module Iriq
       cardinality_frac = stats.cardinality.to_f / total
       enough_data      = total >= MIN_OBSERVATIONS_FOR_INFERENCE
       value_frac       = stats.value_fraction(value)
+
+      # For STABLE_VARIABLE_TYPES (version, locale, currency, boolean),
+      # a dominant value wins over the variable-dominance branch — a
+      # single-version /api/v1/... pattern stays as the literal `v1`
+      # rather than placeholdering to {version}. Without dominance,
+      # fall through to :variable_identifier (the per-type placeholder).
+      if variable
+        return :stable_literal if value_frac >= STABLE_LITERAL_THRESHOLD
+
+        return :variable_identifier
+      end
 
       if enough_data && variable_frac >= VARIABLE_DOMINANCE_THRESHOLD
         # Position is dominated by variable types (UUIDs, integers, etc.).

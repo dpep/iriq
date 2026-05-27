@@ -63,9 +63,23 @@ module Iriq
     # unambiguous from a single value.
     VERSION_RE = /\Av\d+(?:\.\d+)*(?:[-+][A-Za-z0-9.\-]+)?\z/.freeze
     # BCP 47-ish locale: 2-3 letter language + separator + region/script.
-    # We require the separator — bare `en` looks identical to plain
-    # literals and we'd over-classify everything.
+    # The bare 2/3-letter case is handled via LOCALE_LANGUAGE_CODES below
+    # so we don't over-classify random short words.
     LOCALE_RE  = /\A[a-z]{2,3}[-_][A-Za-z][A-Za-z0-9]+\z/.freeze
+    # Inline ISO 639-1 (subset) — the language codes we'll accept as a
+    # standalone locale segment. Bare `en` / `fr` / `ja` etc. classify as
+    # :locale; tokens not in the list (like the 2-letter literal `to` or
+    # `if`) stay as :literal. Curated for the languages that show up in
+    # real `?lang=` traffic; expandable as needed.
+    LOCALE_LANGUAGE_CODES = %w[
+      ar bg bn ca cs da de el en es et fa fi fr gu he hi hr hu id it
+      ja ka kk km kn ko lt lv mk ml mr ms my nb nl no pa pl pt ro ru
+      sk sl sr sv sw ta te th tl tr uk ur vi zh
+    ].to_set.freeze
+    # 2 letters only — 3-letter slot is handled by CURRENCY_RE (ISO 4217
+    # codes are 3 chars; ISO 639-2 language codes are too, but we don't
+    # ship that list and would shadow currencies for ambiguous strings).
+    LOCALE_BARE_RE = /\A[a-z]{2}\z/.freeze
     # ISO 4217 currency codes — inline allowlist of the ~30 most-used
     # codes covers the long tail of real traffic. Three-letter all-caps
     # strings (`FAQ`, `FOO`) would otherwise leak into the literal type
@@ -127,6 +141,7 @@ module Iriq
       when VERSION_RE  then :version
       when BOOLEAN_RE  then :boolean
       when LOCALE_RE   then :locale
+      when LOCALE_BARE_RE then classify_locale(segment)
       when DATE_RE, DATE_SLASH_RE, DATE_US_RE then :date
       when ISO_TIME_RE then :timestamp
       when INTEGER_RE  then classify_integer(segment)
@@ -158,6 +173,14 @@ module Iriq
       :opaque_id
     end
 
+    # Bare 2- or 3-letter lowercase token — only :locale when it's a known
+    # ISO 639-1 code. Otherwise it's a regular literal (`if`, `to`, `of`).
+    def classify_locale(segment)
+      return :locale if LOCALE_LANGUAGE_CODES.include?(segment)
+
+      :literal
+    end
+
     def classify_integer(segment)
       n = segment.to_i
       return :timestamp if TS_MILLIS_RANGE.cover?(n)
@@ -174,11 +197,11 @@ module Iriq
         end
       end
 
-      # 4-digit integer in the plausible-year window. Same caveat as
-      # YYYYMMDD: a 4-digit ID happening to fall in this range will
-      # also classify as :year; corpus-level type majority will surface
-      # mis-classifications.
-      return :year if segment.length == 4 && YEAR_RANGE.cover?(n)
+      # Plausible-year window detection deliberately doesn't happen here.
+      # A single 4-digit int in 1900..2100 is ambiguous (could be a year
+      # OR an integer ID). The corpus layer promotes a position to :year
+      # via min/max range analysis once it has enough samples — see
+      # Cluster#param_type.
 
       :integer
     end

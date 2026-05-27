@@ -79,13 +79,29 @@ var (
 	booleanRE = regexp.MustCompile(`^(?i:true|false)$`)
 	// SemVer-ish version with explicit `v` prefix.
 	versionRE = regexp.MustCompile(`^v\d+(?:\.\d+)*(?:[-+][A-Za-z0-9.\-]+)?$`)
-	// BCP 47-ish locale — requires the separator so bare `en` stays
-	// :literal.
-	localeRE  = regexp.MustCompile(`^[a-z]{2,3}[-_][A-Za-z][A-Za-z0-9]+$`)
+	// BCP 47-ish locale — has separator. Bare 2-letter case handled via
+	// the inline ISO 639-1 allowlist below.
+	localeRE = regexp.MustCompile(`^[a-z]{2,3}[-_][A-Za-z][A-Za-z0-9]+$`)
+	// Bare 2-letter slot; only :locale when it's in the language-code
+	// allowlist. 3-letter slot is reserved for currencies.
+	localeBareRE = regexp.MustCompile(`^[a-z]{2}$`)
 	// Three-letter shape; validated against the inline ISO 4217 list in
 	// classifyCurrency so we don't catch random 3-letter tokens.
 	currencyRE = regexp.MustCompile(`^[A-Za-z]{3}$`)
 )
+
+// localeLanguageCodes is the inline ISO 639-1 (subset) — codes commonly
+// used in real `?lang=` traffic. Tokens not in the list (`if`, `to`)
+// stay as :literal.
+var localeLanguageCodes = map[string]struct{}{
+	"ar": {}, "bg": {}, "bn": {}, "ca": {}, "cs": {}, "da": {}, "de": {}, "el": {},
+	"en": {}, "es": {}, "et": {}, "fa": {}, "fi": {}, "fr": {}, "gu": {}, "he": {},
+	"hi": {}, "hr": {}, "hu": {}, "id": {}, "it": {}, "ja": {}, "ka": {}, "kk": {},
+	"km": {}, "kn": {}, "ko": {}, "lt": {}, "lv": {}, "mk": {}, "ml": {}, "mr": {},
+	"ms": {}, "my": {}, "nb": {}, "nl": {}, "no": {}, "pa": {}, "pl": {}, "pt": {},
+	"ro": {}, "ru": {}, "sk": {}, "sl": {}, "sr": {}, "sv": {}, "sw": {}, "ta": {},
+	"te": {}, "th": {}, "tl": {}, "tr": {}, "uk": {}, "ur": {}, "vi": {}, "zh": {},
+}
 
 // currencyCodes is the inline ISO 4217 allowlist — ~35 entries covering
 // the most-used codes in real traffic. Full PSL-style coverage would add
@@ -181,6 +197,8 @@ func computeClassification(segment string) SegmentType {
 		return TypeBoolean
 	case localeRE.MatchString(segment):
 		return TypeLocale
+	case localeBareRE.MatchString(segment):
+		return classifyLocaleBare(segment)
 	case dateRE.MatchString(segment), dateSlashRE.MatchString(segment), dateUSRE.MatchString(segment):
 		return TypeDate
 	case isoTimeRE.MatchString(segment):
@@ -212,6 +230,15 @@ func classifyCurrency(segment string) SegmentType {
 		return TypeLiteral
 	}
 	return TypeOpaqueID
+}
+
+// classifyLocaleBare promotes a bare 2-letter token to TypeLocale when
+// it's a known ISO 639-1 code. Otherwise it's a regular literal.
+func classifyLocaleBare(segment string) SegmentType {
+	if _, ok := localeLanguageCodes[segment]; ok {
+		return TypeLocale
+	}
+	return TypeLiteral
 }
 
 // classifyIPv4 verifies that each dotted-quad octet ≤ 255. Falls back to
@@ -251,12 +278,9 @@ func classifyInteger(segment string) SegmentType {
 		}
 	}
 
-	// 4-digit integer in the plausible-year window. Same caveat as
-	// YYYYMMDD: a 4-digit ID happening to fall in this range will also
-	// classify as :year; corpus-level type majority surfaces mis-classifications.
-	if len(segment) == 4 && n >= yearMin && n <= yearMax {
-		return TypeYear
-	}
+	// Year detection deliberately doesn't happen here — see Cluster.ParamType
+	// for the corpus-level promotion. A single 4-digit int is ambiguous;
+	// only range analysis across observations is reliable.
 
 	return TypeInteger
 }

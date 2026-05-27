@@ -170,11 +170,11 @@
     },
     {
       "input": "2026",
-      "type": "year"
+      "type": "integer"
     },
     {
       "input": "1999",
-      "type": "year"
+      "type": "integer"
     },
     {
       "input": "1800",

@@ -106,6 +106,11 @@ module Iriq
           presence:    @count.positive? ? stats.total.to_f / @count : 0.0,
         }
         row[:values] = enum_values(stats) if type == :enum
+        if stats.numeric_count.positive?
+          row[:min] = stats.numeric_min
+          row[:max] = stats.numeric_max
+          row[:avg] = stats.numeric_avg
+        end
         row
       }.sort_by { |row| [-row[:count], row[:name]] }
     end
@@ -121,13 +126,18 @@ module Iriq
       return nil unless stats
       return nil if stats.total.zero?
 
-      # :enum check first — bounded set of repeated values trumps the
-      # underlying value type. We want `?status=active` to surface as :enum
+      type = stats.dominant_type
+
+      # :year takes priority over :enum for numeric range columns —
+      # a "years 2020..2026" position is more useful described as a
+      # ranged year than as an enum of those specific values.
+      return :year if year_position?(type, stats)
+
+      # :enum check — bounded set of repeated values trumps the underlying
+      # value type. `?status=active|draft|archived` surfaces as :enum
       # (with the value list) rather than :literal even though each value
       # individually classifies as a literal.
       return :enum if enum?(stats)
-
-      type = stats.dominant_type
 
       # :date gate — demote when there isn't enough date-typed quorum.
       if type == :date
@@ -150,6 +160,21 @@ module Iriq
       end
 
       type
+    end
+
+    YEAR_RANGE              = 1900..2100
+    YEAR_MIN_OBSERVATIONS   = 5
+    YEAR_MIN_DISTINCT       = 2
+    YEAR_MAX_DISTINCT       = 150
+
+    def year_position?(type, stats)
+      return false unless type == :integer
+      return false if stats.numeric_count.zero?
+      return false if stats.cardinality < YEAR_MIN_DISTINCT
+      return false if stats.cardinality > YEAR_MAX_DISTINCT
+      return false if stats.total < YEAR_MIN_OBSERVATIONS
+
+      YEAR_RANGE.cover?(stats.numeric_min) && YEAR_RANGE.cover?(stats.numeric_max)
     end
 
     # True when stats shows a bounded set of repeated values worth treating
