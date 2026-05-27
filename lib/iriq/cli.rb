@@ -37,6 +37,7 @@ module Iriq
       Other:
         -h, --help            Show this message
         -j, --json            Emit JSON instead of human-readable output
+            --ndjson          Newline-delimited JSON (one object per line). Implies --json.
         -N, --no-hints        Use {integer_id} placeholders instead of {user_id}
             --no-scheme-less  Skip foo.com/path extraction (explicit-scheme only)
         -V, --version         Print version
@@ -113,6 +114,7 @@ module Iriq
     def parse_options(argv)
       opts = {
         json:        false,
+        ndjson:      false,
         help:        false,
         version:     false,
         hints:       true,
@@ -125,6 +127,7 @@ module Iriq
         o.on("-p", "--parse")        { opts[:sections] << :parse }
         o.on("-n", "--normalize")    { opts[:sections] << :normalize }
         o.on("-j", "--json")         { opts[:json]    = true }
+        o.on("--ndjson")             { opts[:json]    = true; opts[:ndjson] = true }
         o.on("--[no-]hints")         { |v| opts[:hints] = v }
         o.on("-N")                   { opts[:hints] = false }
         o.on("--corpus PATH")        { |v| opts[:corpus] = v }
@@ -215,7 +218,7 @@ module Iriq
 
       if opts[:json]
         out = sections.size == 1 ? payloads.map(&:values).flatten(1) : payloads
-        stdout.puts JSON.generate(out)
+        emit_json(out, opts)
       elsif sections == [:normalize]
         # Most common case — keep it tight: one URL per line, no headers.
         payloads.each { |p| stdout.puts p[:normalize] }
@@ -260,7 +263,7 @@ module Iriq
       sorted = counts.sort_by { |k, c| [-c, first[k]] }
 
       if opts[:json]
-        stdout.puts JSON.generate(sorted.map { |k, c| { iri: k, count: c } })
+        emit_json(sorted.map { |k, c| { iri: k, count: c } }, opts)
       elsif sorted.all? { |_, c| c == 1 }
         sorted.each { |k, _| stdout.puts k }
       else
@@ -314,6 +317,19 @@ module Iriq
       }.reject { |_, v| v.nil? || (v.respond_to?(:empty?) && v.empty?) }
     end
 
+    # Emit a JSON payload to stdout. When --ndjson is set and the payload is
+    # an Array, write one object per line (newline-delimited JSON) instead of
+    # one wrapping array — friendlier for `jq -c`, streaming pipelines, and
+    # log ingest tools. Non-array payloads (single objects) emit the same
+    # under both flags.
+    def emit_json(payload, opts)
+      if opts[:ndjson] && payload.is_a?(Array)
+        payload.each { |item| stdout.puts JSON.generate(item) }
+      else
+        stdout.puts JSON.generate(payload)
+      end
+    end
+
     def emit_sections(data, sections)
       multi = sections.size > 1
       sections.each_with_index do |sec, i|
@@ -339,7 +355,7 @@ module Iriq
       sorted = clusters.sort_by { |c| -c.count }
 
       if opts[:json]
-        stdout.puts JSON.generate(sorted.map(&:to_h))
+        emit_json(sorted.map(&:to_h), opts)
       else
         sorted.each_with_index do |c, i|
           stdout.puts if i > 0

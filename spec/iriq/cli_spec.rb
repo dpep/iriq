@@ -200,6 +200,36 @@ describe Iriq::CLI do
         ])
       end
 
+      it "-n --ndjson emits one JSON value per line" do
+        stdin.string = "see https://foo.com/users/1 and https://foo.com/users/2"
+        expect(run("-n", "--ndjson")).to eq(0)
+        lines = stdout.string.lines.map(&:chomp)
+        expect(lines).to eq([
+          '"https://foo.com/users/{user_id}"',
+          '"https://foo.com/users/{user_id}"',
+        ])
+      end
+
+      it "--ndjson on cluster output emits one cluster per line" do
+        stdin.string = (1..11).map { |n| "https://foo.com/users/#{n}" }.join("\n")
+        expect(run("--ndjson")).to eq(0)
+        lines = stdout.string.lines.map(&:chomp)
+        expect(lines.size).to eq(1)
+        parsed = JSON.parse(lines.first)
+        expect(parsed["shape"]).to eq("/users/{user_id}")
+        expect(parsed["count"]).to eq(11)
+      end
+
+      it "--ndjson on the url-list view emits one {iri,count} per line" do
+        stdin.string = "https://foo.com\nhttps://foo.com\nhttps://bar.com\n"
+        expect(run("--ndjson")).to eq(0)
+        parsed = stdout.string.lines.map { |l| JSON.parse(l) }
+        expect(parsed).to eq([
+          { "iri" => "https://foo.com", "count" => 2 },
+          { "iri" => "https://bar.com", "count" => 1 },
+        ])
+      end
+
       it "-p prints parse output per IRI with a header" do
         stdin.string = "see https://foo.com/users/1"
         expect(run("-p")).to eq(0)

@@ -390,6 +390,7 @@ Flags:
 | `-p, --parse`       | Show parsed fields                                      |
 | `-n, --normalize`   | Show the shape-normalized form                          |
 | `-j, --json`        | Emit JSON                                               |
+| `--ndjson`          | Newline-delimited JSON (one object per line); implies `--json` |
 | `-N, --no-hints`    | Use `{integer_id}` etc. instead of `{user_id}`          |
 | `--no-scheme-less`  | Skip `foo.com/path`-style extraction (explicit-scheme only) |
 | `--corpus PATH`     | Load/create a corpus at PATH (`.json` or `.db`/`.sqlite`/`.sqlite3`) |

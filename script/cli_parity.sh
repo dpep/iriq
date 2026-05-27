@@ -74,6 +74,10 @@ run_pair "pipe -n normalize" \
   "see https://foo.com/users/1 and (https://foo.com/users/2)" -n
 run_pair "pipe -n --json" \
   "see https://foo.com/users/1 and https://foo.com/users/2" -n --json
+run_pair "pipe -n --ndjson" \
+  "see https://foo.com/users/1 and https://foo.com/users/2" -n --ndjson
+run_pair "pipe url-list --ndjson" \
+  $'https://foo.com\nhttps://foo.com\nhttps://bar.com\n' --ndjson
 run_pair "pipe cluster auto" \
   $'https://foo.com/users/1\nhttps://foo.com/users/2\nhttps://foo.com/users/3\nhttps://foo.com/users/4\nhttps://foo.com/users/5\nhttps://foo.com/users/6\nhttps://foo.com/users/7\nhttps://foo.com/users/8\nhttps://foo.com/users/9\nhttps://foo.com/users/10\n'
 
