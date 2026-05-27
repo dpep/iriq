@@ -56,7 +56,7 @@ func TestClustererExplain(t *testing.T) {
 func TestClustererURN(t *testing.T) {
 	c := NewClusterer(nil)
 	_, _ = c.Add("urn:isbn:0451450523", "")
-	_, _ = c.Add("urn:isbn:9999999999", "")
+	_, _ = c.Add("urn:isbn:0140449116", "")
 	if c.Size() != 1 {
 		t.Errorf("expected 1 cluster, got %d", c.Size())
 	}

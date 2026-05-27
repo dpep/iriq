@@ -106,6 +106,16 @@ module Iriq
           presence:    @count.positive? ? stats.total.to_f / @count : 0.0,
         }
         row[:values] = enum_values(stats) if type == :enum
+        # Verbose value distribution — fractions over tracked occurrences.
+        # Boolean and enum positions get the per-value breakdown (e.g.
+        # `true: 0.97, false: 0.03`). Number positions get the int-vs-float
+        # split via :subtype_distribution.
+        if type == :boolean || type == :enum
+          row[:value_distribution] = value_distribution(stats)
+        end
+        if type == :number
+          row[:subtype_distribution] = subtype_distribution(stats, %i[integer float])
+        end
         if stats.numeric_count.positive?
           row[:min] = stats.numeric_min
           row[:max] = stats.numeric_max
@@ -132,12 +142,19 @@ module Iriq
       # a "years 2020..2026" position is more useful described as a
       # ranged year than as an enum of those specific values.
       return :year if year_position?(type, stats)
+      # :http_status — 3-digit ints clustered in 100..599 are almost
+      # certainly HTTP statuses. Same shape as :year (range check) but
+      # tighter window. Useful for `?status=...` or path positions that
+      # echo a status code.
+      return :http_status if http_status_position?(type, stats)
 
       # :enum check — bounded set of repeated values trumps the underlying
       # value type. `?status=active|draft|archived` surfaces as :enum
       # (with the value list) rather than :literal even though each value
-      # individually classifies as a literal.
-      return :enum if enum?(stats)
+      # individually classifies as a literal. Skip the override when the
+      # dominant type is already specific (`:boolean` carries more meaning
+      # than a 2-value enum).
+      return :enum if enum?(stats) && type != :boolean
 
       # :date gate — demote when there isn't enough date-typed quorum.
       if type == :date
@@ -177,6 +194,21 @@ module Iriq
       YEAR_RANGE.cover?(stats.numeric_min) && YEAR_RANGE.cover?(stats.numeric_max)
     end
 
+    HTTP_STATUS_RANGE            = 100..599
+    HTTP_STATUS_MIN_OBSERVATIONS = 5
+    HTTP_STATUS_MIN_DISTINCT     = 2
+    HTTP_STATUS_MAX_DISTINCT     = 30
+
+    def http_status_position?(type, stats)
+      return false unless type == :integer
+      return false if stats.numeric_count.zero?
+      return false if stats.cardinality < HTTP_STATUS_MIN_DISTINCT
+      return false if stats.cardinality > HTTP_STATUS_MAX_DISTINCT
+      return false if stats.total < HTTP_STATUS_MIN_OBSERVATIONS
+
+      HTTP_STATUS_RANGE.cover?(stats.numeric_min) && HTTP_STATUS_RANGE.cover?(stats.numeric_max)
+    end
+
     # True when stats shows a bounded set of repeated values worth treating
     # as an enum. See ENUM_* constants at the top of this class.
     def enum?(stats)
@@ -193,6 +225,30 @@ module Iriq
     # so verbose/explain consumers can render the value set.
     def enum_values(stats)
       stats.value_counts.sort_by { |v, n| [-n, v] }.map(&:first)
+    end
+
+    # value_distribution returns the fraction of total observations each
+    # tracked value represents, ordered by descending count then lex. Used
+    # by param_summary for :boolean and :enum positions so callers can
+    # render "true 97%, false 3%"-style breakdowns.
+    def value_distribution(stats)
+      return {} if stats.total.zero?
+
+      stats.value_counts.sort_by { |v, n| [-n, v] }.to_h.transform_values do |n|
+        (n.to_f / stats.total).round(4)
+      end
+    end
+
+    # subtype_distribution slices type_counts to a specific subset and
+    # returns the fraction each subtype represents. Used for the :number
+    # umbrella to expose the int-vs-float split.
+    def subtype_distribution(stats, subtypes)
+      return {} if stats.total.zero?
+
+      subtypes.each_with_object({}) do |t, out|
+        n = stats.type_counts[t] || 0
+        out[t] = (n.to_f / stats.total).round(4) if n.positive?
+      end
     end
 
     # Most common type in stats.type_counts excluding `skip` — lex tie-break

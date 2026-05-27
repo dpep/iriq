@@ -68,6 +68,11 @@ run_pair "normalize date path"   "" -n "https://foo.com/events/20240115/details"
 run_pair "normalize date param"  "" -n "https://foo.com/events?since=2024/01/15&page=5"
 run_pair "normalize network params" "" -n "https://foo.com/admin?ip=192.168.1.1&email=alice@example.com&redirect=https://other.com/x"
 run_pair "normalize ipv6 param"  "" -n "https://foo.com/admin?host=2001:db8::1"
+run_pair "normalize currency path"  "" -n "https://shop.com/pricing/usd/checkout"
+run_pair "normalize currency param" "" -n "https://shop.com/price?currency=eur"
+run_pair "normalize ip collapse"    "" -n "https://foo.com/probe/192.168.1.1"
+run_pair "normalize version path"   "" -n "https://foo.com/api/v1/status"
+run_pair "normalize new types"      "" -n "https://foo.com/upload?type=image/png&token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dQw4w9WgXcQ&phone=%2B15551234567"
 
 # Pipe modes
 run_pair "pipe URL list" \

@@ -13,13 +13,17 @@ module Iriq
   #
   # Pass `canonical_dates: true` to render date-typed segments in canonical
   # ISO form (2024/01/15 → 2024-01-15) instead of as a `{date}` placeholder.
-  # Used by Normalizer for display output; the clusterer keeps the placeholder
-  # form so dated routes still group together.
+  # Pass `canonical_currencies: true` for the same treatment of currency
+  # codes (`usd` → `USD`). Used by Normalizer for display output; the
+  # clusterer keeps the placeholder form so dated/currency routes still
+  # group together.
   class PathShape
-    def initialize(classifier: SegmentClassifier::DEFAULT, hints: true, canonical_dates: false)
-      @classifier      = classifier
-      @hints           = hints
-      @canonical_dates = canonical_dates
+    def initialize(classifier: SegmentClassifier::DEFAULT, hints: true,
+                   canonical_dates: false, canonical_currencies: false)
+      @classifier           = classifier
+      @hints                = hints
+      @canonical_dates      = canonical_dates
+      @canonical_currencies = canonical_currencies
     end
 
     def for(segments)
@@ -45,12 +49,20 @@ module Iriq
         return canon
       end
 
-      placeholder = @hints ? (entry[:hint] || entry[:type]) : entry[:type]
+      if @canonical_currencies && entry[:type] == :currency &&
+         (canon = SegmentClassifier.canonical_currency(entry[:value]))
+        return canon
+      end
+
+      placeholder = @hints ? (entry[:hint] || SegmentClassifier.display_type(entry[:type])) : SegmentClassifier.display_type(entry[:type])
       "{#{placeholder}}"
     end
 
-    def self.for(segments, classifier: SegmentClassifier::DEFAULT, hints: true, canonical_dates: false)
-      new(classifier: classifier, hints: hints, canonical_dates: canonical_dates).for(segments)
+    def self.for(segments, classifier: SegmentClassifier::DEFAULT, hints: true,
+                 canonical_dates: false, canonical_currencies: false)
+      new(classifier: classifier, hints: hints,
+          canonical_dates: canonical_dates,
+          canonical_currencies: canonical_currencies).for(segments)
     end
   end
 end

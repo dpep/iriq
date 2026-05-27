@@ -23,14 +23,16 @@ describe Iriq::PathShape do
     end
 
     it "classifies version segments separately from path literals" do
-      # v1 / v2.0.1 now classify as :version (variable) — hints lift
-      # /api/v1/... to {api_id} since v1 sits in a path-id position.
-      expect(described_class.for(["api", "v1", "status"])).to eq("/api/{api_id}/status")
+      # v1 / v2.0.1 classify as :version. Semantic types (version, locale,
+      # currency, boolean, date) skip the noun-singularize hint so the type
+      # itself surfaces instead of a misleading {api_id} placeholder.
+      expect(described_class.for(["api", "v1", "status"])).to eq("/api/{version}/status")
     end
 
     it "shapes dates and slugs (with hints when possible)" do
+      # Date is a semantic type — surface as {date}, not {post_id}.
       expect(described_class.for(["posts", "2024-05-23", "my-cool-post"]))
-        .to eq("/posts/{post_id}/{slug}")
+        .to eq("/posts/{date}/{slug}")
     end
 
     it "skips the hint when no literal precedes the variable" do

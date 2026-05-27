@@ -34,5 +34,28 @@ describe Iriq::Normalizer do
       expect(described_class.normalize("https://foo.com/users/1", hints: false))
         .to eq("https://foo.com/users/{integer}")
     end
+
+    it "canonicalizes currency segments to upper case" do
+      expect(described_class.normalize("https://shop.com/pricing/usd/checkout"))
+        .to eq("https://shop.com/pricing/USD/checkout")
+    end
+
+    it "canonicalizes currency query params to upper case" do
+      out = described_class.normalize("https://shop.com/price?currency=eur")
+      expect(out).to eq("https://shop.com/price?currency=EUR")
+    end
+
+    it "collapses ipv4/ipv6 to {ip} in placeholder form" do
+      expect(described_class.normalize("https://foo.com/probe/192.168.1.1"))
+        .to eq("https://foo.com/probe/{ip}")
+      expect(described_class.normalize("https://foo.com/probe/::1"))
+        .to eq("https://foo.com/probe/{ip}")
+    end
+
+    it "surfaces semantic types as {type} rather than noun-singular hints" do
+      # version: don't render as {api_id}.
+      expect(described_class.normalize("https://foo.com/api/v1/status"))
+        .to eq("https://foo.com/api/{version}/status")
+    end
   end
 end

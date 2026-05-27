@@ -364,6 +364,56 @@ describe Iriq::Corpus do
       expect(c.normalize("https://foo.com/posts?status=other"))
         .to eq("https://foo.com/posts?status={enum}")
     end
+
+    it "exposes a value_distribution for :enum positions" do
+      c = described_class.new
+      30.times { c.observe("https://foo.com/posts?status=published") }
+      20.times { c.observe("https://foo.com/posts?status=draft") }
+
+      row = c.params_for("https://foo.com/posts").first
+      expect(row[:value_distribution]).to eq("published" => 0.6, "draft" => 0.4)
+    end
+  end
+
+  describe "value distributions" do
+    it "exposes a value_distribution for :boolean positions" do
+      c = described_class.new
+      90.times { c.observe("https://foo.com/x?ok=true") }
+      10.times { c.observe("https://foo.com/x?ok=false") }
+      row = c.params_for("https://foo.com/x").first
+      expect(row[:type]).to eq(:boolean)
+      expect(row[:value_distribution]).to eq("true" => 0.9, "false" => 0.1)
+    end
+
+    it "exposes a subtype_distribution for :number positions" do
+      c = described_class.new
+      40.times { |i| c.observe("https://foo.com/api?amt=#{i + 1}") }
+      60.times { |i| c.observe("https://foo.com/api?amt=#{i + 1}.5") }
+      row = c.params_for("https://foo.com/api").first
+      expect(row[:type]).to eq(:number)
+      expect(row[:subtype_distribution]).to eq(integer: 0.4, float: 0.6)
+    end
+  end
+
+  describe "http_status promotion" do
+    it "surfaces a param as :http_status when integer values fall in 100..599" do
+      c = described_class.new
+      [200, 200, 200, 404, 500].each do |s|
+        c.observe("https://foo.com/api?status=#{s}")
+      end
+      row = c.params_for("https://foo.com/api").first
+      expect(row[:type]).to eq(:http_status)
+    end
+
+    it "stays as :integer when values exceed the status window" do
+      c = described_class.new
+      [200, 999, 1000].each do |s|
+        c.observe("https://foo.com/api?status=#{s}")
+        c.observe("https://foo.com/api?status=#{s + 1}")
+      end
+      row = c.params_for("https://foo.com/api").first
+      expect(row[:type]).to eq(:integer)
+    end
   end
 
   describe "host_strategy" do

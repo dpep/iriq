@@ -1,6 +1,9 @@
 package iriq
 
-import "sort"
+import (
+	"math"
+	"sort"
+)
 
 // MaxClusterExamples mirrors Cluster::MAX_EXAMPLES.
 const MaxClusterExamples = 10
@@ -67,6 +70,40 @@ func isYearPosition(t SegmentType, stats *PositionStats) bool {
 	return true
 }
 
+// HTTPStatus* thresholds mirror Cluster::HTTP_STATUS_* in Ruby — promote
+// an integer position to TypeHTTPStatus when values cluster in 100..599
+// with enough samples and a bounded distinct set.
+const (
+	HTTPStatusRangeMin        = 100
+	HTTPStatusRangeMax        = 599
+	HTTPStatusMinObservations = 5
+	HTTPStatusMinDistinct     = 2
+	HTTPStatusMaxDistinct     = 30
+)
+
+func isHTTPStatusPosition(t SegmentType, stats *PositionStats) bool {
+	if t != TypeInteger {
+		return false
+	}
+	if stats.NumericCount == 0 {
+		return false
+	}
+	card := stats.Cardinality()
+	if card < HTTPStatusMinDistinct || card > HTTPStatusMaxDistinct {
+		return false
+	}
+	if stats.Total < HTTPStatusMinObservations {
+		return false
+	}
+	if stats.NumericMin < HTTPStatusRangeMin || stats.NumericMin > HTTPStatusRangeMax {
+		return false
+	}
+	if stats.NumericMax < HTTPStatusRangeMin || stats.NumericMax > HTTPStatusRangeMax {
+		return false
+	}
+	return true
+}
+
 // SegmentPositionStat is the per-position summary surfaced via
 // Cluster.SegmentStats — one entry per path position.
 type SegmentPositionStat struct {
@@ -115,17 +152,23 @@ func NewClusterWith(key, host, scheme, shape string, maxValues int) *Cluster {
 // distinct observed values (descending count, lex tie-break). NumericCount
 // is non-zero when the position has at least one integer / float
 // observation; Min/Max/Avg only meaningful in that case.
+//
+// ValueDistribution carries per-value fractions for TypeBoolean and
+// TypeEnum positions (e.g. {"true": 0.97, "false": 0.03}).
+// SubtypeDistribution carries the int-vs-float split for TypeNumber.
 type ParamSummary struct {
-	Name         string
-	Count        int
-	Type         SegmentType
-	Cardinality  int
-	Presence     float64
-	Values       []string // populated only for TypeEnum
-	NumericCount int
-	Min          float64
-	Max          float64
-	Avg          float64
+	Name                string
+	Count               int
+	Type                SegmentType
+	Cardinality         int
+	Presence            float64
+	Values              []string // populated only for TypeEnum
+	NumericCount        int
+	Min                 float64
+	Max                 float64
+	Avg                 float64
+	ValueDistribution   map[string]float64
+	SubtypeDistribution map[SegmentType]float64
 }
 
 func (c *Cluster) ParamSummary() []ParamSummary {
@@ -145,6 +188,12 @@ func (c *Cluster) ParamSummary() []ParamSummary {
 		if row.Type == TypeEnum {
 			row.Values = enumValues(stats)
 		}
+		if row.Type == TypeBoolean || row.Type == TypeEnum {
+			row.ValueDistribution = valueDistribution(stats)
+		}
+		if row.Type == TypeNumber {
+			row.SubtypeDistribution = subtypeDistribution(stats, []SegmentType{TypeInteger, TypeFloat})
+		}
 		if stats.NumericCount > 0 {
 			row.NumericCount = stats.NumericCount
 			row.Min = stats.NumericMin
@@ -156,6 +205,41 @@ func (c *Cluster) ParamSummary() []ParamSummary {
 	// Stable order: by descending count, name asc.
 	sortParamSummary(out)
 	return out
+}
+
+// valueDistribution returns the per-value fraction over total observations,
+// rounded to 4 decimals. Caller can iterate value_counts.Keys() if order is
+// needed; the map itself is unordered.
+func valueDistribution(stats *PositionStats) map[string]float64 {
+	if stats.Total == 0 {
+		return nil
+	}
+	out := make(map[string]float64, len(stats.ValueCounts))
+	for v, n := range stats.ValueCounts {
+		out[v] = roundFrac(float64(n) / float64(stats.Total))
+	}
+	return out
+}
+
+// subtypeDistribution slices type_counts to a specific subset and returns
+// fractions per subtype, rounded to 4 decimals.
+func subtypeDistribution(stats *PositionStats, subtypes []SegmentType) map[SegmentType]float64 {
+	if stats.Total == 0 {
+		return nil
+	}
+	out := map[SegmentType]float64{}
+	for _, t := range subtypes {
+		if n := stats.TypeCounts[t]; n > 0 {
+			out[t] = roundFrac(float64(n) / float64(stats.Total))
+		}
+	}
+	return out
+}
+
+// roundFrac rounds to 4 decimal places — match Ruby's `.round(4)` so
+// JSON output is identical across runtimes.
+func roundFrac(f float64) float64 {
+	return math.Round(f*10000) / 10000
 }
 
 // enumValues returns the distinct values tracked in stats, sorted by
@@ -211,9 +295,16 @@ func (c *Cluster) ParamType(name string) SegmentType {
 	if isYearPosition(t, stats) {
 		return TypeYear
 	}
+	// HTTP status — 3-digit ints clustered in 100..599 are almost certainly
+	// HTTP statuses. Same range-promotion pattern as year, tighter window.
+	if isHTTPStatusPosition(t, stats) {
+		return TypeHTTPStatus
+	}
 
 	// Enum check — bounded value set trumps the underlying value type.
-	if isEnum(stats) {
+	// Skip when the dominant type is already specific (:boolean carries
+	// more meaning than a 2-value enum).
+	if isEnum(stats) && t != TypeBoolean {
 		return TypeEnum
 	}
 

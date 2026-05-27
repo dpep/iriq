@@ -181,6 +181,54 @@
       "type": "integer"
     },
     {
+      "input": "by-locale",
+      "type": "slug"
+    },
+    {
+      "input": "if",
+      "type": "literal"
+    },
+    {
+      "input": "to",
+      "type": "literal"
+    },
+    {
+      "input": "+15551234567",
+      "type": "phone"
+    },
+    {
+      "input": "+1 (555) 123-4567",
+      "type": "phone"
+    },
+    {
+      "input": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dQw4w9WgXcQ",
+      "type": "jwt"
+    },
+    {
+      "input": "image/png",
+      "type": "mime"
+    },
+    {
+      "input": "application/vnd.api+json",
+      "type": "mime"
+    },
+    {
+      "input": "text/html",
+      "type": "mime"
+    },
+    {
+      "input": "foo.com/bar",
+      "type": "url"
+    },
+    {
+      "input": "sub.foo.com/",
+      "type": "url"
+    },
+    {
+      "input": "image.png",
+      "type": "opaque_id"
+    },
+    {
       "input": "こんにちは",
       "type": "literal"
     },
