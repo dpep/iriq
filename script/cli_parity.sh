@@ -89,6 +89,8 @@ run_pair "pipe -n --json" \
   "see https://foo.com/users/1 and https://foo.com/users/2" -n --json
 run_pair "pipe -n --ndjson" \
   "see https://foo.com/users/1 and https://foo.com/users/2" -n --ndjson
+run_pair "pipe -n -J (short ndjson)" \
+  "see https://foo.com/users/1 and https://foo.com/users/2" -nJ
 run_pair "pipe url-list --ndjson" \
   $'https://foo.com\nhttps://foo.com\nhttps://bar.com\n' --ndjson
 run_pair "pipe cluster auto" \

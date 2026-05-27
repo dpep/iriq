@@ -42,7 +42,7 @@ Corpus + stats:
 Other:
   -h, --help            Show this message
   -j, --json            Emit JSON instead of human-readable output
-      --ndjson          Newline-delimited JSON (one object per line). Implies --json.
+  -J, --ndjson          Newline-delimited JSON (one object per line). Implies --json.
   -N, --no-hints        Use {integer} placeholders instead of {user_id}
       --no-scheme-less  Skip foo.com/path extraction (explicit-scheme only)
   -V, --version         Print version
@@ -230,7 +230,7 @@ func parseOptions(argv []string) ([]string, *options, error) {
 			opts.version = true
 		case a == "-j" || a == "--json":
 			opts.json = true
-		case a == "--ndjson":
+		case a == "-J" || a == "--ndjson":
 			opts.json = true
 			opts.ndjson = true
 		case a == "--stats":
@@ -283,6 +283,9 @@ func parseOptions(argv []string) ([]string, *options, error) {
 					opts.sections = append(opts.sections, sectionNormalize)
 				case 'j':
 					opts.json = true
+				case 'J':
+					opts.json = true
+					opts.ndjson = true
 				case 'N':
 					opts.hints = false
 				case 'h':

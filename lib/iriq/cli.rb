@@ -40,7 +40,7 @@ module Iriq
       Other:
         -h, --help            Show this message
         -j, --json            Emit JSON instead of human-readable output
-            --ndjson          Newline-delimited JSON (one object per line). Implies --json.
+        -J, --ndjson          Newline-delimited JSON (one object per line). Implies --json.
         -N, --no-hints        Use {integer} placeholders instead of {user_id}
             --no-scheme-less  Skip foo.com/path extraction (explicit-scheme only)
         -V, --version         Print version
@@ -131,7 +131,7 @@ module Iriq
         o.on("-p", "--parse")        { opts[:sections] << :parse }
         o.on("-n", "--normalize")    { opts[:sections] << :normalize }
         o.on("-j", "--json")         { opts[:json]    = true }
-        o.on("--ndjson")             { opts[:json]    = true; opts[:ndjson] = true }
+        o.on("-J", "--ndjson")       { opts[:json]    = true; opts[:ndjson] = true }
         o.on("--[no-]hints")         { |v| opts[:hints] = v }
         o.on("-N")                   { opts[:hints] = false }
         o.on("--corpus PATH")        { |v| opts[:corpus] = v }
