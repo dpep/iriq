@@ -298,7 +298,7 @@ describe Iriq::Corpus do
     end
   end
 
-  describe "float classification + :numeric umbrella" do
+  describe "float classification + :number umbrella" do
     it "classifies a float value as :float" do
       expect(Iriq::SegmentClassifier::DEFAULT.classify("3.14")).to eq(:float)
       expect(Iriq::SegmentClassifier::DEFAULT.classify("-2.5")).to eq(:float)
@@ -311,14 +311,14 @@ describe Iriq::Corpus do
         .to eq("https://foo.com/api?amt={float}")
     end
 
-    it "promotes to :numeric when ints and floats are mixed without a clear winner" do
+    it "promotes to :number when ints and floats are mixed without a clear winner" do
       c = described_class.new
       60.times { |i| c.observe("https://foo.com/api?amt=#{i + 1}.99") }
       40.times { |i| c.observe("https://foo.com/api?amt=#{i + 100}") }
 
-      expect(c.params_for("https://foo.com/api").first[:type]).to eq(:numeric)
+      expect(c.params_for("https://foo.com/api").first[:type]).to eq(:number)
       expect(c.normalize("https://foo.com/api?amt=99.5"))
-        .to eq("https://foo.com/api?amt={numeric}")
+        .to eq("https://foo.com/api?amt={number}")
     end
 
     it "stays as :float when floats dominate above subtype threshold" do

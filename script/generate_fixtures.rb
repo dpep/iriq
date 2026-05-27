@@ -51,6 +51,11 @@ CLASSIFIER_INPUTS = [
   "::1", "2001:db8::1", "fe80::1", "12:34",
   "https://foo.com/bar", "ftp://files.example.com/x",
   "alice@example.com", "user.name+tag@sub.example.co.uk",
+  "true", "false", "TRUE",
+  "v1", "v2.0.1", "v1.2.3-beta", "1.2.3",
+  "en-US", "fr_CA", "zh-Hant",
+  "USD", "eur", "FAQ",
+  "2026", "1999", "1800",
   "こんにちは", "",
 ].freeze
 

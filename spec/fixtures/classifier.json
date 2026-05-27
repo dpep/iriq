@@ -117,6 +117,70 @@
       "type": "email"
     },
     {
+      "input": "true",
+      "type": "boolean"
+    },
+    {
+      "input": "false",
+      "type": "boolean"
+    },
+    {
+      "input": "TRUE",
+      "type": "boolean"
+    },
+    {
+      "input": "v1",
+      "type": "version"
+    },
+    {
+      "input": "v2.0.1",
+      "type": "version"
+    },
+    {
+      "input": "v1.2.3-beta",
+      "type": "version"
+    },
+    {
+      "input": "1.2.3",
+      "type": "opaque_id"
+    },
+    {
+      "input": "en-US",
+      "type": "locale"
+    },
+    {
+      "input": "fr_CA",
+      "type": "locale"
+    },
+    {
+      "input": "zh-Hant",
+      "type": "locale"
+    },
+    {
+      "input": "USD",
+      "type": "currency"
+    },
+    {
+      "input": "eur",
+      "type": "currency"
+    },
+    {
+      "input": "FAQ",
+      "type": "literal"
+    },
+    {
+      "input": "2026",
+      "type": "year"
+    },
+    {
+      "input": "1999",
+      "type": "year"
+    },
+    {
+      "input": "1800",
+      "type": "integer"
+    },
+    {
       "input": "こんにちは",
       "type": "literal"
     },

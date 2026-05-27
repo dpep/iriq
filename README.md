@@ -154,9 +154,14 @@ Iriq::Inflector.reset_adapter!
 `Iriq::SegmentClassifier` returns one of:
 
 - `:literal` — plain word (`users`, `orders`, `Profile`, `こんにちは`)
-- `:integer_id` — pure digits below the timestamp range (`1`, `123`, `42`)
+- `:integer` — pure digits below the timestamp range (`1`, `123`, `42`)
 - `:float` — decimal with digits on both sides (`3.14`, `-2.5`, `1.0`)
-- `:numeric` — corpus-only umbrella when ints and floats coexist at one position without a clear majority
+- `:number` — corpus-only umbrella when ints and floats coexist at one position without a clear majority
+- `:year` — 4-digit integer in 1900..2100 (`2026`, `1999`)
+- `:boolean` — `true` / `false` (any case); `0`/`1` are caught by the `:enum` umbrella when they cluster
+- `:version` — semver-ish with `v` prefix (`v1`, `v2.0.1`, `v1.2.3-beta`)
+- `:locale` — BCP 47-ish with separator (`en-US`, `fr_CA`, `zh-Hant`)
+- `:currency` — ISO 4217 codes from a ~35-entry allowlist (`USD`, `EUR`, `JPY`)
 - `:uuid` — `f47ac10b-58cc-4372-a567-0e02b2c3d479`
 - `:date` — `2024-05-23`, `2024/05/23`, `20240523`, `05/23/2024` (US, query-params only — slashes can't appear in path segments). Canonicalized to ISO in `--normalize` output.
 - `:timestamp` — ISO 8601, or 10/13-digit UNIX epoch
@@ -166,6 +171,7 @@ Iriq::Inflector.reset_adapter!
 - `:ipv6` — full or compressed (`::1`, `2001:db8::1`, full 8-group form)
 - `:url` — value-as-URL (`https://...`, `ftp://...`); useful for redirect params
 - `:email` — `local@host.tld`
+- `:enum` — corpus-only umbrella for bounded value sets (≥20 obs, ≤10 distinct)
 - `:opaque_id` — short alphanumeric mix that doesn't fit elsewhere
 
 Heuristics are deterministic and ordered — the first matching rule wins.

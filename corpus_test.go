@@ -203,7 +203,7 @@ func TestCorpusFloatAndNumeric(t *testing.T) {
 		t.Errorf("pure float: got %q", got)
 	}
 
-	// Mixed ints + floats promote to :numeric.
+	// Mixed ints + floats promote to :number.
 	c2 := NewCorpus()
 	for i := 0; i < 60; i++ {
 		_, _ = c2.Observe("https://foo.com/api?amt=" + itoa(i+1) + ".5")
@@ -212,11 +212,11 @@ func TestCorpusFloatAndNumeric(t *testing.T) {
 		_, _ = c2.Observe("https://foo.com/api?amt=" + itoa(i+100))
 	}
 	got2, _ := c2.Normalize("https://foo.com/api?amt=12.34")
-	if got2 != "https://foo.com/api?amt={numeric}" {
+	if got2 != "https://foo.com/api?amt={number}" {
 		t.Errorf("mixed: got %q", got2)
 	}
 	ps := c2.ParamsFor("https://foo.com/api")
-	if len(ps) != 1 || ps[0].Type != TypeNumeric {
+	if len(ps) != 1 || ps[0].Type != TypeNumber {
 		t.Errorf("ParamsFor: got %+v", ps)
 	}
 }

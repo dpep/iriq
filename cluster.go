@@ -11,13 +11,13 @@ const MaxClusterExamples = 10
 // accident, so we require quorum before canonicalizing.
 const DateConfidenceThreshold = 0.8
 
-// NumericConfidenceThreshold + NumericSubtypeThreshold gate the :numeric
-// umbrella. Promote to :numeric when combined integer + float observations
+// NumberConfidenceThreshold + NumberSubtypeThreshold gate the :number
+// umbrella. Promote to :number when combined integer + float observations
 // dominate (≥ threshold) AND neither subtype alone is the clear winner
 // (each below subtype threshold).
 const (
-	NumericConfidenceThreshold = 0.8
-	NumericSubtypeThreshold    = 0.8
+	NumberConfidenceThreshold = 0.8
+	NumberSubtypeThreshold    = 0.8
 )
 
 // Enum* thresholds. Promote a param to TypeEnum when the corpus has seen
@@ -173,15 +173,15 @@ func (c *Cluster) ParamType(name string) SegmentType {
 		return TypeLiteral
 	}
 
-	// :numeric umbrella — promote when ints + floats together dominate but
+	// :number umbrella — promote when ints + floats together dominate but
 	// neither alone is the clear winner.
 	if t == TypeInteger || t == TypeFloat {
 		intFrac := float64(stats.TypeCounts[TypeInteger]) / float64(stats.Total)
 		floatFrac := float64(stats.TypeCounts[TypeFloat]) / float64(stats.Total)
-		if intFrac < NumericSubtypeThreshold &&
-			floatFrac < NumericSubtypeThreshold &&
-			(intFrac+floatFrac) >= NumericConfidenceThreshold {
-			return TypeNumeric
+		if intFrac < NumberSubtypeThreshold &&
+			floatFrac < NumberSubtypeThreshold &&
+			(intFrac+floatFrac) >= NumberConfidenceThreshold {
+			return TypeNumber
 		}
 	}
 

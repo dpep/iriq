@@ -14,11 +14,11 @@ const (
 	TypeLiteral    SegmentType = "literal"
 	TypeInteger  SegmentType = "integer"
 	TypeFloat      SegmentType = "float"
-	// TypeNumeric is a corpus-only umbrella surfaced by Cluster.ParamType
+	// TypeNumber is a corpus-only umbrella surfaced by Cluster.ParamType
 	// when both :integer and :float observations exist at the same
 	// position without either hitting a strong majority. The classifier
-	// never returns TypeNumeric for an individual value.
-	TypeNumeric    SegmentType = "numeric"
+	// never returns TypeNumber for an individual value.
+	TypeNumber    SegmentType = "number"
 	TypeUUID       SegmentType = "uuid"
 	TypeDate       SegmentType = "date"
 	TypeTimestamp  SegmentType = "timestamp"
@@ -28,6 +28,11 @@ const (
 	TypeIPv6       SegmentType = "ipv6"
 	TypeURL        SegmentType = "url"
 	TypeEmail      SegmentType = "email"
+	TypeBoolean    SegmentType = "boolean"
+	TypeVersion    SegmentType = "version"
+	TypeLocale     SegmentType = "locale"
+	TypeCurrency   SegmentType = "currency"
+	TypeYear       SegmentType = "year"
 	// TypeEnum is a corpus-only umbrella surfaced by Cluster.ParamType when
 	// a position has a bounded set of repeated values across enough samples
 	// (see Enum* thresholds in cluster.go).
@@ -67,6 +72,36 @@ var (
 	ipv6CompressedRE = regexp.MustCompile(`^[0-9a-fA-F:]{2,}$`)
 	urlRE            = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.\-]*://\S+$`)
 	emailRE          = regexp.MustCompile(`^[A-Za-z0-9._%+\-]+@[A-Za-z0-9](?:[A-Za-z0-9\-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9\-]*[A-Za-z0-9])?)+$`)
+
+	// Boolean literal — case-insensitive. `0`/`1` look like integers from
+	// a single value alone; the corpus's :enum detection picks them up
+	// when they appear as a bounded set on a param.
+	booleanRE = regexp.MustCompile(`^(?i:true|false)$`)
+	// SemVer-ish version with explicit `v` prefix.
+	versionRE = regexp.MustCompile(`^v\d+(?:\.\d+)*(?:[-+][A-Za-z0-9.\-]+)?$`)
+	// BCP 47-ish locale — requires the separator so bare `en` stays
+	// :literal.
+	localeRE  = regexp.MustCompile(`^[a-z]{2,3}[-_][A-Za-z][A-Za-z0-9]+$`)
+	// Three-letter shape; validated against the inline ISO 4217 list in
+	// classifyCurrency so we don't catch random 3-letter tokens.
+	currencyRE = regexp.MustCompile(`^[A-Za-z]{3}$`)
+)
+
+// currencyCodes is the inline ISO 4217 allowlist — ~35 entries covering
+// the most-used codes in real traffic. Full PSL-style coverage would add
+// ~180 entries; this list is the 80/20 hit.
+var currencyCodes = map[string]struct{}{
+	"USD": {}, "EUR": {}, "GBP": {}, "JPY": {}, "CNY": {}, "CHF": {}, "CAD": {},
+	"AUD": {}, "NZD": {}, "HKD": {}, "SGD": {}, "INR": {}, "KRW": {}, "MXN": {},
+	"BRL": {}, "ZAR": {}, "SEK": {}, "NOK": {}, "DKK": {}, "PLN": {}, "CZK": {},
+	"HUF": {}, "RUB": {}, "TRY": {}, "ILS": {}, "AED": {}, "SAR": {}, "THB": {},
+	"IDR": {}, "PHP": {}, "VND": {}, "TWD": {}, "MYR": {}, "NGN": {}, "EGP": {},
+}
+
+// yearMin / yearMax mirror the Ruby YEAR_RANGE.
+const (
+	yearMin = 1900
+	yearMax = 2100
 )
 
 const (
@@ -138,6 +173,14 @@ func computeClassification(segment string) SegmentType {
 		return TypeIPv6
 	case strings.Contains(segment, "::") && ipv6CompressedRE.MatchString(segment):
 		return TypeIPv6
+	case hashRE.MatchString(segment):
+		return TypeHash
+	case versionRE.MatchString(segment):
+		return TypeVersion
+	case booleanRE.MatchString(segment):
+		return TypeBoolean
+	case localeRE.MatchString(segment):
+		return TypeLocale
 	case dateRE.MatchString(segment), dateSlashRE.MatchString(segment), dateUSRE.MatchString(segment):
 		return TypeDate
 	case isoTimeRE.MatchString(segment):
@@ -146,8 +189,8 @@ func computeClassification(segment string) SegmentType {
 		return classifyInteger(segment)
 	case floatRE.MatchString(segment):
 		return TypeFloat
-	case hashRE.MatchString(segment):
-		return TypeHash
+	case currencyRE.MatchString(segment):
+		return classifyCurrency(segment)
 	case slugRE.MatchString(segment):
 		return TypeSlug
 	case literalRE.MatchString(segment):
@@ -156,6 +199,19 @@ func computeClassification(segment string) SegmentType {
 		return TypeOpaqueID
 	}
 	return TypeLiteral
+}
+
+// classifyCurrency upgrades a 3-letter token to TypeCurrency only when
+// it's in the ISO 4217 allowlist. Otherwise falls through to the literal
+// rules so random 3-letter words like FAQ don't get promoted.
+func classifyCurrency(segment string) SegmentType {
+	if _, ok := currencyCodes[strings.ToUpper(segment)]; ok {
+		return TypeCurrency
+	}
+	if literalRE.MatchString(segment) {
+		return TypeLiteral
+	}
+	return TypeOpaqueID
 }
 
 // classifyIPv4 verifies that each dotted-quad octet ≤ 255. Falls back to
@@ -193,6 +249,13 @@ func classifyInteger(segment string) SegmentType {
 		if y >= 1900 && y <= 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31 {
 			return TypeDate
 		}
+	}
+
+	// 4-digit integer in the plausible-year window. Same caveat as
+	// YYYYMMDD: a 4-digit ID happening to fall in this range will also
+	// classify as :year; corpus-level type majority surfaces mis-classifications.
+	if len(segment) == 4 && n >= yearMin && n <= yearMax {
+		return TypeYear
 	}
 
 	return TypeInteger

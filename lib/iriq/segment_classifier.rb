@@ -4,17 +4,17 @@ module Iriq
   # Returns a symbol from the known TYPES set. Order matters: the first
   # matching rule wins.
   class SegmentClassifier
-    # `:numeric` is a corpus-only umbrella surfaced by Cluster#param_type
+    # `:number` is a corpus-only umbrella surfaced by Cluster#param_type
     # when both `:integer` and `:float` are observed at the same position
     # without either hitting a clear majority. The classifier never returns
-    # `:numeric` for an individual value — every value is unambiguously one
+    # `:number` for an individual value — every value is unambiguously one
     # or the other.
     #
     # `:enum` is similarly corpus-only — it surfaces when a position has a
     # bounded set of distinct values observed across enough samples (see
     # Cluster::ENUM_* thresholds).
-    TYPES = %i[literal integer float numeric uuid date timestamp hash slug
-               ipv4 ipv6 url email enum opaque_id].freeze
+    TYPES = %i[literal integer float number uuid date year timestamp hash slug
+               ipv4 ipv6 url email boolean version locale currency enum opaque_id].freeze
 
     UUID_RE      = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/.freeze
     INTEGER_RE   = /\A\d+\z/.freeze
@@ -51,6 +51,33 @@ module Iriq
     # Simplified email — local@host.tld, no leading/trailing dots in either
     # part. Not RFC 5322 compliant; covers the common shape.
     EMAIL_RE = /\A[A-Za-z0-9._%+\-]+@[A-Za-z0-9](?:[A-Za-z0-9\-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9\-]*[A-Za-z0-9])?)+\z/.freeze
+
+    # Boolean literal — case-insensitive. `0`/`1` look like integers from a
+    # single value alone; the corpus's :enum detection picks them up when
+    # they appear as a bounded value set on a param.
+    BOOLEAN_RE = /\A(?:true|false)\z/i.freeze
+    # SemVer-ish version tag with explicit `v` prefix. Without the prefix
+    # `1.2.3` looks like a float / opaque blob; the `v` keeps it
+    # unambiguous from a single value.
+    VERSION_RE = /\Av\d+(?:\.\d+)*(?:[-+][A-Za-z0-9.\-]+)?\z/.freeze
+    # BCP 47-ish locale: 2-3 letter language + separator + region/script.
+    # We require the separator — bare `en` looks identical to plain
+    # literals and we'd over-classify everything.
+    LOCALE_RE  = /\A[a-z]{2,3}[-_][A-Za-z][A-Za-z0-9]+\z/.freeze
+    # ISO 4217 currency codes — inline allowlist of the ~30 most-used
+    # codes covers the long tail of real traffic. Three-letter all-caps
+    # strings (`FAQ`, `FOO`) would otherwise leak into the literal type
+    # if we relied on shape alone.
+    CURRENCY_CODES = %w[
+      USD EUR GBP JPY CNY CHF CAD AUD NZD HKD SGD
+      INR KRW MXN BRL ZAR SEK NOK DKK PLN CZK HUF
+      RUB TRY ILS AED SAR THB IDR PHP VND TWD MYR
+      NGN EGP
+    ].to_set.freeze
+    CURRENCY_RE    = /\A[A-Za-z]{3}\z/.freeze
+    # Plausible year — 4-digit integer in the 1900..2100 window. Checked
+    # inside classify_integer so we don't shadow shorter / longer ints.
+    YEAR_RANGE = 1900..2100
 
     # Plausible UNIX timestamps (10 digit seconds or 13 digit ms) from
     # roughly 2001 onward.
@@ -94,11 +121,15 @@ module Iriq
       when EMAIL_RE    then :email
       when IPV4_RE     then classify_ipv4(segment)
       when IPV6_RE     then :ipv6
+      when HASH_RE     then :hash
+      when VERSION_RE  then :version
+      when BOOLEAN_RE  then :boolean
+      when LOCALE_RE   then :locale
       when DATE_RE, DATE_SLASH_RE, DATE_US_RE then :date
       when ISO_TIME_RE then :timestamp
       when INTEGER_RE  then classify_integer(segment)
       when FLOAT_RE    then :float
-      when HASH_RE     then :hash
+      when CURRENCY_RE then classify_currency(segment)
       when SLUG_RE     then :slug
       when LITERAL_RE  then :literal
       when OPAQUE_RE   then :opaque_id
@@ -113,6 +144,16 @@ module Iriq
       return :opaque_id unless segment.split(".").all? { |o| (0..255).cover?(o.to_i) }
 
       :ipv4
+    end
+
+    # Three-letter shape — only call it :currency if it's actually in the
+    # ISO 4217 allowlist (case-insensitive). Otherwise fall through to the
+    # literal/opaque rules.
+    def classify_currency(segment)
+      return :currency if CURRENCY_CODES.include?(segment.upcase)
+      return :literal if segment.match?(LITERAL_RE)
+
+      :opaque_id
     end
 
     def classify_integer(segment)
@@ -130,6 +171,12 @@ module Iriq
           return :date
         end
       end
+
+      # 4-digit integer in the plausible-year window. Same caveat as
+      # YYYYMMDD: a 4-digit ID happening to fall in this range will
+      # also classify as :year; corpus-level type majority will surface
+      # mis-classifications.
+      return :year if segment.length == 4 && YEAR_RANGE.cover?(n)
 
       :integer
     end

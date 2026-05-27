@@ -13,12 +13,12 @@ module Iriq
     # YYYYMMDD by accident — without quorum we'd canonicalize random IDs.
     DATE_CONFIDENCE_THRESHOLD = 0.8
 
-    # `:numeric` umbrella thresholds. Promote a position to :numeric when
+    # `:number` umbrella thresholds. Promote a position to :number when
     # the combined :integer + :float observations dominate (≥ majority)
     # AND neither subtype alone hits the strong threshold (we have a clear
     # numeric pattern but it isn't purely ints or purely floats).
-    NUMERIC_CONFIDENCE_THRESHOLD = 0.8
-    NUMERIC_SUBTYPE_THRESHOLD    = 0.8
+    NUMBER_CONFIDENCE_THRESHOLD = 0.8
+    NUMBER_SUBTYPE_THRESHOLD    = 0.8
 
     # `:enum` thresholds. Promote a param to :enum when the corpus has seen
     # enough samples to trust the bound, the value set is small, each value
@@ -137,15 +137,15 @@ module Iriq
         return dominant_excluding(stats, :date) || :literal
       end
 
-      # :numeric umbrella — promote when ints + floats together dominate
+      # :number umbrella — promote when ints + floats together dominate
       # but neither alone is the clear winner.
       if type == :integer || type == :float
         int_frac   = stats.type_counts[:integer].to_f / stats.total
         float_frac = stats.type_counts[:float].to_f / stats.total
-        if int_frac < NUMERIC_SUBTYPE_THRESHOLD &&
-           float_frac < NUMERIC_SUBTYPE_THRESHOLD &&
-           (int_frac + float_frac) >= NUMERIC_CONFIDENCE_THRESHOLD
-          return :numeric
+        if int_frac < NUMBER_SUBTYPE_THRESHOLD &&
+           float_frac < NUMBER_SUBTYPE_THRESHOLD &&
+           (int_frac + float_frac) >= NUMBER_CONFIDENCE_THRESHOLD
+          return :number
         end
       end
 
