@@ -14,11 +14,11 @@ const (
 	TypeLiteral    SegmentType = "literal"
 	TypeInteger  SegmentType = "integer"
 	TypeFloat      SegmentType = "float"
-	// TypeNumeric is a corpus-only umbrella surfaced by Cluster.ParamType
+	// TypeNumber is a corpus-only umbrella surfaced by Cluster.ParamType
 	// when both :integer and :float observations exist at the same
 	// position without either hitting a strong majority. The classifier
-	// never returns TypeNumeric for an individual value.
-	TypeNumeric    SegmentType = "numeric"
+	// never returns TypeNumber for an individual value.
+	TypeNumber    SegmentType = "number"
 	TypeUUID       SegmentType = "uuid"
 	TypeDate       SegmentType = "date"
 	TypeTimestamp  SegmentType = "timestamp"
@@ -28,6 +28,11 @@ const (
 	TypeIPv6       SegmentType = "ipv6"
 	TypeURL        SegmentType = "url"
 	TypeEmail      SegmentType = "email"
+	TypeBoolean    SegmentType = "boolean"
+	TypeVersion    SegmentType = "version"
+	TypeLocale     SegmentType = "locale"
+	TypeCurrency   SegmentType = "currency"
+	TypeYear       SegmentType = "year"
 	// TypeEnum is a corpus-only umbrella surfaced by Cluster.ParamType when
 	// a position has a bounded set of repeated values across enough samples
 	// (see Enum* thresholds in cluster.go).
@@ -67,6 +72,52 @@ var (
 	ipv6CompressedRE = regexp.MustCompile(`^[0-9a-fA-F:]{2,}$`)
 	urlRE            = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.\-]*://\S+$`)
 	emailRE          = regexp.MustCompile(`^[A-Za-z0-9._%+\-]+@[A-Za-z0-9](?:[A-Za-z0-9\-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9\-]*[A-Za-z0-9])?)+$`)
+
+	// Boolean literal — case-insensitive. `0`/`1` look like integers from
+	// a single value alone; the corpus's :enum detection picks them up
+	// when they appear as a bounded set on a param.
+	booleanRE = regexp.MustCompile(`^(?i:true|false)$`)
+	// SemVer-ish version with explicit `v` prefix.
+	versionRE = regexp.MustCompile(`^v\d+(?:\.\d+)*(?:[-+][A-Za-z0-9.\-]+)?$`)
+	// BCP 47-ish locale — has separator. Bare 2-letter case handled via
+	// the inline ISO 639-1 allowlist below.
+	localeRE = regexp.MustCompile(`^[a-z]{2,3}[-_][A-Za-z][A-Za-z0-9]+$`)
+	// Bare 2-letter slot; only :locale when it's in the language-code
+	// allowlist. 3-letter slot is reserved for currencies.
+	localeBareRE = regexp.MustCompile(`^[a-z]{2}$`)
+	// Three-letter shape; validated against the inline ISO 4217 list in
+	// classifyCurrency so we don't catch random 3-letter tokens.
+	currencyRE = regexp.MustCompile(`^[A-Za-z]{3}$`)
+)
+
+// localeLanguageCodes is the inline ISO 639-1 (subset) — codes commonly
+// used in real `?lang=` traffic. Tokens not in the list (`if`, `to`)
+// stay as :literal.
+var localeLanguageCodes = map[string]struct{}{
+	"ar": {}, "bg": {}, "bn": {}, "ca": {}, "cs": {}, "da": {}, "de": {}, "el": {},
+	"en": {}, "es": {}, "et": {}, "fa": {}, "fi": {}, "fr": {}, "gu": {}, "he": {},
+	"hi": {}, "hr": {}, "hu": {}, "id": {}, "it": {}, "ja": {}, "ka": {}, "kk": {},
+	"km": {}, "kn": {}, "ko": {}, "lt": {}, "lv": {}, "mk": {}, "ml": {}, "mr": {},
+	"ms": {}, "my": {}, "nb": {}, "nl": {}, "no": {}, "pa": {}, "pl": {}, "pt": {},
+	"ro": {}, "ru": {}, "sk": {}, "sl": {}, "sr": {}, "sv": {}, "sw": {}, "ta": {},
+	"te": {}, "th": {}, "tl": {}, "tr": {}, "uk": {}, "ur": {}, "vi": {}, "zh": {},
+}
+
+// currencyCodes is the inline ISO 4217 allowlist — ~35 entries covering
+// the most-used codes in real traffic. Full PSL-style coverage would add
+// ~180 entries; this list is the 80/20 hit.
+var currencyCodes = map[string]struct{}{
+	"USD": {}, "EUR": {}, "GBP": {}, "JPY": {}, "CNY": {}, "CHF": {}, "CAD": {},
+	"AUD": {}, "NZD": {}, "HKD": {}, "SGD": {}, "INR": {}, "KRW": {}, "MXN": {},
+	"BRL": {}, "ZAR": {}, "SEK": {}, "NOK": {}, "DKK": {}, "PLN": {}, "CZK": {},
+	"HUF": {}, "RUB": {}, "TRY": {}, "ILS": {}, "AED": {}, "SAR": {}, "THB": {},
+	"IDR": {}, "PHP": {}, "VND": {}, "TWD": {}, "MYR": {}, "NGN": {}, "EGP": {},
+}
+
+// yearMin / yearMax mirror the Ruby YEAR_RANGE.
+const (
+	yearMin = 1900
+	yearMax = 2100
 )
 
 const (
@@ -138,6 +189,16 @@ func computeClassification(segment string) SegmentType {
 		return TypeIPv6
 	case strings.Contains(segment, "::") && ipv6CompressedRE.MatchString(segment):
 		return TypeIPv6
+	case hashRE.MatchString(segment):
+		return TypeHash
+	case versionRE.MatchString(segment):
+		return TypeVersion
+	case booleanRE.MatchString(segment):
+		return TypeBoolean
+	case localeRE.MatchString(segment):
+		return TypeLocale
+	case localeBareRE.MatchString(segment):
+		return classifyLocaleBare(segment)
 	case dateRE.MatchString(segment), dateSlashRE.MatchString(segment), dateUSRE.MatchString(segment):
 		return TypeDate
 	case isoTimeRE.MatchString(segment):
@@ -146,14 +207,36 @@ func computeClassification(segment string) SegmentType {
 		return classifyInteger(segment)
 	case floatRE.MatchString(segment):
 		return TypeFloat
-	case hashRE.MatchString(segment):
-		return TypeHash
+	case currencyRE.MatchString(segment):
+		return classifyCurrency(segment)
 	case slugRE.MatchString(segment):
 		return TypeSlug
 	case literalRE.MatchString(segment):
 		return TypeLiteral
 	case opaqueRE.MatchString(segment):
 		return TypeOpaqueID
+	}
+	return TypeLiteral
+}
+
+// classifyCurrency upgrades a 3-letter token to TypeCurrency only when
+// it's in the ISO 4217 allowlist. Otherwise falls through to the literal
+// rules so random 3-letter words like FAQ don't get promoted.
+func classifyCurrency(segment string) SegmentType {
+	if _, ok := currencyCodes[strings.ToUpper(segment)]; ok {
+		return TypeCurrency
+	}
+	if literalRE.MatchString(segment) {
+		return TypeLiteral
+	}
+	return TypeOpaqueID
+}
+
+// classifyLocaleBare promotes a bare 2-letter token to TypeLocale when
+// it's a known ISO 639-1 code. Otherwise it's a regular literal.
+func classifyLocaleBare(segment string) SegmentType {
+	if _, ok := localeLanguageCodes[segment]; ok {
+		return TypeLocale
 	}
 	return TypeLiteral
 }
@@ -194,6 +277,10 @@ func classifyInteger(segment string) SegmentType {
 			return TypeDate
 		}
 	}
+
+	// Year detection deliberately doesn't happen here — see Cluster.ParamType
+	// for the corpus-level promotion. A single 4-digit int is ambiguous;
+	// only range analysis across observations is reliable.
 
 	return TypeInteger
 }

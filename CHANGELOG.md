@@ -1,3 +1,11 @@
+###  0.8.0  (2026-05-27)
+- **Breaking**: `:numeric` umbrella renamed to `:number` (Ruby) / `TypeNumeric` → `TypeNumber` (Go). Same semantics.
+- New classifier types: `:boolean` (`true`/`false`, any case), `:version` (`v1`, `v2.0.1`, `v1.2.3-beta` — requires the `v` prefix), `:locale` (BCP 47-ish full forms like `en-US`/`fr_CA`, plus bare 2-letter language codes from an inline ISO 639-1 allowlist of ~55 entries — `en`, `fr`, `ja`, etc.), `:currency` (3-letter codes from an inline ISO 4217 allowlist of ~35 entries).
+- `:year` is now corpus-only: an `:integer` position whose observed min/max land in 1900..2100 with ≥2 distinct values gets promoted. A single 4-digit integer in isolation classifies as `:integer` — only range analysis across observations is reliable.
+- `PositionStats` now tracks `numeric_min` / `numeric_max` / `numeric_sum` / `numeric_count` for `:integer`/`:float` observations. `Cluster#param_summary` surfaces `min` / `max` / `avg` on any param with numeric observations.
+- Shape-y variable types (`:version`, `:locale`, `:currency`, `:boolean`) now respect the stable-literal rule: a single dominant value at a position (`v1` only across many observations) stays as the literal `v1` instead of being placeholdered as `{version}`. High cardinality at the same position falls back to `{version}` / `{locale}` / etc. as expected.
+- 0/1 booleans still classify as `:integer` individually; the existing `:enum` umbrella catches `?flag=0` / `?flag=1` patterns when they cluster.
+
 ###  0.7.0  (2026-05-27)
 - **Breaking**: `:integer_id` classifier type renamed to `:integer` (Ruby) / `TypeIntegerID` → `TypeInteger` (Go). The "ID" semantics live in the hints layer (which still produces `{user_id}` placeholders); the classifier now reflects pure shape. Update any direct `.classify(...) == :integer_id` checks, dump-file consumers, and persisted corpora — the type symbol changed in `type_counts` and raw shape strings (e.g. `/users/{integer_id}` → `/users/{integer}`).
 - New `:enum` umbrella (corpus-only): when a param has a small bounded set of repeated values (default ≥20 observations, ≤10 distinct, each ≥2 occurrences, ≥95% coverage), `Cluster#param_type` returns `:enum` and `param_summary` includes the value list under `:values`. Normalize output keeps the `{enum}` placeholder — values aren't inlined.

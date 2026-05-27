@@ -353,6 +353,17 @@ func placeholderFor(e SegmentHint) string {
 	return "{" + string(e.Type) + "}"
 }
 
+// stableVariableType reports whether a variable-classified segment is one
+// of the shape-y types where a dominant value should still be preserved
+// as a literal (e.g. /api/v1/... with only v1 ever observed).
+func stableVariableType(t SegmentType) bool {
+	switch t {
+	case TypeVersion, TypeLocale, TypeCurrency, TypeBoolean:
+		return true
+	}
+	return false
+}
+
 func (cp *Corpus) classify(entry SegmentHint, stats *PositionStats) Classification {
 	if stats == nil || stats.Total == 0 {
 		if entry.Variable {
@@ -360,15 +371,25 @@ func (cp *Corpus) classify(entry SegmentHint, stats *PositionStats) Classificati
 		}
 		return ClassAmbiguous
 	}
-	if entry.Variable {
+	if entry.Variable && !stableVariableType(entry.Type) {
 		return ClassVariableIdentifier
 	}
+
 	value := entry.Value
 	total := stats.Total
 	variableFrac := stats.VariableFraction(cp.Classifier)
 	cardinalityFrac := float64(stats.Cardinality()) / float64(total)
 	enoughData := total >= MinObservationsForInference
 	valueFrac := stats.ValueFraction(value)
+
+	// For shape-y variable types, a dominant value wins → :stable_literal;
+	// otherwise fall back to :variable_identifier (per-type placeholder).
+	if entry.Variable {
+		if valueFrac >= StableLiteralThreshold {
+			return ClassStableLiteral
+		}
+		return ClassVariableIdentifier
+	}
 
 	switch {
 	case enoughData && variableFrac >= VariableDominanceThreshold:

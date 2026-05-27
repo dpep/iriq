@@ -11,13 +11,13 @@ const MaxClusterExamples = 10
 // accident, so we require quorum before canonicalizing.
 const DateConfidenceThreshold = 0.8
 
-// NumericConfidenceThreshold + NumericSubtypeThreshold gate the :numeric
-// umbrella. Promote to :numeric when combined integer + float observations
+// NumberConfidenceThreshold + NumberSubtypeThreshold gate the :number
+// umbrella. Promote to :number when combined integer + float observations
 // dominate (≥ threshold) AND neither subtype alone is the clear winner
 // (each below subtype threshold).
 const (
-	NumericConfidenceThreshold = 0.8
-	NumericSubtypeThreshold    = 0.8
+	NumberConfidenceThreshold = 0.8
+	NumberSubtypeThreshold    = 0.8
 )
 
 // Enum* thresholds. Promote a param to TypeEnum when the corpus has seen
@@ -30,6 +30,42 @@ const (
 	EnumMinValueCount   = 2
 	EnumMinCoverage     = 0.95
 )
+
+// Year* thresholds. Promote an :integer position to :year when observed
+// values cluster in the 1900..2100 window with enough samples and a
+// modest spread of distinct values.
+const (
+	YearRangeMin        = 1900
+	YearRangeMax        = 2100
+	YearMinObservations = 5
+	YearMinDistinct     = 2
+	YearMaxDistinct     = 150
+)
+
+// isYearPosition reports whether a position's observed integer range
+// matches the year window.
+func isYearPosition(t SegmentType, stats *PositionStats) bool {
+	if t != TypeInteger {
+		return false
+	}
+	if stats.NumericCount == 0 {
+		return false
+	}
+	card := stats.Cardinality()
+	if card < YearMinDistinct || card > YearMaxDistinct {
+		return false
+	}
+	if stats.Total < YearMinObservations {
+		return false
+	}
+	if stats.NumericMin < YearRangeMin || stats.NumericMin > YearRangeMax {
+		return false
+	}
+	if stats.NumericMax < YearRangeMin || stats.NumericMax > YearRangeMax {
+		return false
+	}
+	return true
+}
 
 // SegmentPositionStat is the per-position summary surfaced via
 // Cluster.SegmentStats — one entry per path position.
@@ -76,15 +112,20 @@ func NewClusterWith(key, host, scheme, shape string, maxValues int) *Cluster {
 
 // ParamSummary returns a per-param row useful for display + corpus queries
 // like Corpus.ParamsFor(url). When Type is TypeEnum, Values lists the
-// distinct observed values (descending count, lex tie-break) so verbose /
-// explain consumers can render the set.
+// distinct observed values (descending count, lex tie-break). NumericCount
+// is non-zero when the position has at least one integer / float
+// observation; Min/Max/Avg only meaningful in that case.
 type ParamSummary struct {
-	Name        string
-	Count       int
-	Type        SegmentType
-	Cardinality int
-	Presence    float64
-	Values      []string // populated only for TypeEnum
+	Name         string
+	Count        int
+	Type         SegmentType
+	Cardinality  int
+	Presence     float64
+	Values       []string // populated only for TypeEnum
+	NumericCount int
+	Min          float64
+	Max          float64
+	Avg          float64
 }
 
 func (c *Cluster) ParamSummary() []ParamSummary {
@@ -103,6 +144,12 @@ func (c *Cluster) ParamSummary() []ParamSummary {
 		}
 		if row.Type == TypeEnum {
 			row.Values = enumValues(stats)
+		}
+		if stats.NumericCount > 0 {
+			row.NumericCount = stats.NumericCount
+			row.Min = stats.NumericMin
+			row.Max = stats.NumericMax
+			row.Avg = stats.NumericAvg()
 		}
 		out = append(out, row)
 	}
@@ -156,11 +203,19 @@ func (c *Cluster) ParamType(name string) SegmentType {
 	if stats == nil || stats.Total == 0 {
 		return ""
 	}
-	// Enum check first — bounded value set trumps the underlying value type.
+	t := stats.DominantType()
+
+	// Year wins over enum for numeric range columns — a "years 2020..2026"
+	// position is more useful described as a ranged year than as an enum
+	// of those specific values.
+	if isYearPosition(t, stats) {
+		return TypeYear
+	}
+
+	// Enum check — bounded value set trumps the underlying value type.
 	if isEnum(stats) {
 		return TypeEnum
 	}
-	t := stats.DominantType()
 
 	// :date gate — demote when there isn't enough date-typed quorum.
 	if t == TypeDate {
@@ -173,15 +228,15 @@ func (c *Cluster) ParamType(name string) SegmentType {
 		return TypeLiteral
 	}
 
-	// :numeric umbrella — promote when ints + floats together dominate but
+	// :number umbrella — promote when ints + floats together dominate but
 	// neither alone is the clear winner.
 	if t == TypeInteger || t == TypeFloat {
 		intFrac := float64(stats.TypeCounts[TypeInteger]) / float64(stats.Total)
 		floatFrac := float64(stats.TypeCounts[TypeFloat]) / float64(stats.Total)
-		if intFrac < NumericSubtypeThreshold &&
-			floatFrac < NumericSubtypeThreshold &&
-			(intFrac+floatFrac) >= NumericConfidenceThreshold {
-			return TypeNumeric
+		if intFrac < NumberSubtypeThreshold &&
+			floatFrac < NumberSubtypeThreshold &&
+			(intFrac+floatFrac) >= NumberConfidenceThreshold {
+			return TypeNumber
 		}
 	}
 

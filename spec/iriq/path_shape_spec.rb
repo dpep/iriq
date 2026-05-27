@@ -18,8 +18,14 @@ describe Iriq::PathShape do
         .to eq("/users/{user_uuid}")
     end
 
-    it "leaves literals alone" do
-      expect(described_class.for(["api", "v1", "status"])).to eq("/api/v1/status")
+    it "leaves true literals alone" do
+      expect(described_class.for(["api", "alpha", "status"])).to eq("/api/alpha/status")
+    end
+
+    it "classifies version segments separately from path literals" do
+      # v1 / v2.0.1 now classify as :version (variable) — hints lift
+      # /api/v1/... to {api_id} since v1 sits in a path-id position.
+      expect(described_class.for(["api", "v1", "status"])).to eq("/api/{api_id}/status")
     end
 
     it "shapes dates and slugs (with hints when possible)" do
