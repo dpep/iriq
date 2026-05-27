@@ -77,6 +77,11 @@ func shapeQuery(params *OrderedMap, c *SegmentClassifier) string {
 	for _, k := range keys {
 		v, _ := params.Get(k)
 		t := c.Classify(v)
+		// Param-name hint can lift a generic literal/opaque_id/slug into
+		// a semantic type — `?phone=unknown` becomes `{phone}`.
+		if hint := ParamNameHint(k, t); hint != "" {
+			t = hint
+		}
 		var shaped string
 		if t == TypeDate {
 			if canon := CanonicalDate(v); canon != "" {

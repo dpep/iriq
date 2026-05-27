@@ -116,6 +116,12 @@ module Iriq
         if type == :number
           row[:subtype_distribution] = subtype_distribution(stats, %i[integer float])
         end
+        # :file kind breakdown — derived from tracked value_counts at
+        # summary time. Best-effort: only reflects observations within
+        # the value-tracking cap.
+        if type == :file
+          row[:kind_distribution] = file_kind_distribution(stats)
+        end
         if stats.numeric_count.positive?
           row[:min] = stats.numeric_min
           row[:max] = stats.numeric_max
@@ -174,6 +180,13 @@ module Iriq
            (int_frac + float_frac) >= NUMBER_CONFIDENCE_THRESHOLD
           return :number
         end
+      end
+
+      # Param-name fallback — `?phone=...` overrides a generic literal
+      # type with `:phone` when the value's shape was too weak to detect
+      # on its own. Only fires for overridable types (literal/opaque_id/slug).
+      if (hint = SegmentClassifier.param_name_hint(name, type))
+        return hint
       end
 
       type
@@ -248,6 +261,28 @@ module Iriq
       subtypes.each_with_object({}) do |t, out|
         n = stats.type_counts[t] || 0
         out[t] = (n.to_f / stats.total).round(4) if n.positive?
+      end
+    end
+
+    # file_kind_distribution buckets tracked values by file kind and
+    # returns the fraction each kind represents over tracked observations.
+    # `:unknown` covers values that classified as :file but whose extension
+    # isn't in the kind allowlist (shouldn't normally happen since the
+    # classifier already gates on the kind map). Sums to ≤ 1.0 since
+    # value_counts caps at PositionStats::DEFAULT_MAX_VALUES.
+    def file_kind_distribution(stats)
+      return {} if stats.value_counts.empty?
+
+      total = stats.value_counts.values.sum
+      return {} if total.zero?
+
+      kinds = Hash.new(0)
+      stats.value_counts.each do |value, n|
+        kind = SegmentClassifier.file_kind(value) || :unknown
+        kinds[kind] += n
+      end
+      kinds.sort_by { |k, n| [-n, k.to_s] }.to_h.transform_values do |n|
+        (n.to_f / total).round(4)
       end
     end
 

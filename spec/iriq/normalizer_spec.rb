@@ -57,5 +57,28 @@ describe Iriq::Normalizer do
       expect(described_class.normalize("https://foo.com/api/v1/status"))
         .to eq("https://foo.com/api/{version}/status")
     end
+
+    it "classifies file-shaped path segments as {file}" do
+      expect(described_class.normalize("https://foo.com/uploads/image.png"))
+        .to eq("https://foo.com/uploads/{file}")
+    end
+
+    it "classifies NANP phone path segments as {phone}" do
+      expect(described_class.normalize("https://foo.com/contact/555-666-7777"))
+        .to eq("https://foo.com/contact/{phone}")
+    end
+
+    it "uses param-name hints when the value is too generic" do
+      # `?phone=unknown` — value classifies as :literal but param name lifts it.
+      out = described_class.normalize("https://foo.com/x?phone=unknown&email=tbd")
+      expect(out).to eq("https://foo.com/x?email={email}&phone={phone}")
+    end
+
+    it "doesn't let param-name hints override a specific value type" do
+      # `?phone=123` — value classifies as :integer; param-name hint only fires
+      # for generic types, so the integer wins.
+      out = described_class.normalize("https://foo.com/x?phone=12345")
+      expect(out).to eq("https://foo.com/x?phone={integer}")
+    end
   end
 end

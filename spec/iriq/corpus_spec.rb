@@ -395,6 +395,36 @@ describe Iriq::Corpus do
     end
   end
 
+  describe "param-name hints" do
+    it "lifts a generic-valued param to its hinted type" do
+      c = described_class.new
+      %w[unknown tbd foo bar baz qux quux corge grault garply waldo fred].each do |v|
+        c.observe("https://foo.com/x?phone=#{v}")
+      end
+      row = c.params_for("https://foo.com/x").first
+      expect(row[:type]).to eq(:phone)
+    end
+
+    it "doesn't override a specific value type" do
+      c = described_class.new
+      5.times { |i| c.observe("https://foo.com/x?phone=#{1000 + i}") }
+      row = c.params_for("https://foo.com/x").first
+      expect(row[:type]).to eq(:integer)
+    end
+  end
+
+  describe ":file param summary" do
+    it "surfaces a kind_distribution for file-typed params" do
+      c = described_class.new
+      %w[a.png b.jpg c.gif d.pdf e.csv].each do |f|
+        c.observe("https://foo.com/upload?asset=#{f}")
+      end
+      row = c.params_for("https://foo.com/upload").first
+      expect(row[:type]).to eq(:file)
+      expect(row[:kind_distribution]).to include(image: be > 0.0, document: be > 0.0, data: be > 0.0)
+    end
+  end
+
   describe "http_status promotion" do
     it "surfaces a param as :http_status when integer values fall in 100..599" do
       c = described_class.new

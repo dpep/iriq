@@ -201,6 +201,22 @@
       "type": "phone"
     },
     {
+      "input": "555-666-7777",
+      "type": "phone"
+    },
+    {
+      "input": "(555) 666-7777",
+      "type": "phone"
+    },
+    {
+      "input": "555.666.7777",
+      "type": "phone"
+    },
+    {
+      "input": "123-456-7890",
+      "type": "slug"
+    },
+    {
       "input": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dQw4w9WgXcQ",
       "type": "jwt"
     },
@@ -226,6 +242,26 @@
     },
     {
       "input": "image.png",
+      "type": "file"
+    },
+    {
+      "input": "report.pdf",
+      "type": "file"
+    },
+    {
+      "input": "data.csv",
+      "type": "file"
+    },
+    {
+      "input": "user-photo.jpg",
+      "type": "file"
+    },
+    {
+      "input": "archive.tar.gz",
+      "type": "file"
+    },
+    {
+      "input": "no-known-ext.qwerty",
       "type": "opaque_id"
     },
     {

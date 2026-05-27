@@ -73,6 +73,10 @@ run_pair "normalize currency param" "" -n "https://shop.com/price?currency=eur"
 run_pair "normalize ip collapse"    "" -n "https://foo.com/probe/192.168.1.1"
 run_pair "normalize version path"   "" -n "https://foo.com/api/v1/status"
 run_pair "normalize new types"      "" -n "https://foo.com/upload?type=image/png&token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dQw4w9WgXcQ&phone=%2B15551234567"
+run_pair "normalize file segment"   "" -n "https://foo.com/uploads/image.png"
+run_pair "normalize NANP phone"     "" -n "https://foo.com/contact/555-666-7777"
+run_pair "normalize param hints"    "" -n "https://foo.com/x?phone=unknown&email=tbd&redirect=somepath"
+run_pair "normalize hint vs specific" "" -n "https://foo.com/x?phone=12345"
 
 # Pipe modes
 run_pair "pipe URL list" \
