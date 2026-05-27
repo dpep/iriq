@@ -9,7 +9,8 @@ module Iriq
     # without either hitting a clear majority. The classifier never returns
     # `:numeric` for an individual value — every value is unambiguously one
     # or the other.
-    TYPES = %i[literal integer_id float numeric uuid date timestamp hash slug opaque_id].freeze
+    TYPES = %i[literal integer_id float numeric uuid date timestamp hash slug
+               ipv4 ipv6 url email opaque_id].freeze
 
     UUID_RE      = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/.freeze
     INTEGER_RE   = /\A\d+\z/.freeze
@@ -31,6 +32,21 @@ module Iriq
     SLUG_RE      = /\A[a-z0-9]+(?:[-_][a-z0-9]+)+\z/.freeze
     LITERAL_RE   = /\A[\p{L}][\p{L}\p{M}_]*\z/u.freeze
     OPAQUE_RE    = /\A[A-Za-z0-9_\-.~]{4,}\z/.freeze
+
+    # Dotted-quad shape; per-octet bounds are validated in classify_ipv4.
+    IPV4_RE  = /\A\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\z/.freeze
+    # IPv6: matches either the full eight-group form (`a:b:c:d:e:f:g:h`)
+    # or any compressed form containing `::`. Rejects bare hex / integers
+    # / single-colon strings so we don't shadow :integer_id, :hash, etc.
+    # Doesn't accept IPv4-mapped variants (`::ffff:192.0.2.1`) — common
+    # IPv6 traffic in URLs doesn't use them.
+    IPV6_RE  = /\A(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){7}|(?=[0-9a-fA-F:]*::)[0-9a-fA-F:]{2,})\z/.freeze
+    # URL-as-value: a scheme prefix followed by something non-empty.
+    # Used for query params like ?redirect=https://foo.com/bar.
+    URL_RE   = %r{\A[a-zA-Z][a-zA-Z0-9+.\-]*://\S+\z}.freeze
+    # Simplified email — local@host.tld, no leading/trailing dots in either
+    # part. Not RFC 5322 compliant; covers the common shape.
+    EMAIL_RE = /\A[A-Za-z0-9._%+\-]+@[A-Za-z0-9](?:[A-Za-z0-9\-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9\-]*[A-Za-z0-9])?)+\z/.freeze
 
     # Plausible UNIX timestamps (10 digit seconds or 13 digit ms) from
     # roughly 2001 onward.
@@ -65,8 +81,15 @@ module Iriq
     private
 
     def compute_classification(segment)
+      # Network / structured-value types take precedence over the generic
+      # OPAQUE_RE catch-all (which would otherwise grab IPv4) and the
+      # LITERAL fallback (which today swallows email + URL + IPv6).
       case segment
       when UUID_RE     then :uuid
+      when URL_RE      then :url
+      when EMAIL_RE    then :email
+      when IPV4_RE     then classify_ipv4(segment)
+      when IPV6_RE     then :ipv6
       when DATE_RE, DATE_SLASH_RE, DATE_US_RE then :date
       when ISO_TIME_RE then :timestamp
       when INTEGER_RE  then classify_integer(segment)
@@ -77,6 +100,15 @@ module Iriq
       when OPAQUE_RE   then :opaque_id
       else :literal
       end
+    end
+
+    # IPV4_RE only checks shape (1-3 digits between dots). Validate each
+    # octet ≤ 255; on failure fall back to :opaque_id so we don't promote
+    # garbage like `999.999.999.999` to :ipv4.
+    def classify_ipv4(segment)
+      return :opaque_id unless segment.split(".").all? { |o| (0..255).cover?(o.to_i) }
+
+      :ipv4
     end
 
     def classify_integer(segment)

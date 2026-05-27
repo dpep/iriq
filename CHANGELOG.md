@@ -1,3 +1,8 @@
+###  0.6.0  (2026-05-27)
+- New classifier types: `:ipv4`, `:ipv6`, `:url`, `:email` (Ruby) / `TypeIPv4`, `TypeIPv6`, `TypeURL`, `TypeEmail` (Go). Slotted before the generic `:opaque_id` / `:literal` catch-alls so URL params like `?redirect=https://foo.com/...`, `?email=alice@example.com`, `?ip=192.168.1.1`, `?gateway=fe80::1` get distinct types instead of falling through.
+- IPv4 validates octets ≤ 255 — out-of-range dotted-quads fall back to `:opaque_id`.
+- IPv6 accepts the full eight-group form and any compressed form containing `::`. IPv4-mapped variants (`::ffff:192.0.2.1`) are not recognized.
+
 ###  0.5.0  (2026-05-27)
 - Float values now classify as `:float` instead of falling through to `:opaque_id` (Ruby `:float` / Go `TypeFloat`). Regex requires digits on both sides of the decimal — `3.14`, `-2.5`, `1.0` match; `.5`, `1.`, `1e10` do not.
 - New `:numeric` umbrella (corpus-only): when a cluster sees both `:integer_id` and `:float` observations at the same param with neither subtype hitting the 80% confidence threshold, the param surfaces as `:numeric` in `param_summary` and renders as `{numeric}` in `Corpus#normalize` output. The classifier itself never returns `:numeric` directly — individual values are always specifically int or float.

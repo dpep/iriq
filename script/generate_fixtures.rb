@@ -40,12 +40,17 @@ PARSER_INPUTS = [
 
 CLASSIFIER_INPUTS = [
   "users", "Profile", "123", "0", "9999999",
+  "3.14", "-2.5", "1.0",
   "f47ac10b-58cc-4372-a567-0e02b2c3d479",
   "2024-05-23", "2024-05-23T10:30:00Z", "2024-05-23 10:30:00",
   "1716470400", "1716470400000",
   "d41d8cd98f00b204e9800998ecf8427e",
   "my-cool-post", "my_cool_post",
   "abc123XYZ",
+  "192.168.1.1", "10.0.0.1", "999.999.999.999",
+  "::1", "2001:db8::1", "fe80::1", "12:34",
+  "https://foo.com/bar", "ftp://files.example.com/x",
+  "alice@example.com", "user.name+tag@sub.example.co.uk",
   "こんにちは", "",
 ].freeze
 

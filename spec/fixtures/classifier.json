@@ -21,6 +21,18 @@
       "type": "integer_id"
     },
     {
+      "input": "3.14",
+      "type": "float"
+    },
+    {
+      "input": "-2.5",
+      "type": "float"
+    },
+    {
+      "input": "1.0",
+      "type": "float"
+    },
+    {
       "input": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
       "type": "uuid"
     },
@@ -59,6 +71,50 @@
     {
       "input": "abc123XYZ",
       "type": "opaque_id"
+    },
+    {
+      "input": "192.168.1.1",
+      "type": "ipv4"
+    },
+    {
+      "input": "10.0.0.1",
+      "type": "ipv4"
+    },
+    {
+      "input": "999.999.999.999",
+      "type": "opaque_id"
+    },
+    {
+      "input": "::1",
+      "type": "ipv6"
+    },
+    {
+      "input": "2001:db8::1",
+      "type": "ipv6"
+    },
+    {
+      "input": "fe80::1",
+      "type": "ipv6"
+    },
+    {
+      "input": "12:34",
+      "type": "literal"
+    },
+    {
+      "input": "https://foo.com/bar",
+      "type": "url"
+    },
+    {
+      "input": "ftp://files.example.com/x",
+      "type": "url"
+    },
+    {
+      "input": "alice@example.com",
+      "type": "email"
+    },
+    {
+      "input": "user.name+tag@sub.example.co.uk",
+      "type": "email"
     },
     {
       "input": "こんにちは",

@@ -3,6 +3,7 @@ package iriq
 import (
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -23,6 +24,10 @@ const (
 	TypeTimestamp  SegmentType = "timestamp"
 	TypeHash       SegmentType = "hash"
 	TypeSlug       SegmentType = "slug"
+	TypeIPv4       SegmentType = "ipv4"
+	TypeIPv6       SegmentType = "ipv6"
+	TypeURL        SegmentType = "url"
+	TypeEmail      SegmentType = "email"
 	TypeOpaqueID   SegmentType = "opaque_id"
 )
 
@@ -47,6 +52,17 @@ var (
 	// Unicode letter at the start followed by letters/marks/underscore.
 	literalRE = regexp.MustCompile(`^\p{L}[\p{L}\p{M}_]*$`)
 	opaqueRE  = regexp.MustCompile(`^[A-Za-z0-9_\-.~]{4,}$`)
+
+	// Network / structured-value patterns. Validated past the regex by
+	// helpers (octet bounds for IPv4, double-colon presence for IPv6).
+	// ipv4RE itself is defined in registrable_domain.go — reused here.
+	// IPv6: full 8-group OR contains "::". Doesn't match bare hex /
+	// integers / single-colon strings, so :integer_id / :hash aren't
+	// shadowed. Skipping IPv4-mapped variants for now.
+	ipv6FullRE       = regexp.MustCompile(`^[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){7}$`)
+	ipv6CompressedRE = regexp.MustCompile(`^[0-9a-fA-F:]{2,}$`)
+	urlRE            = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.\-]*://\S+$`)
+	emailRE          = regexp.MustCompile(`^[A-Za-z0-9._%+\-]+@[A-Za-z0-9](?:[A-Za-z0-9\-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9\-]*[A-Za-z0-9])?)+$`)
 )
 
 const (
@@ -105,6 +121,19 @@ func computeClassification(segment string) SegmentType {
 	switch {
 	case uuidRE.MatchString(segment):
 		return TypeUUID
+	// Network / structured types take precedence over the generic opaqueRE
+	// catch-all (which would otherwise grab IPv4) and the literal fallback
+	// (which today swallows email + URL + IPv6).
+	case urlRE.MatchString(segment):
+		return TypeURL
+	case emailRE.MatchString(segment):
+		return TypeEmail
+	case ipv4RE.MatchString(segment):
+		return classifyIPv4(segment)
+	case ipv6FullRE.MatchString(segment):
+		return TypeIPv6
+	case strings.Contains(segment, "::") && ipv6CompressedRE.MatchString(segment):
+		return TypeIPv6
 	case dateRE.MatchString(segment), dateSlashRE.MatchString(segment), dateUSRE.MatchString(segment):
 		return TypeDate
 	case isoTimeRE.MatchString(segment):
@@ -123,6 +152,18 @@ func computeClassification(segment string) SegmentType {
 		return TypeOpaqueID
 	}
 	return TypeLiteral
+}
+
+// classifyIPv4 verifies that each dotted-quad octet ≤ 255. Falls back to
+// TypeOpaqueID so garbage like "999.999.999.999" doesn't get promoted.
+func classifyIPv4(segment string) SegmentType {
+	for _, oct := range strings.Split(segment, ".") {
+		n, err := strconv.Atoi(oct)
+		if err != nil || n < 0 || n > 255 {
+			return TypeOpaqueID
+		}
+	}
+	return TypeIPv4
 }
 
 func classifyInteger(segment string) SegmentType {

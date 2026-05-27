@@ -162,6 +162,10 @@ Iriq::Inflector.reset_adapter!
 - `:timestamp` — ISO 8601, or 10/13-digit UNIX epoch
 - `:hash` — 32+ hex chars (md5 / sha)
 - `:slug` — `my-cool-post`, `my_cool_post`
+- `:ipv4` — dotted-quad with each octet 0..255 (`192.168.1.1`)
+- `:ipv6` — full or compressed (`::1`, `2001:db8::1`, full 8-group form)
+- `:url` — value-as-URL (`https://...`, `ftp://...`); useful for redirect params
+- `:email` — `local@host.tld`
 - `:opaque_id` — short alphanumeric mix that doesn't fit elsewhere
 
 Heuristics are deterministic and ordered — the first matching rule wins.
