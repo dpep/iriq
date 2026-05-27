@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -38,6 +39,7 @@ Corpus + stats:
 Other:
   -h, --help            Show this message
   -j, --json            Emit JSON instead of human-readable output
+      --ndjson          Newline-delimited JSON (one object per line). Implies --json.
   -N, --no-hints        Use {integer_id} placeholders instead of {user_id}
       --no-scheme-less  Skip foo.com/path extraction (explicit-scheme only)
   -V, --version         Print version
@@ -74,6 +76,7 @@ type options struct {
 	help       bool
 	version    bool
 	json       bool
+	ndjson     bool
 	hints      bool
 	sections   []section
 	corpus     string
@@ -205,6 +208,9 @@ func parseOptions(argv []string) ([]string, *options, error) {
 			opts.version = true
 		case a == "-j" || a == "--json":
 			opts.json = true
+		case a == "--ndjson":
+			opts.json = true
+			opts.ndjson = true
 		case a == "--stats":
 			opts.stats = true
 		case a == "--hints":
@@ -543,9 +549,9 @@ func emitPerIRISections(stdout io.Writer, iris []*iriq.Identifier, opts *options
 					}
 				}
 			}
-			writeJSON(stdout, flat)
+			emitJSON(stdout, opts, flat)
 		} else {
-			writeJSON(stdout, payloads)
+			emitJSON(stdout, opts, payloads)
 		}
 		return
 	}
@@ -604,11 +610,17 @@ func emitURLList(stdout io.Writer, iris []*iriq.Identifier, opts *options) {
 	})
 
 	if opts.json {
-		out := make([]map[string]interface{}, len(order))
-		for i, c := range order {
-			out[i] = map[string]interface{}{"iri": c.URL, "count": c.Count}
+		// Struct (not map) to pin field order — Ruby emits {iri, count} in
+		// insertion order; Go's map[string]interface{} sorts alphabetically.
+		type urlCount struct {
+			IRI   string `json:"iri"`
+			Count int    `json:"count"`
 		}
-		writeJSON(stdout, out)
+		out := make([]urlCount, len(order))
+		for i, c := range order {
+			out[i] = urlCount{IRI: c.URL, Count: c.Count}
+		}
+		emitJSON(stdout, opts, out)
 		return
 	}
 
@@ -661,7 +673,7 @@ func emitClusters(stdout io.Writer, clusters []*iriq.Cluster, opts *options) {
 				"segments": segs,
 			}
 		}
-		writeJSON(stdout, out)
+		emitJSON(stdout, opts, out)
 		return
 	}
 
@@ -810,6 +822,28 @@ func writeJSON(stdout io.Writer, v interface{}) {
 	enc := json.NewEncoder(stdout)
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(v)
+}
+
+// emitJSON respects --ndjson: when the payload is a slice and ndjson is set,
+// one JSON value is written per line (no wrapping array). Non-slice payloads
+// fall through to the wrapping encoder unchanged. Mirrors emit_json in
+// lib/iriq/cli.rb.
+func emitJSON(stdout io.Writer, opts *options, payload interface{}) {
+	if opts.ndjson {
+		// Use reflection to handle any slice type ([]interface{}, []*Cluster, etc.).
+		rv := reflectValue(payload)
+		if rv.IsValid() && rv.Kind() == reflect.Slice {
+			for i := 0; i < rv.Len(); i++ {
+				writeJSON(stdout, rv.Index(i).Interface())
+			}
+			return
+		}
+	}
+	writeJSON(stdout, payload)
+}
+
+func reflectValue(v interface{}) reflect.Value {
+	return reflect.ValueOf(v)
 }
 
 func parseMsg(err error) string {
