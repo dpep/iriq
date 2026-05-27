@@ -16,7 +16,7 @@ describe Iriq do
       result = Iriq.explain("https://foo.com/users/123")
       expect(result).to eq([
         { value: "users", type: :literal,    variable: false, hint: nil },
-        { value: "123",   type: :integer_id, variable: true,  hint: "user_id" },
+        { value: "123",   type: :integer, variable: true,  hint: "user_id" },
       ])
     end
   end

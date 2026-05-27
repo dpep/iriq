@@ -5,12 +5,16 @@ module Iriq
   # matching rule wins.
   class SegmentClassifier
     # `:numeric` is a corpus-only umbrella surfaced by Cluster#param_type
-    # when both `:integer_id` and `:float` are observed at the same position
+    # when both `:integer` and `:float` are observed at the same position
     # without either hitting a clear majority. The classifier never returns
     # `:numeric` for an individual value — every value is unambiguously one
     # or the other.
-    TYPES = %i[literal integer_id float numeric uuid date timestamp hash slug
-               ipv4 ipv6 url email opaque_id].freeze
+    #
+    # `:enum` is similarly corpus-only — it surfaces when a position has a
+    # bounded set of distinct values observed across enough samples (see
+    # Cluster::ENUM_* thresholds).
+    TYPES = %i[literal integer float numeric uuid date timestamp hash slug
+               ipv4 ipv6 url email enum opaque_id].freeze
 
     UUID_RE      = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/.freeze
     INTEGER_RE   = /\A\d+\z/.freeze
@@ -37,7 +41,7 @@ module Iriq
     IPV4_RE  = /\A\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\z/.freeze
     # IPv6: matches either the full eight-group form (`a:b:c:d:e:f:g:h`)
     # or any compressed form containing `::`. Rejects bare hex / integers
-    # / single-colon strings so we don't shadow :integer_id, :hash, etc.
+    # / single-colon strings so we don't shadow :integer, :hash, etc.
     # Doesn't accept IPv4-mapped variants (`::ffff:192.0.2.1`) — common
     # IPv6 traffic in URLs doesn't use them.
     IPV6_RE  = /\A(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){7}|(?=[0-9a-fA-F:]*::)[0-9a-fA-F:]{2,})\z/.freeze
@@ -127,7 +131,7 @@ module Iriq
         end
       end
 
-      :integer_id
+      :integer
     end
 
     public

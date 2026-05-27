@@ -9,7 +9,7 @@ module Iriq
   # Pass `hints: false` to use raw types instead:
   #
   #   PathShape.for(["users", "123"], hints: false)
-  #   # => "/users/{integer_id}"
+  #   # => "/users/{integer}"
   #
   # Pass `canonical_dates: true` to render date-typed segments in canonical
   # ISO form (2024/01/15 → 2024-01-15) instead of as a `{date}` placeholder.

@@ -64,11 +64,11 @@ describe Iriq::Clusterer do
 
       result = clusterer.explain("https://foo.com/users/999")
       expect(result[0]).to eq(value: "users", type: :literal,    variable: false, hint: nil,       stable: true)
-      expect(result[1]).to eq(value: "999",   type: :integer_id, variable: true,  hint: "user_id", stable: false)
+      expect(result[1]).to eq(value: "999",   type: :integer, variable: true,  hint: "user_id", stable: false)
     end
 
     it "returns variable=false when the position turns out to be stable in cluster" do
-      # all observed shape="/x/{integer_id}" but the integer is always "5"
+      # all observed shape="/x/{integer}" but the integer is always "5"
       clusterer.add("https://foo.com/x/5")
       clusterer.add("https://foo.com/x/5")
 
@@ -81,7 +81,7 @@ describe Iriq::Clusterer do
       result = clusterer.explain("https://foo.com/users/1")
       expect(result).to eq([
         { value: "users", type: :literal,    variable: false, hint: nil,       stable: false },
-        { value: "1",     type: :integer_id, variable: true,  hint: "user_id", stable: false },
+        { value: "1",     type: :integer, variable: true,  hint: "user_id", stable: false },
       ])
     end
   end

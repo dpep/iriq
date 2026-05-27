@@ -1,3 +1,8 @@
+###  0.7.0  (2026-05-27)
+- **Breaking**: `:integer_id` classifier type renamed to `:integer` (Ruby) / `TypeIntegerID` → `TypeInteger` (Go). The "ID" semantics live in the hints layer (which still produces `{user_id}` placeholders); the classifier now reflects pure shape. Update any direct `.classify(...) == :integer_id` checks, dump-file consumers, and persisted corpora — the type symbol changed in `type_counts` and raw shape strings (e.g. `/users/{integer_id}` → `/users/{integer}`).
+- New `:enum` umbrella (corpus-only): when a param has a small bounded set of repeated values (default ≥20 observations, ≤10 distinct, each ≥2 occurrences, ≥95% coverage), `Cluster#param_type` returns `:enum` and `param_summary` includes the value list under `:values`. Normalize output keeps the `{enum}` placeholder — values aren't inlined.
+- `iriq --host=full|registrable|reg|none` CLI flag plumbs `Corpus#host_strategy` from the command line. `reg` is a short alias for `registrable`.
+
 ###  0.6.0  (2026-05-27)
 - New classifier types: `:ipv4`, `:ipv6`, `:url`, `:email` (Ruby) / `TypeIPv4`, `TypeIPv6`, `TypeURL`, `TypeEmail` (Go). Slotted before the generic `:opaque_id` / `:literal` catch-alls so URL params like `?redirect=https://foo.com/...`, `?email=alice@example.com`, `?ip=192.168.1.1`, `?gateway=fe80::1` get distinct types instead of falling through.
 - IPv4 validates octets ≤ 255 — out-of-range dotted-quads fall back to `:opaque_id`.

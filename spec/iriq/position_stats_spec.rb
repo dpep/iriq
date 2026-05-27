@@ -13,10 +13,10 @@ describe Iriq::PositionStats do
 
     it "tracks per-type counts" do
       stats.observe("a", :literal)
-      stats.observe("1", :integer_id)
-      stats.observe("2", :integer_id)
+      stats.observe("1", :integer)
+      stats.observe("2", :integer)
 
-      expect(stats.type_counts).to eq(literal: 1, integer_id: 2)
+      expect(stats.type_counts).to eq(literal: 1, integer: 2)
     end
 
     it "caps cardinality at max_values but keeps total accurate" do
@@ -35,9 +35,9 @@ describe Iriq::PositionStats do
 
     it "returns the share of observations whose type was variable" do
       stats.observe("foo", :literal)
-      stats.observe("1",   :integer_id)
-      stats.observe("2",   :integer_id)
-      stats.observe("3",   :integer_id)
+      stats.observe("1",   :integer)
+      stats.observe("2",   :integer)
+      stats.observe("3",   :integer)
 
       expect(stats.variable_fraction(classifier)).to be_within(0.001).of(0.75)
     end

@@ -21,7 +21,7 @@ func TestCorpusObserve(t *testing.T) {
 	}
 	exp := obs.Explanation()
 	last := exp[len(exp)-1]
-	if last.Value != "123" || last.Type != TypeIntegerID {
+	if last.Value != "123" || last.Type != TypeInteger {
 		t.Errorf("last = %#v", last)
 	}
 }
@@ -42,8 +42,8 @@ func TestCorpusAggregates(t *testing.T) {
 	if !reflect.DeepEqual(c.PathLengthCounts(), map[int]int{2: 3, 1: 1}) {
 		t.Errorf("path_length_counts = %#v", c.PathLengthCounts())
 	}
-	if got := c.RawShapeCounts()["/users/{integer_id}"]; got != 2 {
-		t.Errorf("/users/{integer_id} = %d", got)
+	if got := c.RawShapeCounts()["/users/{integer}"]; got != 2 {
+		t.Errorf("/users/{integer} = %d", got)
 	}
 	if got := c.FingerprintCounts()["/users/{user_id}"]; got != 2 {
 		t.Errorf("/users/{user_id} = %d", got)
@@ -67,7 +67,7 @@ func TestCorpusPositionStats(t *testing.T) {
 	if !reflect.DeepEqual(stats.ValueCounts, want) {
 		t.Errorf("value_counts = %#v", stats.ValueCounts)
 	}
-	if stats.TypeCounts[TypeIntegerID] != 2 || stats.TypeCounts[TypeLiteral] != 1 {
+	if stats.TypeCounts[TypeInteger] != 2 || stats.TypeCounts[TypeLiteral] != 1 {
 		t.Errorf("type_counts = %#v", stats.TypeCounts)
 	}
 }
@@ -152,7 +152,7 @@ func TestCorpusQueryParamInference(t *testing.T) {
 		_, _ = c.Observe("https://foo.com/search?q=widget&page=" + itoa(i+1) + "&since=2024/01/" + dayStr)
 	}
 	got, _ := c.Normalize("https://foo.com/search?q=hammer&page=42&since=2024-02-15")
-	want := "https://foo.com/search?page={integer_id}&q=hammer&since=2024-02-15"
+	want := "https://foo.com/search?page={integer}&q=hammer&since=2024-02-15"
 	if got != want {
 		t.Errorf("Normalize: got %q, want %q", got, want)
 	}
@@ -165,8 +165,8 @@ func TestCorpusQueryParamInference(t *testing.T) {
 	for _, p := range params {
 		byName[p.Name] = p
 	}
-	if byName["page"].Type != TypeIntegerID {
-		t.Errorf("page type = %q, want integer_id", byName["page"].Type)
+	if byName["page"].Type != TypeInteger {
+		t.Errorf("page type = %q, want integer", byName["page"].Type)
 	}
 	if byName["since"].Type != TypeDate {
 		t.Errorf("since type = %q, want date", byName["since"].Type)

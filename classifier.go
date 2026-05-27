@@ -12,10 +12,10 @@ type SegmentType string
 
 const (
 	TypeLiteral    SegmentType = "literal"
-	TypeIntegerID  SegmentType = "integer_id"
+	TypeInteger  SegmentType = "integer"
 	TypeFloat      SegmentType = "float"
 	// TypeNumeric is a corpus-only umbrella surfaced by Cluster.ParamType
-	// when both :integer_id and :float observations exist at the same
+	// when both :integer and :float observations exist at the same
 	// position without either hitting a strong majority. The classifier
 	// never returns TypeNumeric for an individual value.
 	TypeNumeric    SegmentType = "numeric"
@@ -28,6 +28,10 @@ const (
 	TypeIPv6       SegmentType = "ipv6"
 	TypeURL        SegmentType = "url"
 	TypeEmail      SegmentType = "email"
+	// TypeEnum is a corpus-only umbrella surfaced by Cluster.ParamType when
+	// a position has a bounded set of repeated values across enough samples
+	// (see Enum* thresholds in cluster.go).
+	TypeEnum       SegmentType = "enum"
 	TypeOpaqueID   SegmentType = "opaque_id"
 )
 
@@ -57,7 +61,7 @@ var (
 	// helpers (octet bounds for IPv4, double-colon presence for IPv6).
 	// ipv4RE itself is defined in registrable_domain.go — reused here.
 	// IPv6: full 8-group OR contains "::". Doesn't match bare hex /
-	// integers / single-colon strings, so :integer_id / :hash aren't
+	// integers / single-colon strings, so :integer / :hash aren't
 	// shadowed. Skipping IPv4-mapped variants for now.
 	ipv6FullRE       = regexp.MustCompile(`^[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){7}$`)
 	ipv6CompressedRE = regexp.MustCompile(`^[0-9a-fA-F:]{2,}$`)
@@ -170,8 +174,8 @@ func classifyInteger(segment string) SegmentType {
 	n, err := strconv.ParseInt(segment, 10, 64)
 	if err != nil {
 		// Out of int64 range: definitely larger than the timestamp window,
-		// keep as plain integer_id.
-		return TypeIntegerID
+		// keep as plain integer.
+		return TypeInteger
 	}
 	if n >= tsMillisMin && n <= tsMillisMax {
 		return TypeTimestamp
@@ -191,7 +195,7 @@ func classifyInteger(segment string) SegmentType {
 		}
 	}
 
-	return TypeIntegerID
+	return TypeInteger
 }
 
 // CanonicalDate normalizes a recognized date string to ISO 8601 (YYYY-MM-DD).

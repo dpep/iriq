@@ -5,9 +5,9 @@ describe Iriq::SegmentClassifier do
     {
       "users"                                => :literal,
       "Profile"                              => :literal,
-      "123"                                  => :integer_id,
-      "0"                                    => :integer_id,
-      "9999999"                              => :integer_id,
+      "123"                                  => :integer,
+      "0"                                    => :integer,
+      "9999999"                              => :integer,
       "f47ac10b-58cc-4372-a567-0e02b2c3d479" => :uuid,
       "2024-05-23"                           => :date,
       "2024-05-23T10:30:00Z"                 => :timestamp,
@@ -52,7 +52,7 @@ describe Iriq::SegmentClassifier do
   describe "#variable?" do
     it "is false for :literal only" do
       expect(classifier.variable?(:literal)).to be false
-      expect(classifier.variable?(:integer_id)).to be true
+      expect(classifier.variable?(:integer)).to be true
       expect(classifier.variable?(:uuid)).to be true
     end
   end

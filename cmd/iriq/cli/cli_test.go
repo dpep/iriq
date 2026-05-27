@@ -117,7 +117,7 @@ func TestJSONMultiSection(t *testing.T) {
 
 func TestNoHints(t *testing.T) {
 	r := runCLI(t, "", "-n", "--no-hints", "foo.com/users/123")
-	if strings.TrimSpace(r.stdout) != "https://foo.com/users/{integer_id}" {
+	if strings.TrimSpace(r.stdout) != "https://foo.com/users/{integer}" {
 		t.Errorf("got %q", r.stdout)
 	}
 }

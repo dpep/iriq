@@ -13,7 +13,7 @@
     {
       "input": "https://foo.com/users/123",
       "hints": false,
-      "output": "https://foo.com/users/{integer_id}"
+      "output": "https://foo.com/users/{integer}"
     },
     {
       "input": "HTTPS://FOO.COM:443/Bar",
@@ -28,7 +28,7 @@
     {
       "input": "https://foo.com/search?q=hi&page=2",
       "hints": true,
-      "output": "https://foo.com/search?page={integer_id}&q=hi"
+      "output": "https://foo.com/search?page={integer}&q=hi"
     },
     {
       "input": "urn:isbn:0451450523",

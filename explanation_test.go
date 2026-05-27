@@ -9,9 +9,9 @@ func TestExplainURL(t *testing.T) {
 	}
 	want := []SegmentHint{
 		{Value: "users", Type: TypeLiteral, Variable: false, Hint: ""},
-		{Value: "123", Type: TypeIntegerID, Variable: true, Hint: "user_id"},
+		{Value: "123", Type: TypeInteger, Variable: true, Hint: "user_id"},
 		{Value: "orders", Type: TypeLiteral, Variable: false, Hint: ""},
-		{Value: "456", Type: TypeIntegerID, Variable: true, Hint: "order_id"},
+		{Value: "456", Type: TypeInteger, Variable: true, Hint: "order_id"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("len(got)=%d want %d", len(got), len(want))
@@ -28,7 +28,7 @@ func TestExplainURN(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("len = %d", len(got))
 	}
-	if got[1].Type != TypeIntegerID {
+	if got[1].Type != TypeInteger {
 		t.Errorf("got %#v", got[1])
 	}
 	if got[1].Hint != "isbn_id" {

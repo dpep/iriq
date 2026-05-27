@@ -10,15 +10,15 @@
     },
     {
       "input": "123",
-      "type": "integer_id"
+      "type": "integer"
     },
     {
       "input": "0",
-      "type": "integer_id"
+      "type": "integer"
     },
     {
       "input": "9999999",
-      "type": "integer_id"
+      "type": "integer"
     },
     {
       "input": "3.14",

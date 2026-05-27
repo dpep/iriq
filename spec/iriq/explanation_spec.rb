@@ -4,9 +4,9 @@ describe Iriq::Explanation do
       result = described_class.explain("https://foo.com/users/123/orders/456")
       expect(result).to eq([
         { value: "users",  type: :literal,    variable: false, hint: nil },
-        { value: "123",    type: :integer_id, variable: true,  hint: "user_id" },
+        { value: "123",    type: :integer, variable: true,  hint: "user_id" },
         { value: "orders", type: :literal,    variable: false, hint: nil },
-        { value: "456",    type: :integer_id, variable: true,  hint: "order_id" },
+        { value: "456",    type: :integer, variable: true,  hint: "order_id" },
       ])
     end
 
@@ -19,7 +19,7 @@ describe Iriq::Explanation do
       result = described_class.explain("urn:isbn:0451450523")
       expect(result).to eq([
         { value: "isbn",       type: :literal,    variable: false, hint: nil },
-        { value: "0451450523", type: :integer_id, variable: true,  hint: "isbn_id" },
+        { value: "0451450523", type: :integer, variable: true,  hint: "isbn_id" },
       ])
     end
 

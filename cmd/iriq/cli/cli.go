@@ -34,13 +34,16 @@ Sections (combine freely):
 Corpus + stats:
       --corpus PATH     Load/create a JSON corpus; observe and save atomically.
                         -n becomes corpus-informed once it has data.
+      --host MODE       Host-keying strategy for clustering:
+                        full (default), registrable (or reg) strips
+                        subdomains, none ignores host entirely.
       --stats           Print rolling aggregates
 
 Other:
   -h, --help            Show this message
   -j, --json            Emit JSON instead of human-readable output
       --ndjson          Newline-delimited JSON (one object per line). Implies --json.
-  -N, --no-hints        Use {integer_id} placeholders instead of {user_id}
+  -N, --no-hints        Use {integer} placeholders instead of {user_id}
       --no-scheme-less  Skip foo.com/path extraction (explicit-scheme only)
   -V, --version         Print version
 
@@ -75,17 +78,18 @@ const (
 type options struct {
 	help       bool
 	version    bool
-	json       bool
-	ndjson     bool
-	hints      bool
-	sections   []section
-	corpus     string
-	stats      bool
-	schemeLess bool
+	json         bool
+	ndjson       bool
+	hints        bool
+	sections     []section
+	corpus       string
+	stats        bool
+	schemeLess   bool
+	hostStrategy iriq.HostStrategy
 }
 
 func defaultOptions() *options {
-	return &options{hints: true, schemeLess: true}
+	return &options{hints: true, schemeLess: true, hostStrategy: iriq.HostStrategyFull}
 }
 
 // Run executes the CLI and returns an exit code.
@@ -127,7 +131,7 @@ func Run(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 
 	var corpus *iriq.Corpus
 	if opts.corpus != "" {
-		c, err := loadCorpus(opts.corpus)
+		c, err := loadCorpus(opts.corpus, opts.hostStrategy)
 		if err != nil {
 			fmt.Fprintf(stderr, "iriq: %s\n", err)
 			return 1
@@ -162,11 +166,29 @@ func parseableIRI(input string) bool {
 	return err == nil
 }
 
-func loadCorpus(path string) (*iriq.Corpus, error) {
+func loadCorpus(path string, host iriq.HostStrategy) (*iriq.Corpus, error) {
 	// OpenCorpus handles both create and load — picks the backend by file
 	// extension and creates the file (with schema, for SQLite) if it doesn't
 	// yet exist.
-	return iriq.OpenCorpus(path)
+	c, err := iriq.OpenCorpus(path)
+	if err != nil {
+		return nil, err
+	}
+	c.HostStrategy = host
+	return c, nil
+}
+
+// parseHostStrategy accepts full|registrable|reg|none (case-insensitive).
+func parseHostStrategy(value string) (iriq.HostStrategy, error) {
+	switch strings.ToLower(value) {
+	case "full":
+		return iriq.HostStrategyFull, nil
+	case "registrable", "reg":
+		return iriq.HostStrategyRegistrable, nil
+	case "none":
+		return iriq.HostStrategyNone, nil
+	}
+	return 0, fmt.Errorf("--host: expected full|registrable|reg|none, got %q", value)
 }
 
 func pipedStdin(stdin io.Reader) bool {
@@ -233,6 +255,22 @@ func parseOptions(argv []string) ([]string, *options, error) {
 			i++
 		case strings.HasPrefix(a, "--corpus="):
 			opts.corpus = strings.TrimPrefix(a, "--corpus=")
+		case a == "--host":
+			if i+1 >= len(argv) {
+				return nil, nil, fmt.Errorf("missing argument: --host MODE")
+			}
+			s, err := parseHostStrategy(argv[i+1])
+			if err != nil {
+				return nil, nil, err
+			}
+			opts.hostStrategy = s
+			i++
+		case strings.HasPrefix(a, "--host="):
+			s, err := parseHostStrategy(strings.TrimPrefix(a, "--host="))
+			if err != nil {
+				return nil, nil, err
+			}
+			opts.hostStrategy = s
 		case strings.HasPrefix(a, "--"):
 			return nil, nil, fmt.Errorf("invalid option: %s", a)
 		case strings.HasPrefix(a, "-") && len(a) > 1:
