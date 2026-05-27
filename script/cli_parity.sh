@@ -115,6 +115,29 @@ corpus_pair() {
 corpus_pair "JSON storage"   ".json"
 corpus_pair "SQLite storage" ".db"
 
+# --host=reg should cluster subdomain-heavy hosts under their registrable apex.
+host_strategy_pair() {
+  local label="$1"
+  local rstream=$'https://api.foo.com/users/1\nhttps://app.foo.com/users/2\nhttps://blog.example.co.uk/posts/3\nhttps://news.example.co.uk/posts/4\n'
+  local ruby_path="$corpus_dir/ruby-host.json"
+  local go_path="$corpus_dir/go-host.json"
+  rm -f "$ruby_path" "$go_path"
+  echo -n "$rstream" | (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" --host=reg) > /dev/null
+  echo -n "$rstream" | "$GO_BIN" --corpus "$go_path" --host=reg > /dev/null
+  local ruby_out go_out
+  ruby_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" --stats --json < /dev/null) )
+  go_out=$( "$GO_BIN" --corpus "$go_path" --stats --json < /dev/null )
+  if [[ "$ruby_out" == "$go_out" ]]; then
+    pass_count=$((pass_count + 1))
+  else
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH: $label"
+    diff <(echo "$ruby_out") <(echo "$go_out") | sed 's/^/    /'
+  fi
+}
+host_strategy_pair "--host=reg collapses subdomains"
+
 echo
 echo "Passed: $pass_count"
 echo "Failed: $fail_count"

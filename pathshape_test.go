@@ -11,7 +11,7 @@ func TestPathShapeFor(t *testing.T) {
 		{nil, true, "/"},
 		{[]string{}, true, "/"},
 		{[]string{"users", "123"}, true, "/users/{user_id}"},
-		{[]string{"users", "123"}, false, "/users/{integer_id}"},
+		{[]string{"users", "123"}, false, "/users/{integer}"},
 		{[]string{"users", "123", "orders", "456"}, true, "/users/{user_id}/orders/{order_id}"},
 		{[]string{"login"}, true, "/login"},
 		{[]string{"posts", "abc-123"}, true, "/posts/{post_id}"},

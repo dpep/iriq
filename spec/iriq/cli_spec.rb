@@ -100,7 +100,7 @@ describe Iriq::CLI do
   describe "--no-hints" do
     it "uses mechanical placeholders" do
       expect(run("-n", "--no-hints", "foo.com/users/123")).to eq(0)
-      expect(stdout.string.strip).to eq("https://foo.com/users/{integer_id}")
+      expect(stdout.string.strip).to eq("https://foo.com/users/{integer}")
     end
   end
 
@@ -251,7 +251,7 @@ describe Iriq::CLI do
       it "-N (no-hints) gives mechanical placeholders in pipe -n output" do
         stdin.string = "see https://foo.com/users/1"
         expect(run("-n", "-N")).to eq(0)
-        expect(stdout.string.strip).to eq("https://foo.com/users/{integer_id}")
+        expect(stdout.string.strip).to eq("https://foo.com/users/{integer}")
       end
 
       it "-pn shows a blank line between sections per IRI" do
@@ -288,7 +288,7 @@ describe Iriq::CLI do
     it "-N renders cluster shapes with mechanical placeholders" do
       stdin.string = (1..10).map { |i| "https://foo.com/users/#{i}" }.join("\n")
       expect(run("-N")).to eq(0)
-      expect(stdout.string).to include("[10] foo.com  /users/{integer_id}")
+      expect(stdout.string).to include("[10] foo.com  /users/{integer}")
       expect(stdout.string).not_to include("{user_id}")
     end
 
@@ -306,7 +306,7 @@ describe Iriq::CLI do
     it "--stats with -N shows raw (hint-free) top shapes" do
       stdin.string = (1..5).map { |i| "https://foo.com/users/#{i}" }.join("\n")
       expect(run("--stats", "-N")).to eq(0)
-      expect(stdout.string).to include("/users/{integer_id}")
+      expect(stdout.string).to include("/users/{integer}")
       expect(stdout.string).not_to include("{user_id}")
     end
 
@@ -315,6 +315,27 @@ describe Iriq::CLI do
       expect(run).to eq(0)
       expect(stdout.string).to include("https://foo.com")
       expect(stdout.string).not_to include("foo.com  /")  # no cluster line
+    end
+  end
+
+  describe "--host" do
+    it "accepts 'reg' as a short alias for registrable" do
+      file = Tempfile.new(["host-strategy", ".json"])
+      begin
+        stdin.string = "https://api.foo.com/users/1\nhttps://app.foo.com/users/2\n"
+        expect(run("--corpus", file.path, "--host=reg")).to eq(0)
+        data = JSON.parse(File.read(file.path))
+        expect(data["host_counts"]).to eq("foo.com" => 2)
+      ensure
+        file.close
+        file.unlink
+      end
+    end
+
+    it "rejects unknown values" do
+      stdin.string = ""
+      expect(run("--host=bogus")).to eq(1)
+      expect(stderr.string).to match(/--host/)
     end
   end
 

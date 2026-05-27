@@ -1,5 +1,7 @@
 package iriq
 
+import "sort"
+
 // MaxClusterExamples mirrors Cluster::MAX_EXAMPLES.
 const MaxClusterExamples = 10
 
@@ -16,6 +18,17 @@ const DateConfidenceThreshold = 0.8
 const (
 	NumericConfidenceThreshold = 0.8
 	NumericSubtypeThreshold    = 0.8
+)
+
+// Enum* thresholds. Promote a param to TypeEnum when the corpus has seen
+// enough samples to trust the bound, the value set is small, each tracked
+// value appears more than once, and tracked values cover nearly all
+// observations.
+const (
+	EnumMinObservations = 20
+	EnumMaxCardinality  = 10
+	EnumMinValueCount   = 2
+	EnumMinCoverage     = 0.95
 )
 
 // SegmentPositionStat is the per-position summary surfaced via
@@ -62,13 +75,16 @@ func NewClusterWith(key, host, scheme, shape string, maxValues int) *Cluster {
 }
 
 // ParamSummary returns a per-param row useful for display + corpus queries
-// like Corpus.ParamsFor(url).
+// like Corpus.ParamsFor(url). When Type is TypeEnum, Values lists the
+// distinct observed values (descending count, lex tie-break) so verbose /
+// explain consumers can render the set.
 type ParamSummary struct {
 	Name        string
 	Count       int
 	Type        SegmentType
 	Cardinality int
 	Presence    float64
+	Values      []string // populated only for TypeEnum
 }
 
 func (c *Cluster) ParamSummary() []ParamSummary {
@@ -81,14 +97,53 @@ func (c *Cluster) ParamSummary() []ParamSummary {
 		if c.Count > 0 {
 			presence = float64(stats.Total) / float64(c.Count)
 		}
-		out = append(out, ParamSummary{
+		row := ParamSummary{
 			Name: name, Count: stats.Total, Type: c.ParamType(name),
 			Cardinality: stats.Cardinality(), Presence: presence,
-		})
+		}
+		if row.Type == TypeEnum {
+			row.Values = enumValues(stats)
+		}
+		out = append(out, row)
 	}
 	// Stable order: by descending count, name asc.
 	sortParamSummary(out)
 	return out
+}
+
+// enumValues returns the distinct values tracked in stats, sorted by
+// descending count with a lex tie-break (mirrors Ruby's Cluster#enum_values).
+func enumValues(stats *PositionStats) []string {
+	keys := make([]string, 0, len(stats.ValueCounts))
+	for k := range stats.ValueCounts {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if stats.ValueCounts[keys[i]] != stats.ValueCounts[keys[j]] {
+			return stats.ValueCounts[keys[i]] > stats.ValueCounts[keys[j]]
+		}
+		return keys[i] < keys[j]
+	})
+	return keys
+}
+
+// isEnum returns true when stats meets the Enum* bounds.
+func isEnum(stats *PositionStats) bool {
+	if stats.Total < EnumMinObservations {
+		return false
+	}
+	card := stats.Cardinality()
+	if card == 0 || card > EnumMaxCardinality {
+		return false
+	}
+	covered := 0
+	for _, n := range stats.ValueCounts {
+		if n < EnumMinValueCount {
+			return false
+		}
+		covered += n
+	}
+	return float64(covered)/float64(stats.Total) >= EnumMinCoverage
 }
 
 // ParamType returns the type the corpus is confident enough to call this
@@ -100,6 +155,10 @@ func (c *Cluster) ParamType(name string) SegmentType {
 	stats := c.ParamStats[name]
 	if stats == nil || stats.Total == 0 {
 		return ""
+	}
+	// Enum check first — bounded value set trumps the underlying value type.
+	if isEnum(stats) {
+		return TypeEnum
 	}
 	t := stats.DominantType()
 
@@ -116,8 +175,8 @@ func (c *Cluster) ParamType(name string) SegmentType {
 
 	// :numeric umbrella — promote when ints + floats together dominate but
 	// neither alone is the clear winner.
-	if t == TypeIntegerID || t == TypeFloat {
-		intFrac := float64(stats.TypeCounts[TypeIntegerID]) / float64(stats.Total)
+	if t == TypeInteger || t == TypeFloat {
+		intFrac := float64(stats.TypeCounts[TypeInteger]) / float64(stats.Total)
 		floatFrac := float64(stats.TypeCounts[TypeFloat]) / float64(stats.Total)
 		if intFrac < NumericSubtypeThreshold &&
 			floatFrac < NumericSubtypeThreshold &&

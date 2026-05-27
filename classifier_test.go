@@ -6,9 +6,9 @@ func TestClassifyCases(t *testing.T) {
 	cases := map[string]SegmentType{
 		"users":                                TypeLiteral,
 		"Profile":                              TypeLiteral,
-		"123":                                  TypeIntegerID,
-		"0":                                    TypeIntegerID,
-		"9999999":                              TypeIntegerID,
+		"123":                                  TypeInteger,
+		"0":                                    TypeInteger,
+		"9999999":                              TypeInteger,
 		"f47ac10b-58cc-4372-a567-0e02b2c3d479": TypeUUID,
 		"2024-05-23":                           TypeDate,
 		"2024-05-23T10:30:00Z":                 TypeTimestamp,
@@ -33,7 +33,7 @@ func TestVariable(t *testing.T) {
 	if DefaultClassifier.Variable(TypeLiteral) {
 		t.Error("literal should not be variable")
 	}
-	for _, t2 := range []SegmentType{TypeIntegerID, TypeUUID, TypeDate, TypeTimestamp, TypeHash, TypeSlug, TypeOpaqueID} {
+	for _, t2 := range []SegmentType{TypeInteger, TypeUUID, TypeDate, TypeTimestamp, TypeHash, TypeSlug, TypeOpaqueID} {
 		if !DefaultClassifier.Variable(t2) {
 			t.Errorf("%q should be variable", t2)
 		}

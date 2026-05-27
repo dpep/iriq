@@ -4,7 +4,7 @@ module Iriq
   #   Explanation.explain("https://foo.com/users/123")
   #   # => [
   #   #      { value: "users", type: :literal,    variable: false, hint: nil       },
-  #   #      { value: "123",   type: :integer_id, variable: true,  hint: "user_id" },
+  #   #      { value: "123",   type: :integer, variable: true,  hint: "user_id" },
   #   #    ]
   module Explanation
     module_function

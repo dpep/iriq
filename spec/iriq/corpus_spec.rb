@@ -9,7 +9,7 @@ describe Iriq::Corpus do
       expect(obs.fingerprint).to eq("https://foo.com/users/{user_id}")
       expect(obs.cluster).to be_a(Iriq::Cluster)
       expect(obs.explanation).to be_an(Array)
-      expect(obs.explanation.last).to include(value: "123", type: :integer_id)
+      expect(obs.explanation.last).to include(value: "123", type: :integer)
     end
 
     it "accepts a pre-parsed Identifier" do
@@ -36,7 +36,7 @@ describe Iriq::Corpus do
 
     it "counts by raw (hint-free) shape" do
       expect(corpus.raw_shape_counts).to include(
-        "/users/{integer_id}" => 2,
+        "/users/{integer}" => 2,
         "/posts/{slug}"       => 1,
         "/x"                  => 1,
       )
@@ -61,7 +61,7 @@ describe Iriq::Corpus do
       stats = corpus.stats_for("foo.com", "/users")
       expect(stats.total).to eq(3)
       expect(stats.value_counts).to eq("123" => 1, "456" => 1, "me" => 1)
-      expect(stats.type_counts).to eq(integer_id: 2, literal: 1)
+      expect(stats.type_counts).to eq(integer: 2, literal: 1)
     end
 
     it "tracks the position-0 stats too" do
@@ -259,7 +259,7 @@ describe Iriq::Corpus do
         corpus.observe("https://foo.com/search?q=widget&page=#{i + 1}&since=2024/01/#{(i % 28) + 1}")
       end
       out = corpus.normalize("https://foo.com/search?q=hammer&page=42&since=2024-02-15")
-      expect(out).to eq("https://foo.com/search?page={integer_id}&q=hammer&since=2024-02-15")
+      expect(out).to eq("https://foo.com/search?page={integer}&q=hammer&since=2024-02-15")
     end
 
     it "params_for returns per-param presence + type for the cluster" do
@@ -269,7 +269,7 @@ describe Iriq::Corpus do
       summary = corpus.params_for("https://foo.com/items")
       expect(summary.map { |p| p[:name] }.sort).to eq(%w[fields page])
       page = summary.find { |p| p[:name] == "page" }
-      expect(page[:type]).to eq(:integer_id)
+      expect(page[:type]).to eq(:integer)
       expect(page[:presence]).to eq(1.0)
     end
   end
@@ -326,6 +326,43 @@ describe Iriq::Corpus do
       85.times { |i| c.observe("https://foo.com/api?amt=#{i + 1}.99") }
       15.times { |i| c.observe("https://foo.com/api?amt=#{i + 100}") }
       expect(c.params_for("https://foo.com/api").first[:type]).to eq(:float)
+    end
+  end
+
+  describe "enum detection" do
+    it "surfaces a param as :enum when values are bounded across enough observations" do
+      c = described_class.new
+      30.times { c.observe("https://foo.com/posts?status=published") }
+      20.times { c.observe("https://foo.com/posts?status=draft") }
+      10.times { c.observe("https://foo.com/posts?status=archived") }
+
+      row = c.params_for("https://foo.com/posts").first
+      expect(row[:type]).to eq(:enum)
+      expect(row[:values]).to eq(%w[published draft archived])
+    end
+
+    it "does NOT promote to :enum below the observation threshold" do
+      c = described_class.new
+      5.times { c.observe("https://foo.com/posts?mode=draft") }
+      5.times { c.observe("https://foo.com/posts?mode=published") }
+      row = c.params_for("https://foo.com/posts").first
+      expect(row[:type]).to eq(:literal)
+      expect(row[:values]).to be_nil
+    end
+
+    it "does NOT promote when cardinality is too high" do
+      c = described_class.new
+      40.times { |i| c.observe("https://foo.com/posts?id=#{i}") }
+      row = c.params_for("https://foo.com/posts").first
+      expect(row[:type]).to eq(:integer)
+    end
+
+    it "normalize renders {enum} placeholder without inlining values" do
+      c = described_class.new
+      30.times { c.observe("https://foo.com/posts?status=published") }
+      20.times { c.observe("https://foo.com/posts?status=draft") }
+      expect(c.normalize("https://foo.com/posts?status=other"))
+        .to eq("https://foo.com/posts?status={enum}")
     end
   end
 

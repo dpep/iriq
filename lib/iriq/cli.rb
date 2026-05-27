@@ -32,13 +32,16 @@ module Iriq
       Corpus + stats:
             --corpus PATH     Load/create a JSON corpus; observe and save atomically.
                               -n becomes corpus-informed once it has data.
+            --host MODE       Host-keying strategy for clustering:
+                              full (default), registrable (or reg) strips
+                              subdomains, none ignores host entirely.
             --stats           Print rolling aggregates
 
       Other:
         -h, --help            Show this message
         -j, --json            Emit JSON instead of human-readable output
             --ndjson          Newline-delimited JSON (one object per line). Implies --json.
-        -N, --no-hints        Use {integer_id} placeholders instead of {user_id}
+        -N, --no-hints        Use {integer} placeholders instead of {user_id}
             --no-scheme-less  Skip foo.com/path extraction (explicit-scheme only)
         -V, --version         Print version
 
@@ -82,7 +85,7 @@ module Iriq
 
       return print_usage(stdout, 0) if args.empty? && !batch_mode
 
-      corpus = opts[:corpus] ? load_corpus(opts[:corpus]) : nil
+      corpus = opts[:corpus] ? load_corpus(opts[:corpus], host_strategy: opts[:host_strategy]) : nil
 
       code = if batch_mode
         cmd_batch(args, opts, corpus, explicit_cluster: explicit_cluster)
@@ -119,9 +122,10 @@ module Iriq
         version:     false,
         hints:       true,
         sections:    [],
-        corpus:      nil,
-        stats:       false,
-        scheme_less: true,
+        corpus:        nil,
+        stats:         false,
+        scheme_less:   true,
+        host_strategy: :full,
       }
       parser = OptionParser.new do |o|
         o.on("-p", "--parse")        { opts[:sections] << :parse }
@@ -131,6 +135,7 @@ module Iriq
         o.on("--[no-]hints")         { |v| opts[:hints] = v }
         o.on("-N")                   { opts[:hints] = false }
         o.on("--corpus PATH")        { |v| opts[:corpus] = v }
+        o.on("--host MODE")          { |v| opts[:host_strategy] = host_strategy_arg(v) }
         o.on("--stats")              { opts[:stats]   = true }
         o.on("--[no-]scheme-less")   { |v| opts[:scheme_less] = v }
         o.on("-h", "--help")         { opts[:help]    = true }
@@ -152,8 +157,20 @@ module Iriq
       end
     end
 
-    def load_corpus(path)
-      Corpus.open(path)
+    def load_corpus(path, host_strategy: :full)
+      Corpus.open(path, host_strategy: host_strategy)
+    end
+
+    # Accept `--host=reg` as a short alias for the `registrable` mode.
+    HOST_STRATEGY_ALIASES = {
+      "full" => :full, "registrable" => :registrable, "reg" => :registrable, "none" => :none,
+    }.freeze
+
+    def host_strategy_arg(value)
+      mode = HOST_STRATEGY_ALIASES[value.to_s.downcase]
+      raise OptionParser::InvalidArgument, "--host: expected full|registrable|reg|none, got #{value.inspect}" unless mode
+
+      mode
     end
 
     def print_usage(io, code)
@@ -400,7 +417,10 @@ module Iriq
     end
 
     def top(hash)
-      hash.sort_by { |_, n| -n }.first(TOP_N_STATS).to_h
+      # Lex tie-break on equal counts — Ruby Hash insertion order would
+      # otherwise diverge from Go's map iteration (which has no insertion
+      # order). Keeps Ruby ↔ Go --stats parity stable.
+      hash.sort_by { |k, n| [-n, k] }.first(TOP_N_STATS).to_h
     end
   end
 end

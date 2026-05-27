@@ -28,11 +28,11 @@ describe Iriq::PathShape do
     end
 
     it "skips the hint when no literal precedes the variable" do
-      expect(described_class.for(["123"])).to eq("/{integer_id}")
+      expect(described_class.for(["123"])).to eq("/{integer}")
     end
 
     it "falls back to raw types with hints: false" do
-      expect(described_class.for(["users", "123"], hints: false)).to eq("/users/{integer_id}")
+      expect(described_class.for(["users", "123"], hints: false)).to eq("/users/{integer}")
     end
   end
 end

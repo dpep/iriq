@@ -1,7 +1,7 @@
 module Iriq
   # A group of identifiers that share a host + shape key. Tracks examples and
   # per-position segment statistics so callers can ask which positions are
-  # actually stable in practice (e.g. /users/ always literal, /{integer_id}
+  # actually stable in practice (e.g. /users/ always literal, /{integer}
   # always variable).
   class Cluster
     attr_reader :key, :host, :scheme, :shape, :examples, :count, :param_stats, :max_values
@@ -14,11 +14,20 @@ module Iriq
     DATE_CONFIDENCE_THRESHOLD = 0.8
 
     # `:numeric` umbrella thresholds. Promote a position to :numeric when
-    # the combined :integer_id + :float observations dominate (≥ majority)
+    # the combined :integer + :float observations dominate (≥ majority)
     # AND neither subtype alone hits the strong threshold (we have a clear
     # numeric pattern but it isn't purely ints or purely floats).
     NUMERIC_CONFIDENCE_THRESHOLD = 0.8
     NUMERIC_SUBTYPE_THRESHOLD    = 0.8
+
+    # `:enum` thresholds. Promote a param to :enum when the corpus has seen
+    # enough samples to trust the bound, the value set is small, each value
+    # appears more than once (rules out singletons), and the tracked values
+    # account for nearly all observations (lets a few stragglers through).
+    ENUM_MIN_OBSERVATIONS = 20
+    ENUM_MAX_CARDINALITY  = 10
+    ENUM_MIN_VALUE_COUNT  = 2
+    ENUM_MIN_COVERAGE     = 0.95
 
     def initialize(key:, host:, scheme:, shape:, max_values: PositionStats::DEFAULT_MAX_VALUES)
       @key            = key
@@ -80,7 +89,7 @@ module Iriq
     end
 
     # Per-param summary, ordered by descending presence. Each entry is:
-    #   { name: "page", count: N, type: :integer_id, cardinality: K, presence: 0.83 }
+    #   { name: "page", count: N, type: :integer, cardinality: K, presence: 0.83 }
     # presence is count / @count — the fraction of observations that had
     # this param.
     def param_summary
@@ -88,13 +97,16 @@ module Iriq
 
       @param_stats.map { |name, _stats|
         stats = @param_stats[name]
-        {
+        type  = param_type(name)
+        row   = {
           name:        name,
           count:       stats.total,
-          type:        param_type(name),
+          type:        type,
           cardinality: stats.cardinality,
           presence:    @count.positive? ? stats.total.to_f / @count : 0.0,
         }
+        row[:values] = enum_values(stats) if type == :enum
+        row
       }.sort_by { |row| [-row[:count], row[:name]] }
     end
 
@@ -109,6 +121,12 @@ module Iriq
       return nil unless stats
       return nil if stats.total.zero?
 
+      # :enum check first — bounded set of repeated values trumps the
+      # underlying value type. We want `?status=active` to surface as :enum
+      # (with the value list) rather than :literal even though each value
+      # individually classifies as a literal.
+      return :enum if enum?(stats)
+
       type = stats.dominant_type
 
       # :date gate — demote when there isn't enough date-typed quorum.
@@ -121,8 +139,8 @@ module Iriq
 
       # :numeric umbrella — promote when ints + floats together dominate
       # but neither alone is the clear winner.
-      if type == :integer_id || type == :float
-        int_frac   = stats.type_counts[:integer_id].to_f / stats.total
+      if type == :integer || type == :float
+        int_frac   = stats.type_counts[:integer].to_f / stats.total
         float_frac = stats.type_counts[:float].to_f / stats.total
         if int_frac < NUMERIC_SUBTYPE_THRESHOLD &&
            float_frac < NUMERIC_SUBTYPE_THRESHOLD &&
@@ -132,6 +150,24 @@ module Iriq
       end
 
       type
+    end
+
+    # True when stats shows a bounded set of repeated values worth treating
+    # as an enum. See ENUM_* constants at the top of this class.
+    def enum?(stats)
+      return false if stats.total < ENUM_MIN_OBSERVATIONS
+      return false if stats.cardinality.zero? || stats.cardinality > ENUM_MAX_CARDINALITY
+      return false if stats.value_counts.any? { |_, n| n < ENUM_MIN_VALUE_COUNT }
+
+      coverage = stats.value_counts.values.sum.to_f / stats.total
+      coverage >= ENUM_MIN_COVERAGE
+    end
+
+    # Distinct values tracked for this param, ordered by descending count
+    # (lex tie-break). Returned alongside :enum-typed rows in param_summary
+    # so verbose/explain consumers can render the value set.
+    def enum_values(stats)
+      stats.value_counts.sort_by { |v, n| [-n, v] }.map(&:first)
     end
 
     # Most common type in stats.type_counts excluding `skip` — lex tie-break

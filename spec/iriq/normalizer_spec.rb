@@ -14,7 +14,7 @@ describe Iriq::Normalizer do
 
     it "shapes query values" do
       out = described_class.normalize("https://foo.com/search?q=hello&page=2")
-      expect(out).to eq("https://foo.com/search?page={integer_id}&q=hello")
+      expect(out).to eq("https://foo.com/search?page={integer}&q=hello")
     end
 
     it "shapes URN values with a hint derived from the namespace" do
@@ -32,7 +32,7 @@ describe Iriq::Normalizer do
 
     it "supports hints: false for mechanical placeholders" do
       expect(described_class.normalize("https://foo.com/users/1", hints: false))
-        .to eq("https://foo.com/users/{integer_id}")
+        .to eq("https://foo.com/users/{integer}")
     end
   end
 end
