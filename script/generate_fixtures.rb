@@ -58,9 +58,12 @@ CLASSIFIER_INPUTS = [
   "2026", "1999", "1800",
   "by-locale", "if", "to",
   "+15551234567", "+1 (555) 123-4567",
+  "555-666-7777", "(555) 666-7777", "555.666.7777", "123-456-7890",
   "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dQw4w9WgXcQ",
   "image/png", "application/vnd.api+json", "text/html",
-  "foo.com/bar", "sub.foo.com/", "image.png",
+  "foo.com/bar", "sub.foo.com/",
+  "image.png", "report.pdf", "data.csv", "user-photo.jpg",
+  "archive.tar.gz", "no-known-ext.qwerty",
   "こんにちは", "",
 ].freeze
 
@@ -92,6 +95,10 @@ NORMALIZE_INPUTS = [
   ["https://foo.com/probe/192.168.1.1",                      true],
   ["https://foo.com/probe/::1",                              true],
   ["https://foo.com/api/v1/status",                          true],
+  ["https://foo.com/uploads/image.png",                      true],
+  ["https://foo.com/contact/555-666-7777",                   true],
+  ["https://foo.com/x?phone=unknown&email=tbd",              true],
+  ["https://foo.com/x?phone=12345",                          true],
 ].freeze
 
 PATH_SHAPE_INPUTS = [

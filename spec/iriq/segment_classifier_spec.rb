@@ -70,7 +70,18 @@ describe Iriq::SegmentClassifier do
       "text/html"                            => :mime,
       "foo.com/bar"                          => :url,
       "sub.foo.com/"                         => :url,
-      "image.png"                            => :opaque_id,
+      "image.png"                            => :file,
+      "report.pdf"                           => :file,
+      "data.csv"                             => :file,
+      "user-photo.jpg"                       => :file,
+      "archive.tar.gz"                       => :file,
+      "no-known-ext.qwerty"                  => :opaque_id,
+      "1.2.3"                                => :opaque_id,
+      "555-666-7777"                         => :phone,
+      "(555) 666-7777"                       => :phone,
+      "555.666.7777"                         => :phone,
+      "123-456-7890"                         => :slug,
+      "100-200-3000"                         => :slug,
     }.each do |input, expected|
       it "classifies #{input.inspect} as #{expected}" do
         expect(classifier.classify(input)).to eq(expected)

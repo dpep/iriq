@@ -156,6 +156,7 @@ func NewClusterWith(key, host, scheme, shape string, maxValues int) *Cluster {
 // ValueDistribution carries per-value fractions for TypeBoolean and
 // TypeEnum positions (e.g. {"true": 0.97, "false": 0.03}).
 // SubtypeDistribution carries the int-vs-float split for TypeNumber.
+// KindDistribution carries the file-kind breakdown for TypeFile.
 type ParamSummary struct {
 	Name                string
 	Count               int
@@ -169,6 +170,7 @@ type ParamSummary struct {
 	Avg                 float64
 	ValueDistribution   map[string]float64
 	SubtypeDistribution map[SegmentType]float64
+	KindDistribution    map[FileKind]float64
 }
 
 func (c *Cluster) ParamSummary() []ParamSummary {
@@ -194,6 +196,9 @@ func (c *Cluster) ParamSummary() []ParamSummary {
 		if row.Type == TypeNumber {
 			row.SubtypeDistribution = subtypeDistribution(stats, []SegmentType{TypeInteger, TypeFloat})
 		}
+		if row.Type == TypeFile {
+			row.KindDistribution = fileKindDistribution(stats)
+		}
 		if stats.NumericCount > 0 {
 			row.NumericCount = stats.NumericCount
 			row.Min = stats.NumericMin
@@ -217,6 +222,36 @@ func valueDistribution(stats *PositionStats) map[string]float64 {
 	out := make(map[string]float64, len(stats.ValueCounts))
 	for v, n := range stats.ValueCounts {
 		out[v] = roundFrac(float64(n) / float64(stats.Total))
+	}
+	return out
+}
+
+// fileKindDistribution buckets tracked file-typed values by kind and
+// returns the per-kind fraction over total tracked observations. Values
+// with no recognized extension bucket as FileKind("unknown"). Sums to
+// ≤ 1.0 since value_counts caps at DefaultMaxValuesPerPosition.
+func fileKindDistribution(stats *PositionStats) map[FileKind]float64 {
+	if len(stats.ValueCounts) == 0 {
+		return nil
+	}
+	total := 0
+	for _, n := range stats.ValueCounts {
+		total += n
+	}
+	if total == 0 {
+		return nil
+	}
+	out := map[FileKind]float64{}
+	counts := map[FileKind]int{}
+	for v, n := range stats.ValueCounts {
+		k := FileKindOf(v)
+		if k == "" {
+			k = "unknown"
+		}
+		counts[k] += n
+	}
+	for k, n := range counts {
+		out[k] = roundFrac(float64(n) / float64(total))
 	}
 	return out
 }
@@ -329,6 +364,13 @@ func (c *Cluster) ParamType(name string) SegmentType {
 			(intFrac+floatFrac) >= NumberConfidenceThreshold {
 			return TypeNumber
 		}
+	}
+
+	// Param-name fallback — `?phone=...` overrides a generic literal/
+	// opaque_id/slug with TypePhone when the value's shape was too weak
+	// to detect on its own.
+	if hint := ParamNameHint(name, t); hint != "" {
+		return hint
 	}
 
 	return t

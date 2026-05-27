@@ -1,3 +1,9 @@
+###  0.10.0  (2026-05-27)
+- New classifier type `:file` — `name.ext` shape where `ext` is in a curated allowlist spanning image / document / data / text / web / audio / video / archive / code kinds. `image.png` and `report.pdf` classify as `:file` instead of falling through to `:opaque_id`. The per-extension kind (`:image`, `:document`, etc.) is surfaced via `SegmentClassifier.file_kind(value)` / `FileKindOf(value)` for verbose displays.
+- `Cluster#param_summary` adds `:kind_distribution` for `:file`-typed params — buckets observed values by kind. Best-effort: only reflects values within the tracking cap.
+- New phone format: NANP-style `555-666-7777`, `555.666.7777`, `(555) 666-7777`. Leading area-code + exchange digits constrained to 2-9 so dotted version strings / digit blobs don't shadow. The `+` E.164 form still covers international.
+- Param-name hints — when a value's type is generic (`:literal`, `:opaque_id`, `:slug`), the param name can supply the type. `?phone=unknown` becomes `{phone}` and `?email=tbd` becomes `{email}`. Hint map covers phone/email/locale/currency/url/jwt/mime variations. Specific value types (e.g. `?phone=12345` → `:integer`) still win.
+
 ###  0.9.0  (2026-05-27)
 - Semantic types (`:version`, `:locale`, `:currency`, `:date`, `:boolean`, `:timestamp`, etc.) now surface as `{type}` placeholders instead of being run through the noun-singularize hint. `/api/v1/status` renders `/api/{version}/status` rather than the misleading `/api/{api_id}/status`. Only ID-shaped types (`:integer`, `:uuid`, `:hash`, `:opaque_id`, `:slug`) keep the `{noun_id}` form.
 - `--normalize` collapses `:ipv4` and `:ipv6` to `{ip}` in placeholder form (previously rendered as `{ipv4}` / `{ipv6}`). The classifier still tracks the specific family; cluster summary keeps the distinct types.

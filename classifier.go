@@ -35,6 +35,7 @@ const (
 	TypePhone      SegmentType = "phone"
 	TypeJWT        SegmentType = "jwt"
 	TypeMIME       SegmentType = "mime"
+	TypeFile       SegmentType = "file"
 	TypeYear       SegmentType = "year"
 	// TypeHTTPStatus is a corpus-only umbrella for positions whose values
 	// cluster in the 100..599 HTTP status window. Same range-promotion
@@ -106,6 +107,14 @@ var (
 	// The digit count is validated past the regex in classifyPhone (E.164
 	// allows 7-15 digits).
 	phoneRE = regexp.MustCompile(`^\+[ \-.()\d]{7,20}$`)
+	// NANP phone without `+` — `555-666-7777`, `555.666.7777`, `(555) 666-7777`.
+	// Leading area-code + exchange digit constrained to 2-9 so bare digit
+	// blobs / dotted versions don't shadow other types.
+	phoneNANPRE = regexp.MustCompile(`^\(?([2-9]\d{2})\)?[ \-.]?([2-9]\d{2})[ \-.]?(\d{4})$`)
+	// File — `name.ext` shape where ext is in fileExtensionKind. The
+	// stem can be a slug/opaque-id/literal; the meaningful signal is
+	// the extension. See computeClassification → classifyFile.
+	fileRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_\-.~]*\.([A-Za-z0-9]{1,8})$`)
 	// JWT — three base64url-encoded parts separated by dots; header starts
 	// with `ey` (`{` JSON prefix base64url-encoded).
 	jwtRE = regexp.MustCompile(`^ey[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+$`)
@@ -120,6 +129,133 @@ const (
 	httpStatusMin = 100
 	httpStatusMax = 599
 )
+
+// FileKind is the per-extension category for :file values — surfaced
+// via FileKind(value) for verbose displays.
+type FileKind string
+
+const (
+	FileKindImage    FileKind = "image"
+	FileKindDocument FileKind = "document"
+	FileKindData     FileKind = "data"
+	FileKindText     FileKind = "text"
+	FileKindWeb      FileKind = "web"
+	FileKindAudio    FileKind = "audio"
+	FileKindVideo    FileKind = "video"
+	FileKindArchive  FileKind = "archive"
+	FileKindCode     FileKind = "code"
+)
+
+// fileExtensionKind mirrors Ruby's FILE_EXTENSION_KIND — a curated
+// allowlist of common extensions per category. Keep this list narrow:
+// random 1-8 char endings can shadow semantic types if widened.
+var fileExtensionKind = map[string]FileKind{
+	"png": FileKindImage, "jpg": FileKindImage, "jpeg": FileKindImage,
+	"gif": FileKindImage, "webp": FileKindImage, "svg": FileKindImage,
+	"bmp": FileKindImage, "tiff": FileKindImage, "tif": FileKindImage,
+	"ico": FileKindImage, "avif": FileKindImage, "heic": FileKindImage,
+	"heif": FileKindImage,
+	"pdf":  FileKindDocument, "doc": FileKindDocument, "docx": FileKindDocument,
+	"xls":  FileKindDocument, "xlsx": FileKindDocument, "ppt": FileKindDocument,
+	"pptx": FileKindDocument, "odt": FileKindDocument, "ods": FileKindDocument,
+	"odp":  FileKindDocument, "rtf": FileKindDocument, "epub": FileKindDocument,
+	"csv": FileKindData, "tsv": FileKindData, "json": FileKindData,
+	"xml":     FileKindData, "yaml": FileKindData, "yml": FileKindData,
+	"parquet": FileKindData, "sqlite": FileKindData, "db": FileKindData,
+	"ndjson":  FileKindData, "jsonl": FileKindData,
+	"txt": FileKindText, "md": FileKindText, "log": FileKindText,
+	"markdown": FileKindText, "rst": FileKindText,
+	"html": FileKindWeb, "htm": FileKindWeb, "css": FileKindWeb,
+	"js":  FileKindWeb, "mjs": FileKindWeb, "cjs": FileKindWeb,
+	"ts":  FileKindWeb, "jsx": FileKindWeb, "tsx": FileKindWeb,
+	"mp3": FileKindAudio, "wav": FileKindAudio, "ogg": FileKindAudio,
+	"flac": FileKindAudio, "aac": FileKindAudio, "m4a": FileKindAudio,
+	"opus": FileKindAudio,
+	"mp4": FileKindVideo, "mov": FileKindVideo, "avi": FileKindVideo,
+	"mkv": FileKindVideo, "webm": FileKindVideo, "flv": FileKindVideo,
+	"wmv": FileKindVideo, "m4v": FileKindVideo,
+	"zip": FileKindArchive, "tar": FileKindArchive, "gz": FileKindArchive,
+	"bz2": FileKindArchive, "7z": FileKindArchive, "rar": FileKindArchive,
+	"xz":  FileKindArchive, "tgz": FileKindArchive,
+	"rb": FileKindCode, "py": FileKindCode, "go": FileKindCode,
+	"java": FileKindCode, "c": FileKindCode, "cc": FileKindCode,
+	"cpp":  FileKindCode, "h": FileKindCode, "hpp": FileKindCode,
+	"sh":   FileKindCode, "swift": FileKindCode, "kt": FileKindCode,
+	"rs":   FileKindCode,
+}
+
+// FileKindOf returns the kind (image/document/data/etc.) for a
+// file-shaped value, or "" if the value isn't a recognized file.
+// Used by verbose displays to subdivide TypeFile without polluting
+// the top-level type taxonomy.
+func FileKindOf(value string) FileKind {
+	m := fileExtRE.FindStringSubmatch(value)
+	if m == nil {
+		return ""
+	}
+	return fileExtensionKind[strings.ToLower(m[1])]
+}
+
+// fileExtRE extracts the trailing extension from a file-shaped string.
+var fileExtRE = regexp.MustCompile(`\.([A-Za-z0-9]{1,8})$`)
+
+// paramNameHints mirrors Ruby's PARAM_NAME_HINTS. Param names that map
+// to a semantic type lift generic-classified values (literal / opaque_id
+// / slug) — `?phone=unknown` becomes TypePhone.
+var paramNameHints = map[string]SegmentType{
+	"phone":        TypePhone,
+	"tel":          TypePhone,
+	"telephone":    TypePhone,
+	"mobile":       TypePhone,
+	"cell":         TypePhone,
+	"email":        TypeEmail,
+	"e_mail":       TypeEmail,
+	"mail":         TypeEmail,
+	"locale":       TypeLocale,
+	"lang":         TypeLocale,
+	"language":     TypeLocale,
+	"currency":     TypeCurrency,
+	"cur":          TypeCurrency,
+	"curr":         TypeCurrency,
+	"url":          TypeURL,
+	"uri":          TypeURL,
+	"redirect":     TypeURL,
+	"redirect_url": TypeURL,
+	"return_to":    TypeURL,
+	"return_url":   TypeURL,
+	"callback":     TypeURL,
+	"callback_url": TypeURL,
+	"next_url":     TypeURL,
+	"jwt":          TypeJWT,
+	"bearer":       TypeJWT,
+	"auth_token":   TypeJWT,
+	"mime":         TypeMIME,
+	"content_type": TypeMIME,
+	"media_type":   TypeMIME,
+}
+
+// paramHintOverridable lists the generic types eligible for param-name
+// override. Anything more specific (TypeInteger, TypeUUID, etc.) carries
+// useful info already.
+var paramHintOverridable = map[SegmentType]struct{}{
+	TypeLiteral:  {},
+	TypeOpaqueID: {},
+	TypeSlug:     {},
+}
+
+// ParamNameHint returns a hinted type for a param name when the resolved
+// value type is generic. Returns "" when no hint applies. Both
+// Cluster.ParamType (corpus path) and Normalizer.shapeQuery (one-shot)
+// consult this so corpus + one-shot agree on the override.
+func ParamNameHint(name string, current SegmentType) SegmentType {
+	if name == "" {
+		return ""
+	}
+	if _, ok := paramHintOverridable[current]; !ok {
+		return ""
+	}
+	return paramNameHints[strings.ToLower(name)]
+}
 
 // localeLanguageCodes is the inline ISO 639-1 (subset) — codes commonly
 // used in real `?lang=` traffic. Tokens not in the list (`if`, `to`)
@@ -242,12 +378,16 @@ func computeClassification(segment string) SegmentType {
 		return TypeTimestamp
 	case phoneRE.MatchString(segment):
 		return classifyPhone(segment)
+	case phoneNANPRE.MatchString(segment):
+		return TypePhone
 	case integerRE.MatchString(segment):
 		return classifyInteger(segment)
 	case floatRE.MatchString(segment):
 		return TypeFloat
 	case currencyRE.MatchString(segment):
 		return classifyCurrency(segment)
+	case fileRE.MatchString(segment):
+		return classifyFile(segment)
 	case slugRE.MatchString(segment):
 		return TypeSlug
 	case literalRE.MatchString(segment):
@@ -256,6 +396,24 @@ func computeClassification(segment string) SegmentType {
 		return TypeOpaqueID
 	}
 	return TypeLiteral
+}
+
+// classifyFile promotes a `name.ext` shape to TypeFile only when ext is
+// in the kind allowlist. Otherwise falls through to slug/opaque so
+// version-shaped values like `1.2.3` aren't pulled in.
+func classifyFile(segment string) SegmentType {
+	m := fileRE.FindStringSubmatch(segment)
+	if m == nil {
+		return TypeOpaqueID
+	}
+	ext := strings.ToLower(m[1])
+	if _, ok := fileExtensionKind[ext]; ok {
+		return TypeFile
+	}
+	if slugRE.MatchString(segment) {
+		return TypeSlug
+	}
+	return TypeOpaqueID
 }
 
 // classifyPhone counts digits (ignoring separators) and confirms the count

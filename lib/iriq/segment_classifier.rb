@@ -17,7 +17,7 @@ module Iriq
     # Cluster::ENUM_* thresholds).
     TYPES = %i[literal integer float number uuid date year timestamp hash slug
                ipv4 ipv6 url email boolean version locale currency phone jwt mime
-               http_status enum opaque_id].freeze
+               file http_status enum opaque_id].freeze
 
     UUID_RE      = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/.freeze
     INTEGER_RE   = /\A\d+\z/.freeze
@@ -107,6 +107,12 @@ module Iriq
     # `+1 (555) 123-4567` both classify; bare digit blobs without `+`
     # stay as :integer / :opaque_id (too ambiguous from a single value).
     PHONE_RE       = %r{\A\+(?:[ \-.()\d]){7,20}\z}.freeze
+    # NANP phone without `+` — `555-666-7777`, `555.666.7777`, `(555) 666-7777`.
+    # The area-code + exchange leading-digit constraint (first digit 2-9 in
+    # both) is what makes this safe to add without shadowing :integer —
+    # bare digit blobs / dotted numerics fall through. Only matches the
+    # 10-digit NANP shape; international formats need the explicit `+`.
+    PHONE_NANP_RE  = /\A\(?([2-9]\d{2})\)?[ \-.]?([2-9]\d{2})[ \-.]?(\d{4})\z/.freeze
     # JWT: three base64url-encoded segments separated by dots, header
     # starts with `eyJ` (the `{` JSON prefix base64url-encoded).
     JWT_RE         = /\Aey[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\z/.freeze
@@ -114,6 +120,32 @@ module Iriq
     # subtype side is permissive (letters/digits/+-.) so `application/vnd.api+json`
     # and `image/svg+xml` both match.
     MIME_RE        = %r{\A(?:text|image|video|audio|application|multipart|message|font|model)/[A-Za-z0-9!#$&^_+\-.]+\z}.freeze
+    # File — `name.ext` shape where ext is in FILE_EXTENSIONS. The stem
+    # can be a slug, opaque-id, or literal; the meaningful signal is the
+    # extension. Per-extension grouping (image / document / data / etc.)
+    # surfaces via SegmentClassifier.file_kind for verbose displays.
+    FILE_RE = /\A([A-Za-z0-9][A-Za-z0-9_\-.~]*)\.([A-Za-z0-9]{1,8})\z/.freeze
+    # Allowlist of common file extensions, keyed by kind. The kind is
+    # surfaced via file_kind for verbose output; the type itself is just
+    # `:file`. Keep this list curated — random 1-8 char endings can shadow
+    # legitimate semantic types (`fr_CA.us`, `1.2.3`).
+    FILE_EXTENSIONS = {
+      image:    %w[png jpg jpeg gif webp svg bmp tiff tif ico avif heic heif],
+      document: %w[pdf doc docx xls xlsx ppt pptx odt ods odp rtf epub],
+      data:     %w[csv tsv json xml yaml yml parquet sqlite db ndjson jsonl],
+      text:     %w[txt md log markdown rst],
+      web:      %w[html htm css js mjs cjs ts jsx tsx],
+      audio:    %w[mp3 wav ogg flac aac m4a opus],
+      video:    %w[mp4 mov avi mkv webm flv wmv m4v],
+      archive:  %w[zip tar gz bz2 7z rar xz tgz],
+      code:     %w[rb py go java c cc cpp h hpp sh swift kt rs],
+    }.freeze
+    # Reverse map ext → kind for O(1) lookup. Lowercase keys; classify
+    # downcases before consulting.
+    FILE_EXTENSION_KIND = FILE_EXTENSIONS.each_with_object({}) { |(kind, exts), h|
+      exts.each { |e| h[e] = kind }
+    }.freeze
+
     # HTTP status — bare 3-digit integer in the 100..599 window. Same
     # corpus-promotion pattern as :year: a single 3-digit int is ambiguous,
     # but a position whose values cluster inside the HTTP status window is
@@ -175,10 +207,12 @@ module Iriq
       when LOCALE_BARE_RE then classify_locale(segment)
       when DATE_RE, DATE_SLASH_RE, DATE_US_RE then :date
       when ISO_TIME_RE then :timestamp
-      when PHONE_RE    then classify_phone(segment)
+      when PHONE_RE        then classify_phone(segment)
+      when PHONE_NANP_RE   then :phone
       when INTEGER_RE  then classify_integer(segment)
       when FLOAT_RE    then :float
       when CURRENCY_RE then classify_currency(segment)
+      when FILE_RE     then classify_file(segment)
       when SLUG_RE     then :slug
       when LITERAL_RE  then :literal
       when OPAQUE_RE   then :opaque_id
@@ -201,6 +235,18 @@ module Iriq
     def classify_phone(segment)
       digits = segment.count("0-9")
       return :phone if digits.between?(7, 15)
+
+      :opaque_id
+    end
+
+    # File classification — only promote when the trailing extension is
+    # in the allowlist. Otherwise fall through to the slug/literal/opaque
+    # rules so `1.2.3` (version) and `fr_CA.us` (locale-shaped opaque) don't
+    # get pulled in by the FILE_RE shape.
+    def classify_file(segment)
+      ext = segment[/\.([A-Za-z0-9]{1,8})\z/, 1]&.downcase
+      return :file if ext && FILE_EXTENSION_KIND.key?(ext)
+      return :slug if segment.match?(SLUG_RE)
 
       :opaque_id
     end
@@ -271,6 +317,68 @@ module Iriq
       return :ip if type == :ipv4 || type == :ipv6
 
       type
+    end
+
+    # Return the kind (`:image`/`:document`/`:data`/...) for a file-shaped
+    # value, or nil if the value isn't a recognized file. Used by verbose
+    # displays to subdivide `:file` without polluting the top-level type
+    # taxonomy.
+    def self.file_kind(value)
+      return nil if value.nil?
+      ext = value[/\.([A-Za-z0-9]{1,8})\z/, 1]&.downcase
+      ext && FILE_EXTENSION_KIND[ext]
+    end
+
+    # Param-name hints — when a value's classifier output is too generic
+    # (`:literal`, `:opaque_id`, `:slug`) to be informative, the param name
+    # can supply the type. `?phone=unknown` becomes `:phone` even though
+    # `unknown` is a literal. Only "safe" string-shaped types are in the
+    # map; numeric types (`:integer`, `:year`, `:http_status`) are handled
+    # by range analysis instead.
+    PARAM_NAME_HINTS = {
+      "phone"        => :phone,
+      "tel"          => :phone,
+      "telephone"    => :phone,
+      "mobile"       => :phone,
+      "cell"         => :phone,
+      "email"        => :email,
+      "e_mail"       => :email,
+      "mail"         => :email,
+      "locale"       => :locale,
+      "lang"         => :locale,
+      "language"     => :locale,
+      "currency"     => :currency,
+      "cur"          => :currency,
+      "curr"         => :currency,
+      "url"          => :url,
+      "uri"          => :url,
+      "redirect"     => :url,
+      "redirect_url" => :url,
+      "return_to"    => :url,
+      "return_url"   => :url,
+      "callback"     => :url,
+      "callback_url" => :url,
+      "next_url"     => :url,
+      "jwt"          => :jwt,
+      "bearer"       => :jwt,
+      "auth_token"   => :jwt,
+      "mime"         => :mime,
+      "content_type" => :mime,
+      "media_type"   => :mime,
+    }.freeze
+    # Types the param-name hint is allowed to override. Anything more
+    # specific (`:integer`, `:uuid`, etc.) already carries useful info —
+    # the classifier wins.
+    PARAM_HINT_OVERRIDABLE = %i[literal opaque_id slug].to_set.freeze
+
+    # Return a hinted type for a param name when the resolved value type
+    # is generic. Nil when no hint applies. Both Cluster#param_type (for
+    # the corpus path) and Normalizer.shape_query (for one-shot rendering)
+    # consult this so corpus + one-shot agree on the override.
+    def self.param_name_hint(name, current_type)
+      return nil if name.nil? || !PARAM_HINT_OVERRIDABLE.include?(current_type)
+
+      PARAM_NAME_HINTS[name.to_s.downcase]
     end
 
     # Canonicalize a currency code to uppercase ISO 4217. Returns nil if

@@ -74,6 +74,26 @@
       "input": "https://foo.com/api/v1/status",
       "hints": true,
       "output": "https://foo.com/api/{version}/status"
+    },
+    {
+      "input": "https://foo.com/uploads/image.png",
+      "hints": true,
+      "output": "https://foo.com/uploads/{file}"
+    },
+    {
+      "input": "https://foo.com/contact/555-666-7777",
+      "hints": true,
+      "output": "https://foo.com/contact/{phone}"
+    },
+    {
+      "input": "https://foo.com/x?phone=unknown&email=tbd",
+      "hints": true,
+      "output": "https://foo.com/x?email={email}&phone={phone}"
+    },
+    {
+      "input": "https://foo.com/x?phone=12345",
+      "hints": true,
+      "output": "https://foo.com/x?phone={integer}"
     }
   ]
 }

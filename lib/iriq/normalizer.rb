@@ -49,6 +49,11 @@ module Iriq
       params.keys.sort.map do |k|
         v      = params[k]
         type   = classifier.classify(v.to_s)
+        # Param-name hint can lift a generic literal/opaque_id/slug into
+        # a semantic type — `?phone=unknown` becomes `{phone}`.
+        if (hint = SegmentClassifier.param_name_hint(k, type))
+          type = hint
+        end
         shaped = if type == :date && (canon = SegmentClassifier.canonical_date(v.to_s))
                    canon
                  elsif type == :currency && (canon = SegmentClassifier.canonical_currency(v.to_s))
