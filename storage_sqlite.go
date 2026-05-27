@@ -279,9 +279,8 @@ func (s *SqliteStorage) SaveTo(path string) error {
 // --- Increments -------------------------------------------------------------
 
 func (s *SqliteStorage) IncrementHost(host string) {
-	if host == "" {
-		return
-	}
+	// Empty host is meaningful for HostStrategyNone — see the comment on
+	// MemoryStorage.IncrementHost.
 	_, _ = s.ex().Exec(`
 		INSERT INTO host_counts (host, count) VALUES (?, 1)
 		ON CONFLICT(host) DO UPDATE SET count = count + 1

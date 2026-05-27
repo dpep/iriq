@@ -1,3 +1,8 @@
+###  0.5.0  (2026-05-27)
+- Float values now classify as `:float` instead of falling through to `:opaque_id` (Ruby `:float` / Go `TypeFloat`). Regex requires digits on both sides of the decimal — `3.14`, `-2.5`, `1.0` match; `.5`, `1.`, `1e10` do not.
+- New `:numeric` umbrella (corpus-only): when a cluster sees both `:integer_id` and `:float` observations at the same param with neither subtype hitting the 80% confidence threshold, the param surfaces as `:numeric` in `param_summary` and renders as `{numeric}` in `Corpus#normalize` output. The classifier itself never returns `:numeric` directly — individual values are always specifically int or float.
+- `Corpus.new(host_strategy: ...)` knob controls how host is keyed into clusters: `:full` (default, unchanged), `:registrable` (strip subdomains, so `api.foo.com` and `app.foo.com` cluster as `foo.com`), `:none` (ignore host, group all observations by shape alone). `:registrable` uses an inline allowlist of ~70 common multi-label TLDs (`co.uk`, `com.au`, `co.jp`, etc.) — niche multi-label suffixes like `.priv.no` will be over-stripped.
+
 ###  0.4.0  (2026-05-27)
 - Query-param clustering: each `Cluster` now tracks per-param presence, value cardinality, and type via `param_stats`. Surfaced on `cluster.to_h[:params]` (and the JSON cluster view), persisted in both JSON and SQLite backends.
 - `Corpus#normalize` (Ruby) / `Corpus.NormalizeIdentifier` (Go) now include query params, rendered with corpus-informed types when available (falls back to mechanical classification otherwise).

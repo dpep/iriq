@@ -9,6 +9,15 @@ const MaxClusterExamples = 10
 // accident, so we require quorum before canonicalizing.
 const DateConfidenceThreshold = 0.8
 
+// NumericConfidenceThreshold + NumericSubtypeThreshold gate the :numeric
+// umbrella. Promote to :numeric when combined integer + float observations
+// dominate (≥ threshold) AND neither subtype alone is the clear winner
+// (each below subtype threshold).
+const (
+	NumericConfidenceThreshold = 0.8
+	NumericSubtypeThreshold    = 0.8
+)
+
 // SegmentPositionStat is the per-position summary surfaced via
 // Cluster.SegmentStats — one entry per path position.
 type SegmentPositionStat struct {
@@ -89,23 +98,55 @@ func (c *Cluster) ParamSummary() []ParamSummary {
 // and Corpus.inferredParamType so both views agree.
 func (c *Cluster) ParamType(name string) SegmentType {
 	stats := c.ParamStats[name]
-	if stats == nil {
+	if stats == nil || stats.Total == 0 {
 		return ""
 	}
 	t := stats.DominantType()
-	if t != TypeDate {
-		return t
+
+	// :date gate — demote when there isn't enough date-typed quorum.
+	if t == TypeDate {
+		if float64(stats.TypeCounts[TypeDate])/float64(stats.Total) >= DateConfidenceThreshold {
+			return t
+		}
+		if alt := dominantExcluding(stats, TypeDate); alt != "" {
+			return alt
+		}
+		return TypeLiteral
 	}
-	if stats.Total == 0 {
-		return t
+
+	// :numeric umbrella — promote when ints + floats together dominate but
+	// neither alone is the clear winner.
+	if t == TypeIntegerID || t == TypeFloat {
+		intFrac := float64(stats.TypeCounts[TypeIntegerID]) / float64(stats.Total)
+		floatFrac := float64(stats.TypeCounts[TypeFloat]) / float64(stats.Total)
+		if intFrac < NumericSubtypeThreshold &&
+			floatFrac < NumericSubtypeThreshold &&
+			(intFrac+floatFrac) >= NumericConfidenceThreshold {
+			return TypeNumeric
+		}
 	}
-	if float64(stats.TypeCounts[TypeDate])/float64(stats.Total) >= DateConfidenceThreshold {
-		return t
+
+	return t
+}
+
+// dominantExcluding returns the SegmentType with the highest count in
+// stats.TypeCounts excluding `skip`. Lex tie-break for cross-runtime
+// determinism. Returns "" when only the skipped type exists.
+func dominantExcluding(stats *PositionStats, skip SegmentType) SegmentType {
+	var best SegmentType
+	var bestN int
+	first := true
+	for t, n := range stats.TypeCounts {
+		if t == skip {
+			continue
+		}
+		if first || n > bestN || (n == bestN && string(t) < string(best)) {
+			best = t
+			bestN = n
+			first = false
+		}
 	}
-	if alt := dominantNonDateType(stats); alt != "" {
-		return alt
-	}
-	return TypeLiteral
+	return best
 }
 
 func (c *Cluster) Add(iri *Identifier) { c.AddWith(iri, DefaultClassifier) }

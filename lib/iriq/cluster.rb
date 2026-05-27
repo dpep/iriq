@@ -13,6 +13,13 @@ module Iriq
     # YYYYMMDD by accident — without quorum we'd canonicalize random IDs.
     DATE_CONFIDENCE_THRESHOLD = 0.8
 
+    # `:numeric` umbrella thresholds. Promote a position to :numeric when
+    # the combined :integer_id + :float observations dominate (≥ majority)
+    # AND neither subtype alone hits the strong threshold (we have a clear
+    # numeric pattern but it isn't purely ints or purely floats).
+    NUMERIC_CONFIDENCE_THRESHOLD = 0.8
+    NUMERIC_SUBTYPE_THRESHOLD    = 0.8
+
     def initialize(key:, host:, scheme:, shape:, max_values: PositionStats::DEFAULT_MAX_VALUES)
       @key            = key
       @host           = host
@@ -100,21 +107,46 @@ module Iriq
     def param_type(name)
       stats = @param_stats[name]
       return nil unless stats
+      return nil if stats.total.zero?
 
       type = stats.dominant_type
-      return type unless type == :date
 
-      date_frac = stats.total.positive? ? stats.type_counts[:date].to_f / stats.total : 0.0
-      return type if date_frac >= DATE_CONFIDENCE_THRESHOLD
+      # :date gate — demote when there isn't enough date-typed quorum.
+      if type == :date
+        date_frac = stats.type_counts[:date].to_f / stats.total
+        return type if date_frac >= DATE_CONFIDENCE_THRESHOLD
 
-      best, best_count = nil, -1
-      stats.type_counts.each do |t, n|
-        next if t == :date
-        if n > best_count || (n == best_count && t.to_s < best.to_s)
-          best, best_count = t, n
+        return dominant_excluding(stats, :date) || :literal
+      end
+
+      # :numeric umbrella — promote when ints + floats together dominate
+      # but neither alone is the clear winner.
+      if type == :integer_id || type == :float
+        int_frac   = stats.type_counts[:integer_id].to_f / stats.total
+        float_frac = stats.type_counts[:float].to_f / stats.total
+        if int_frac < NUMERIC_SUBTYPE_THRESHOLD &&
+           float_frac < NUMERIC_SUBTYPE_THRESHOLD &&
+           (int_frac + float_frac) >= NUMERIC_CONFIDENCE_THRESHOLD
+          return :numeric
         end
       end
-      best || :literal
+
+      type
+    end
+
+    # Most common type in stats.type_counts excluding `skip` — lex tie-break
+    # so the choice is deterministic across runtimes.
+    def dominant_excluding(stats, skip)
+      best = nil
+      best_count = -1
+      stats.type_counts.each do |t, n|
+        next if t == skip
+        if n > best_count || (n == best_count && t.to_s < best.to_s)
+          best = t
+          best_count = n
+        end
+      end
+      best
     end
 
     # JSON-friendly dump for persistence (distinct from #to_h which is a
@@ -149,8 +181,9 @@ module Iriq
     # Shared cluster-key derivation. Returns [key, host, scheme, shape] —
     # callers that already have a hinted shape can pass it in to skip the
     # recomputation; URN inputs ignore the override and always derive their
-    # own shape from the NSS value.
-    def self.key_for(iri, classifier:, shape: nil)
+    # own shape from the NSS value. `host:` overrides iri.host — used by
+    # Corpus when host_strategy collapses subdomains or ignores the host.
+    def self.key_for(iri, classifier:, shape: nil, host: nil)
       if iri.urn?
         ns, value = (iri.nss || "").split(":", 2)
         derived = value ? urn_value_shape(ns, value, classifier) : nil
@@ -158,8 +191,9 @@ module Iriq
         [key, nil, "urn", key]
       else
         shape ||= PathShape.new(classifier: classifier).for(iri.path_segments)
-        key = "#{iri.scheme}://#{iri.host}#{shape}"
-        [key, iri.host, iri.scheme, shape]
+        effective_host = host.nil? ? iri.host : host
+        key = "#{iri.scheme}://#{effective_host}#{shape}"
+        [key, effective_host, iri.scheme, shape]
       end
     end
 

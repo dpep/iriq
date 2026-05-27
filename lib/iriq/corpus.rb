@@ -42,13 +42,20 @@ module Iriq
     POPULAR_MIN_COUNT         = 5
     POPULAR_BASELINE_MULTIPLE = 3
 
-    attr_reader :storage
+    HOST_STRATEGIES = %i[full registrable none].freeze
+
+    attr_reader :storage, :host_strategy
 
     def initialize(classifier: SegmentClassifier::DEFAULT,
                    max_values_per_position: PositionStats::DEFAULT_MAX_VALUES,
+                   host_strategy: :full,
                    storage: nil)
-      @classifier = classifier
-      @storage    = storage || Storage::Memory.new(
+      raise ArgumentError, "host_strategy must be one of #{HOST_STRATEGIES.inspect}" \
+        unless HOST_STRATEGIES.include?(host_strategy)
+
+      @classifier    = classifier
+      @host_strategy = host_strategy
+      @storage       = storage || Storage::Memory.new(
         classifier: classifier,
         max_values_per_position: max_values_per_position,
       )
@@ -58,11 +65,24 @@ module Iriq
     # `.db`/`.sqlite`/`.sqlite3` use SQLite (incremental writes); anything
     # else uses JSON.
     def self.open(path, classifier: SegmentClassifier::DEFAULT,
-                        max_values_per_position: PositionStats::DEFAULT_MAX_VALUES)
+                        max_values_per_position: PositionStats::DEFAULT_MAX_VALUES,
+                        host_strategy: :full)
       storage = Storage.open(path,
                              classifier: classifier,
                              max_values_per_position: max_values_per_position)
-      new(classifier: classifier, storage: storage)
+      new(classifier: classifier, storage: storage, host_strategy: host_strategy)
+    end
+
+    # Normalize the host for keying purposes. `:full` keeps the original
+    # host; `:registrable` collapses subdomains via the inline-PSL heuristic
+    # (api.foo.com + app.foo.com → foo.com); `:none` ignores host entirely
+    # so clusters group across all hosts by shape alone.
+    def effective_host(host)
+      case @host_strategy
+      when :registrable then RegistrableDomain.for(host)
+      when :none        then ""
+      else                   host
+      end
     end
 
     # Observe a single IRI. Returns an Observation.
@@ -71,21 +91,22 @@ module Iriq
       hinted_entries = SegmentHints.derive(iri.path_segments, @classifier)
       raw_shape    = PathShape.new(classifier: @classifier, hints: false).from_entries(hinted_entries)
       hinted_shape = PathShape.new(classifier: @classifier, hints: true).from_entries(hinted_entries)
+      keying_host  = effective_host(iri.host)
 
       cluster = nil
       @storage.transaction do |s|
-        s.increment_host(iri.host)
+        s.increment_host(keying_host)
         s.increment_path_length(iri.path_segments.size)
         s.increment_raw_shape(raw_shape)
         s.increment_fingerprint(hinted_shape)
 
         prefix = ""
         hinted_entries.each do |entry|
-          s.observe_position(iri.host, prefix, entry[:value], entry[:type])
+          s.observe_position(keying_host, prefix, entry[:value], entry[:type])
           prefix = "#{prefix}/#{placeholder(entry)}"
         end
 
-        key, host, scheme, shape = Cluster.key_for(iri, classifier: @classifier, shape: hinted_shape)
+        key, host, scheme, shape = Cluster.key_for(iri, classifier: @classifier, shape: hinted_shape, host: keying_host)
         cluster = s.add_to_cluster(key, host, scheme, shape, iri)
       end
 
@@ -120,7 +141,8 @@ module Iriq
       iri = coerce(input)
       hinted_shape = PathShape.new(classifier: @classifier, hints: true)
                               .from_entries(SegmentHints.derive(iri.path_segments, @classifier))
-      key, * = Cluster.key_for(iri, classifier: @classifier, shape: hinted_shape)
+      key, * = Cluster.key_for(iri, classifier: @classifier, shape: hinted_shape,
+                               host: effective_host(iri.host))
       cluster = @storage.cluster_for(key)
       cluster ? cluster.param_summary : []
     end
@@ -197,8 +219,9 @@ module Iriq
     def annotate_segments(iri)
       hinted = SegmentHints.derive(iri.path_segments, @classifier)
       prefix = ""
+      keying_host = effective_host(iri.host)
       hinted.map do |entry|
-        stats = @storage.position_stats(iri.host, prefix)
+        stats = @storage.position_stats(keying_host, prefix)
         out = entry.merge(
           prefix:         prefix,
           classification: classify(entry, stats),
@@ -272,7 +295,8 @@ module Iriq
     def render_query(iri)
       hinted_shape = PathShape.new(classifier: @classifier, hints: true)
                               .from_entries(SegmentHints.derive(iri.path_segments, @classifier))
-      key, * = Cluster.key_for(iri, classifier: @classifier, shape: hinted_shape)
+      key, * = Cluster.key_for(iri, classifier: @classifier, shape: hinted_shape,
+                               host: effective_host(iri.host))
       cluster = @storage.cluster_for(key)
 
       iri.query_params.keys.sort.map do |k|

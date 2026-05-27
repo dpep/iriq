@@ -48,9 +48,27 @@ type positionKey struct {
 // State lives in a Storage backend — MemoryStorage by default, JSONStorage
 // or SqliteStorage when opened against a file via OpenCorpus.
 type Corpus struct {
-	Classifier *SegmentClassifier
-	storage    Storage
+	Classifier    *SegmentClassifier
+	HostStrategy  HostStrategy
+	storage       Storage
 }
+
+// HostStrategy controls how iri.Host is keyed into clusters / position
+// stats / host_counts. The original host always lives on the parsed
+// Identifier and surfaces in Normalize output; this only affects how the
+// corpus groups observations.
+type HostStrategy int
+
+const (
+	// HostStrategyFull keys by the original host (today's default).
+	HostStrategyFull HostStrategy = iota
+	// HostStrategyRegistrable collapses subdomains via the inline-PSL
+	// heuristic — api.foo.com + app.foo.com → foo.com.
+	HostStrategyRegistrable
+	// HostStrategyNone ignores host entirely so clusters group across all
+	// hosts by shape alone.
+	HostStrategyNone
+)
 
 // NewCorpus returns a Corpus backed by an in-memory store using default
 // settings.
@@ -70,6 +88,25 @@ func NewCorpusWithStorage(c *SegmentClassifier, s Storage) *Corpus {
 		c = DefaultClassifier
 	}
 	return &Corpus{Classifier: c, storage: s}
+}
+
+// SetHostStrategy lets callers swap the host-keying mode after construction.
+// Has no effect on observations already recorded — only future Observe calls
+// (and any Normalize / ParamsFor lookups) see the new strategy.
+func (cp *Corpus) SetHostStrategy(s HostStrategy) { cp.HostStrategy = s }
+
+// effectiveHost applies HostStrategy to iri.Host. The original host stays
+// on the parsed Identifier for Normalize output; this is only used for
+// clustering / stats keys.
+func (cp *Corpus) effectiveHost(host string) string {
+	switch cp.HostStrategy {
+	case HostStrategyRegistrable:
+		return RegistrableDomain(host)
+	case HostStrategyNone:
+		return ""
+	default:
+		return host
+	}
 }
 
 // OpenCorpus opens a corpus against path; file extension picks the backend
@@ -94,21 +131,22 @@ func (cp *Corpus) Observe(input interface{}) (*Observation, error) {
 	hinted := DeriveHints(iri.PathSegments, cp.Classifier)
 	rawShape := (&PathShape{Classifier: cp.Classifier, Hints: false}).FromEntries(hinted)
 	hintedShape := (&PathShape{Classifier: cp.Classifier, Hints: true}).FromEntries(hinted)
+	keyingHost := cp.effectiveHost(iri.Host)
 
 	var cluster *Cluster
 	err = cp.storage.Transaction(func() error {
-		cp.storage.IncrementHost(iri.Host)
+		cp.storage.IncrementHost(keyingHost)
 		cp.storage.IncrementPathLength(len(iri.PathSegments))
 		cp.storage.IncrementRawShape(rawShape)
 		cp.storage.IncrementFingerprint(hintedShape)
 
 		prefix := ""
 		for _, e := range hinted {
-			cp.storage.ObservePosition(iri.Host, prefix, e.Value, e.Type)
+			cp.storage.ObservePosition(keyingHost, prefix, e.Value, e.Type)
 			prefix = prefix + "/" + placeholderFor(e)
 		}
 
-		key, host, scheme, shape := ClusterKeyFor(iri, cp.Classifier, hintedShape)
+		key, host, scheme, shape := ClusterKeyForHost(iri, cp.Classifier, hintedShape, keyingHost)
 		cluster = cp.storage.AddToCluster(key, host, scheme, shape, iri)
 		return nil
 	})
@@ -174,7 +212,7 @@ func (cp *Corpus) ParamsFor(input interface{}) []ParamSummary {
 func (cp *Corpus) clusterForIRI(iri *Identifier) *Cluster {
 	hinted := DeriveHints(iri.PathSegments, cp.Classifier)
 	shape := (&PathShape{Classifier: cp.Classifier, Hints: true}).FromEntries(hinted)
-	key, _, _, _ := ClusterKeyFor(iri, cp.Classifier, shape)
+	key, _, _, _ := ClusterKeyForHost(iri, cp.Classifier, shape, cp.effectiveHost(iri.Host))
 	return cp.storage.ClusterFor(key)
 }
 
@@ -190,26 +228,6 @@ func (cp *Corpus) renderQuery(iri *Identifier) string {
 		parts = append(parts, k+"="+cp.renderParamValue(v, t))
 	}
 	return strings.Join(parts, "&")
-}
-
-// dominantNonDateType returns the SegmentType with the highest count in
-// TypeCounts excluding TypeDate. Returns "" when only date observations
-// exist. Lex tie-break for cross-runtime determinism.
-func dominantNonDateType(stats *PositionStats) SegmentType {
-	var best SegmentType
-	var bestN int
-	first := true
-	for t, n := range stats.TypeCounts {
-		if t == TypeDate {
-			continue
-		}
-		if first || n > bestN || (n == bestN && string(t) < string(best)) {
-			best = t
-			bestN = n
-			first = false
-		}
-	}
-	return best
 }
 
 func (cp *Corpus) inferredParamType(cluster *Cluster, name, value string) SegmentType {
@@ -315,8 +333,9 @@ func (cp *Corpus) annotateSegments(iri *Identifier) []annotated {
 	hinted := DeriveHints(iri.PathSegments, cp.Classifier)
 	out := make([]annotated, len(hinted))
 	prefix := ""
+	keyingHost := cp.effectiveHost(iri.Host)
 	for i, entry := range hinted {
-		stats := cp.storage.PositionStatsFor(iri.Host, prefix)
+		stats := cp.storage.PositionStatsFor(keyingHost, prefix)
 		cls := cp.classify(entry, stats)
 		out[i] = annotated{hint: entry, prefix: prefix, classification: cls}
 		prefix = prefix + "/" + placeholderFor(entry)

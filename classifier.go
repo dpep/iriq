@@ -12,6 +12,12 @@ type SegmentType string
 const (
 	TypeLiteral    SegmentType = "literal"
 	TypeIntegerID  SegmentType = "integer_id"
+	TypeFloat      SegmentType = "float"
+	// TypeNumeric is a corpus-only umbrella surfaced by Cluster.ParamType
+	// when both :integer_id and :float observations exist at the same
+	// position without either hitting a strong majority. The classifier
+	// never returns TypeNumeric for an individual value.
+	TypeNumeric    SegmentType = "numeric"
 	TypeUUID       SegmentType = "uuid"
 	TypeDate       SegmentType = "date"
 	TypeTimestamp  SegmentType = "timestamp"
@@ -23,6 +29,9 @@ const (
 var (
 	uuidRE    = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 	integerRE = regexp.MustCompile(`^\d+$`)
+	// A float requires a decimal point and digits on both sides. Sign
+	// optional. Bare integers fall through to integerRE.
+	floatRE   = regexp.MustCompile(`^-?\d+\.\d+$`)
 	// Date formats we'll canonicalize. Deliberately conservative — only the
 	// unambiguous forms where the year position is fixed. DD/MM/YYYY isn't
 	// recognized (can't be told apart from MM/DD/YYYY from a segment alone).
@@ -102,6 +111,8 @@ func computeClassification(segment string) SegmentType {
 		return TypeTimestamp
 	case integerRE.MatchString(segment):
 		return classifyInteger(segment)
+	case floatRE.MatchString(segment):
+		return TypeFloat
 	case hashRE.MatchString(segment):
 		return TypeHash
 	case slugRE.MatchString(segment):

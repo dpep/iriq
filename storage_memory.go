@@ -52,9 +52,10 @@ func (s *MemoryStorage) Flush() error                      { return nil }
 func (s *MemoryStorage) Close() error                      { return nil }
 
 func (s *MemoryStorage) IncrementHost(host string) {
-	if host == "" {
-		return
-	}
+	// Empty host is meaningful for HostStrategyNone — every observation
+	// collapses to "" — so we count it. Pre-strategy callers that pass
+	// "" for non-URN identifiers (which always have a host) wouldn't hit
+	// this path.
 	s.hostCounts[host]++
 }
 

@@ -298,6 +298,75 @@ describe Iriq::Corpus do
     end
   end
 
+  describe "float classification + :numeric umbrella" do
+    it "classifies a float value as :float" do
+      expect(Iriq::SegmentClassifier::DEFAULT.classify("3.14")).to eq(:float)
+      expect(Iriq::SegmentClassifier::DEFAULT.classify("-2.5")).to eq(:float)
+    end
+
+    it "renders pure-float param values as {float}" do
+      c = described_class.new
+      20.times { |i| c.observe("https://foo.com/api?amt=#{i + 1}.50") }
+      expect(c.normalize("https://foo.com/api?amt=99.99"))
+        .to eq("https://foo.com/api?amt={float}")
+    end
+
+    it "promotes to :numeric when ints and floats are mixed without a clear winner" do
+      c = described_class.new
+      60.times { |i| c.observe("https://foo.com/api?amt=#{i + 1}.99") }
+      40.times { |i| c.observe("https://foo.com/api?amt=#{i + 100}") }
+
+      expect(c.params_for("https://foo.com/api").first[:type]).to eq(:numeric)
+      expect(c.normalize("https://foo.com/api?amt=99.5"))
+        .to eq("https://foo.com/api?amt={numeric}")
+    end
+
+    it "stays as :float when floats dominate above subtype threshold" do
+      c = described_class.new
+      85.times { |i| c.observe("https://foo.com/api?amt=#{i + 1}.99") }
+      15.times { |i| c.observe("https://foo.com/api?amt=#{i + 100}") }
+      expect(c.params_for("https://foo.com/api").first[:type]).to eq(:float)
+    end
+  end
+
+  describe "host_strategy" do
+    it ":registrable collapses subdomains" do
+      c = described_class.new(host_strategy: :registrable)
+      c.observe("https://api.foo.com/users/1")
+      c.observe("https://app.foo.com/users/2")
+      expect(c.host_counts).to eq("foo.com" => 2)
+      expect(c.clusters.size).to eq(1)
+      expect(c.clusters.first.host).to eq("foo.com")
+    end
+
+    it ":registrable handles multi-label public suffixes (co.uk)" do
+      c = described_class.new(host_strategy: :registrable)
+      c.observe("https://blog.example.co.uk/posts/1")
+      c.observe("https://news.example.co.uk/posts/2")
+      expect(c.host_counts).to eq("example.co.uk" => 2)
+    end
+
+    it ":none pools all hosts into shape-only clusters" do
+      c = described_class.new(host_strategy: :none)
+      c.observe("https://foo.com/users/1")
+      c.observe("https://bar.io/users/2")
+      c.observe("https://baz.net/users/3")
+      expect(c.clusters.size).to eq(1)
+      expect(c.host_counts).to eq("" => 3)
+    end
+
+    it ":full (default) keeps original host" do
+      c = described_class.new
+      c.observe("https://api.foo.com/users/1")
+      c.observe("https://app.foo.com/users/2")
+      expect(c.clusters.size).to eq(2)
+    end
+
+    it "rejects unknown host_strategy" do
+      expect { described_class.new(host_strategy: :bogus) }.to raise_error(ArgumentError)
+    end
+  end
+
   describe ":date quorum threshold" do
     it "does NOT promote a param to :date when date-typed observations are below 80%" do
       corpus = described_class.new
