@@ -47,7 +47,7 @@
         "2024-05-23"
       ],
       "hints": true,
-      "shape": "/events/{event_id}"
+      "shape": "/events/{date}"
     },
     {
       "segments": [

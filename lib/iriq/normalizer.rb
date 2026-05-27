@@ -20,8 +20,10 @@ module Iriq
           entry     = SegmentHints.derive([ns, value], classifier).last
           shaped    = if entry[:type] == :date && (canon = SegmentClassifier.canonical_date(entry[:value]))
                         canon
+                      elsif entry[:type] == :currency && (canon = SegmentClassifier.canonical_currency(entry[:value]))
+                        canon
                       elsif entry[:variable]
-                        "{#{(hints && entry[:hint]) || entry[:type]}}"
+                        "{#{(hints && entry[:hint]) || SegmentClassifier.display_type(entry[:type])}}"
                       else
                         entry[:value]
                       end
@@ -34,7 +36,8 @@ module Iriq
         out << "#{iri.scheme}://" if iri.scheme
         out << iri.host if iri.host
         out << ":#{iri.port}" if iri.port
-        out << PathShape.new(classifier: classifier, hints: hints, canonical_dates: true).for(iri.path_segments)
+        out << PathShape.new(classifier: classifier, hints: hints,
+                             canonical_dates: true, canonical_currencies: true).for(iri.path_segments)
         if iri.query_params && !iri.query_params.empty?
           out << "?" + shape_query(iri.query_params, classifier)
         end
@@ -48,8 +51,10 @@ module Iriq
         type   = classifier.classify(v.to_s)
         shaped = if type == :date && (canon = SegmentClassifier.canonical_date(v.to_s))
                    canon
+                 elsif type == :currency && (canon = SegmentClassifier.canonical_currency(v.to_s))
+                   canon
                  elsif classifier.variable?(type)
-                   "{#{type}}"
+                   "{#{SegmentClassifier.display_type(type)}}"
                  else
                    v
                  end

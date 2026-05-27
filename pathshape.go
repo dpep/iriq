@@ -7,13 +7,15 @@ import "strings"
 // are disabled / no hint is available).
 //
 // With CanonicalDates set, date-typed segments render in canonical ISO form
-// (2024/01/15 → 2024-01-15) instead of as a {date} placeholder. Used by the
-// normalizer for display output; the clusterer keeps the placeholder form so
-// dated routes still group together.
+// (2024/01/15 → 2024-01-15) instead of as a {date} placeholder.
+// CanonicalCurrencies does the same for currency codes (`usd` → `USD`).
+// Used by the normalizer for display output; the clusterer keeps the
+// placeholder form so dated/currency routes still group together.
 type PathShape struct {
-	Classifier     *SegmentClassifier
-	Hints          bool
-	CanonicalDates bool
+	Classifier          *SegmentClassifier
+	Hints               bool
+	CanonicalDates      bool
+	CanonicalCurrencies bool
 }
 
 // NewPathShape returns a PathShape with the default classifier and hints on.
@@ -57,13 +59,18 @@ func (p *PathShape) shapeToken(e SegmentHint) string {
 			return canon
 		}
 	}
+	if p.CanonicalCurrencies && e.Type == TypeCurrency {
+		if canon := CanonicalCurrency(e.Value); canon != "" {
+			return canon
+		}
+	}
 	if p.Hints {
 		if e.Hint != "" {
 			return "{" + e.Hint + "}"
 		}
-		return "{" + string(e.Type) + "}"
+		return "{" + DisplayType(e.Type) + "}"
 	}
-	return "{" + string(e.Type) + "}"
+	return "{" + DisplayType(e.Type) + "}"
 }
 
 // PathShapeFor is the convenience constructor + invocation matching Ruby's

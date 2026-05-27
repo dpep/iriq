@@ -56,6 +56,11 @@ CLASSIFIER_INPUTS = [
   "en-US", "fr_CA", "zh-Hant",
   "USD", "eur", "FAQ",
   "2026", "1999", "1800",
+  "by-locale", "if", "to",
+  "+15551234567", "+1 (555) 123-4567",
+  "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dQw4w9WgXcQ",
+  "image/png", "application/vnd.api+json", "text/html",
+  "foo.com/bar", "sub.foo.com/", "image.png",
   "こんにちは", "",
 ].freeze
 
@@ -82,6 +87,11 @@ NORMALIZE_INPUTS = [
   ["urn:uuid:f47ac10b-58cc-4372-a567-0e02b2c3d479", true],
   ["https://foo.com/2024-05-23/events",     true],
   ["https://foo.com/files/d41d8cd98f00b204e9800998ecf8427e", true],
+  ["https://shop.com/pricing/usd/checkout",                  true],
+  ["https://shop.com/price?currency=eur",                    true],
+  ["https://foo.com/probe/192.168.1.1",                      true],
+  ["https://foo.com/probe/::1",                              true],
+  ["https://foo.com/api/v1/status",                          true],
 ].freeze
 
 PATH_SHAPE_INPUTS = [

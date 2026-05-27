@@ -33,10 +33,12 @@ func NormalizeIdentifier(iri *Identifier, c *SegmentClassifier, hints bool) stri
 			switch {
 			case entry.Type == TypeDate && CanonicalDate(entry.Value) != "":
 				shaped = CanonicalDate(entry.Value)
+			case entry.Type == TypeCurrency && CanonicalCurrency(entry.Value) != "":
+				shaped = CanonicalCurrency(entry.Value)
 			case entry.Variable:
 				placeholder := entry.Hint
 				if !hints || placeholder == "" {
-					placeholder = string(entry.Type)
+					placeholder = DisplayType(entry.Type)
 				}
 				shaped = "{" + placeholder + "}"
 			default:
@@ -59,7 +61,7 @@ func NormalizeIdentifier(iri *Identifier, c *SegmentClassifier, hints bool) stri
 		b.WriteByte(':')
 		b.WriteString(itoa(iri.Port))
 	}
-	ps := &PathShape{Classifier: c, Hints: hints, CanonicalDates: true}
+	ps := &PathShape{Classifier: c, Hints: hints, CanonicalDates: true, CanonicalCurrencies: true}
 	b.WriteString(ps.For(iri.PathSegments))
 	if iri.QueryParams.Len() > 0 {
 		b.WriteByte('?')
@@ -80,10 +82,16 @@ func shapeQuery(params *OrderedMap, c *SegmentClassifier) string {
 			if canon := CanonicalDate(v); canon != "" {
 				shaped = canon
 			} else {
-				shaped = "{" + string(t) + "}"
+				shaped = "{" + DisplayType(t) + "}"
+			}
+		} else if t == TypeCurrency {
+			if canon := CanonicalCurrency(v); canon != "" {
+				shaped = canon
+			} else {
+				shaped = "{" + DisplayType(t) + "}"
 			}
 		} else if c.Variable(t) {
-			shaped = "{" + string(t) + "}"
+			shaped = "{" + DisplayType(t) + "}"
 		} else {
 			shaped = v
 		}

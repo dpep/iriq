@@ -32,7 +32,14 @@ const (
 	TypeVersion    SegmentType = "version"
 	TypeLocale     SegmentType = "locale"
 	TypeCurrency   SegmentType = "currency"
+	TypePhone      SegmentType = "phone"
+	TypeJWT        SegmentType = "jwt"
+	TypeMIME       SegmentType = "mime"
 	TypeYear       SegmentType = "year"
+	// TypeHTTPStatus is a corpus-only umbrella for positions whose values
+	// cluster in the 100..599 HTTP status window. Same range-promotion
+	// pattern as TypeYear — see Cluster.ParamType.
+	TypeHTTPStatus SegmentType = "http_status"
 	// TypeEnum is a corpus-only umbrella surfaced by Cluster.ParamType when
 	// a position has a bounded set of repeated values across enough samples
 	// (see Enum* thresholds in cluster.go).
@@ -71,6 +78,10 @@ var (
 	ipv6FullRE       = regexp.MustCompile(`^[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){7}$`)
 	ipv6CompressedRE = regexp.MustCompile(`^[0-9a-fA-F:]{2,}$`)
 	urlRE            = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.\-]*://\S+$`)
+	// Scheme-less URL — `foo.com/path`, `sub.foo.com/`, etc. Requires a
+	// dotted host with a TLD-like suffix (≥2 letters) followed by a slash
+	// to disambiguate from filenames like `image.png` or version strings.
+	schemelessURLRE  = regexp.MustCompile(`^[a-zA-Z0-9\-]+(?:\.[a-zA-Z0-9\-]+)*\.[a-zA-Z]{2,}/\S*$`)
 	emailRE          = regexp.MustCompile(`^[A-Za-z0-9._%+\-]+@[A-Za-z0-9](?:[A-Za-z0-9\-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9\-]*[A-Za-z0-9])?)+$`)
 
 	// Boolean literal — case-insensitive. `0`/`1` look like integers from
@@ -79,15 +90,35 @@ var (
 	booleanRE = regexp.MustCompile(`^(?i:true|false)$`)
 	// SemVer-ish version with explicit `v` prefix.
 	versionRE = regexp.MustCompile(`^v\d+(?:\.\d+)*(?:[-+][A-Za-z0-9.\-]+)?$`)
-	// BCP 47-ish locale — has separator. Bare 2-letter case handled via
-	// the inline ISO 639-1 allowlist below.
-	localeRE = regexp.MustCompile(`^[a-z]{2,3}[-_][A-Za-z][A-Za-z0-9]+$`)
+	// BCP 47-ish locale — language (2-3 lowercase) + separator + region or
+	// script (2-4 alphanum). The bare 2-letter case is handled via the
+	// inline ISO 639-1 allowlist below. classifyLocalePair also confirms
+	// the language portion is in the allowlist so `by-locale` doesn't
+	// wrongly promote.
+	localeRE = regexp.MustCompile(`^([a-z]{2,3})[-_]([A-Za-z0-9]{2,4})$`)
 	// Bare 2-letter slot; only :locale when it's in the language-code
 	// allowlist. 3-letter slot is reserved for currencies.
 	localeBareRE = regexp.MustCompile(`^[a-z]{2}$`)
 	// Three-letter shape; validated against the inline ISO 4217 list in
 	// classifyCurrency so we don't catch random 3-letter tokens.
 	currencyRE = regexp.MustCompile(`^[A-Za-z]{3}$`)
+	// E.164-ish phone — leading `+` then 7-20 chars of digits + separators.
+	// The digit count is validated past the regex in classifyPhone (E.164
+	// allows 7-15 digits).
+	phoneRE = regexp.MustCompile(`^\+[ \-.()\d]{7,20}$`)
+	// JWT — three base64url-encoded parts separated by dots; header starts
+	// with `ey` (`{` JSON prefix base64url-encoded).
+	jwtRE = regexp.MustCompile(`^ey[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+$`)
+	// MIME / media type — RFC 2046 top-level types plus a subtype. The
+	// subtype side is permissive so `application/vnd.api+json` and
+	// `image/svg+xml` both match.
+	mimeRE = regexp.MustCompile(`^(?:text|image|video|audio|application|multipart|message|font|model)/[A-Za-z0-9!#$&^_+\-.]+$`)
+)
+
+// httpStatusMin / httpStatusMax mirror Ruby's HTTP_STATUS_RANGE.
+const (
+	httpStatusMin = 100
+	httpStatusMax = 599
 )
 
 // localeLanguageCodes is the inline ISO 639-1 (subset) — codes commonly
@@ -176,6 +207,8 @@ func computeClassification(segment string) SegmentType {
 	switch {
 	case uuidRE.MatchString(segment):
 		return TypeUUID
+	case jwtRE.MatchString(segment):
+		return TypeJWT
 	// Network / structured types take precedence over the generic opaqueRE
 	// catch-all (which would otherwise grab IPv4) and the literal fallback
 	// (which today swallows email + URL + IPv6).
@@ -183,6 +216,10 @@ func computeClassification(segment string) SegmentType {
 		return TypeURL
 	case emailRE.MatchString(segment):
 		return TypeEmail
+	case mimeRE.MatchString(segment):
+		return TypeMIME
+	case schemelessURLRE.MatchString(segment):
+		return TypeURL
 	case ipv4RE.MatchString(segment):
 		return classifyIPv4(segment)
 	case ipv6FullRE.MatchString(segment):
@@ -196,13 +233,15 @@ func computeClassification(segment string) SegmentType {
 	case booleanRE.MatchString(segment):
 		return TypeBoolean
 	case localeRE.MatchString(segment):
-		return TypeLocale
+		return classifyLocalePair(segment)
 	case localeBareRE.MatchString(segment):
 		return classifyLocaleBare(segment)
 	case dateRE.MatchString(segment), dateSlashRE.MatchString(segment), dateUSRE.MatchString(segment):
 		return TypeDate
 	case isoTimeRE.MatchString(segment):
 		return TypeTimestamp
+	case phoneRE.MatchString(segment):
+		return classifyPhone(segment)
 	case integerRE.MatchString(segment):
 		return classifyInteger(segment)
 	case floatRE.MatchString(segment):
@@ -217,6 +256,21 @@ func computeClassification(segment string) SegmentType {
 		return TypeOpaqueID
 	}
 	return TypeLiteral
+}
+
+// classifyPhone counts digits (ignoring separators) and confirms the count
+// falls in the E.164 7-15 range. Falls back to TypeOpaqueID otherwise.
+func classifyPhone(segment string) SegmentType {
+	digits := 0
+	for _, r := range segment {
+		if r >= '0' && r <= '9' {
+			digits++
+		}
+	}
+	if digits >= 7 && digits <= 15 {
+		return TypePhone
+	}
+	return TypeOpaqueID
 }
 
 // classifyCurrency upgrades a 3-letter token to TypeCurrency only when
@@ -237,6 +291,23 @@ func classifyCurrency(segment string) SegmentType {
 func classifyLocaleBare(segment string) SegmentType {
 	if _, ok := localeLanguageCodes[segment]; ok {
 		return TypeLocale
+	}
+	return TypeLiteral
+}
+
+// classifyLocalePair handles the dashed/underscored locale form. Only
+// promotes to TypeLocale when the language portion is in the ISO 639-1
+// allowlist — guards against `by-locale` and similar.
+func classifyLocalePair(segment string) SegmentType {
+	m := localeRE.FindStringSubmatch(segment)
+	if m == nil {
+		return TypeLiteral
+	}
+	if _, ok := localeLanguageCodes[m[1]]; ok {
+		return TypeLocale
+	}
+	if slugRE.MatchString(segment) {
+		return TypeSlug
 	}
 	return TypeLiteral
 }
@@ -283,6 +354,32 @@ func classifyInteger(segment string) SegmentType {
 	// only range analysis across observations is reliable.
 
 	return TypeInteger
+}
+
+// DisplayType returns the type name used in `--normalize` placeholders.
+// Collapses TypeIPv4 and TypeIPv6 to "ip" — callers that want the
+// specific family read it off the classifier directly or via cluster
+// stats.
+func DisplayType(t SegmentType) string {
+	switch t {
+	case TypeIPv4, TypeIPv6:
+		return "ip"
+	}
+	return string(t)
+}
+
+// CanonicalCurrency upcases a known ISO 4217 currency code. Returns "" if
+// the value isn't a known code. Used by --normalize so /pricing/usd and
+// /pricing/USD both render as /pricing/USD.
+func CanonicalCurrency(value string) string {
+	if value == "" {
+		return ""
+	}
+	up := strings.ToUpper(value)
+	if _, ok := currencyCodes[up]; ok {
+		return up
+	}
+	return ""
 }
 
 // CanonicalDate normalizes a recognized date string to ISO 8601 (YYYY-MM-DD).

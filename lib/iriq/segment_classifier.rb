@@ -16,7 +16,8 @@ module Iriq
     # bounded set of distinct values observed across enough samples (see
     # Cluster::ENUM_* thresholds).
     TYPES = %i[literal integer float number uuid date year timestamp hash slug
-               ipv4 ipv6 url email boolean version locale currency enum opaque_id].freeze
+               ipv4 ipv6 url email boolean version locale currency phone jwt mime
+               http_status enum opaque_id].freeze
 
     UUID_RE      = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/.freeze
     INTEGER_RE   = /\A\d+\z/.freeze
@@ -50,6 +51,11 @@ module Iriq
     # URL-as-value: a scheme prefix followed by something non-empty.
     # Used for query params like ?redirect=https://foo.com/bar.
     URL_RE   = %r{\A[a-zA-Z][a-zA-Z0-9+.\-]*://\S+\z}.freeze
+    # Scheme-less URL — `foo.com/path`, `sub.foo.com/`, etc. Requires a
+    # dotted host with a TLD-like suffix (≥2 letters) followed by a slash
+    # to disambiguate from filenames like `image.png` or version strings
+    # like `1.2.3`.
+    SCHEMELESS_URL_RE = %r{\A[a-zA-Z0-9\-]+(?:\.[a-zA-Z0-9\-]+)*\.[a-zA-Z]{2,}/\S*\z}.freeze
     # Simplified email — local@host.tld, no leading/trailing dots in either
     # part. Not RFC 5322 compliant; covers the common shape.
     EMAIL_RE = /\A[A-Za-z0-9._%+\-]+@[A-Za-z0-9](?:[A-Za-z0-9\-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9\-]*[A-Za-z0-9])?)+\z/.freeze
@@ -62,10 +68,14 @@ module Iriq
     # `1.2.3` looks like a float / opaque blob; the `v` keeps it
     # unambiguous from a single value.
     VERSION_RE = /\Av\d+(?:\.\d+)*(?:[-+][A-Za-z0-9.\-]+)?\z/.freeze
-    # BCP 47-ish locale: 2-3 letter language + separator + region/script.
-    # The bare 2/3-letter case is handled via LOCALE_LANGUAGE_CODES below
-    # so we don't over-classify random short words.
-    LOCALE_RE  = /\A[a-z]{2,3}[-_][A-Za-z][A-Za-z0-9]+\z/.freeze
+    # BCP 47-ish locale: 2-3 letter language + separator + 2-4 char region
+    # or script. Real-world subtags: ISO 3166-1 region (`US`, `CA`, 2 letters
+    # / 3 digits), ISO 15924 script (`Hans`, 4 letters). The bare 2/3-letter
+    # case is handled via LOCALE_LANGUAGE_CODES below so we don't
+    # over-classify random short words. A trailing helper (classify_locale_pair)
+    # also confirms the language portion is in the allowlist — otherwise
+    # things like `by-locale` would wrongly promote to :locale.
+    LOCALE_RE  = /\A([a-z]{2,3})[-_]([A-Za-z0-9]{2,4})\z/.freeze
     # Inline ISO 639-1 (subset) — the language codes we'll accept as a
     # standalone locale segment. Bare `en` / `fr` / `ja` etc. classify as
     # :locale; tokens not in the list (like the 2-letter literal `to` or
@@ -91,6 +101,24 @@ module Iriq
       NGN EGP
     ].to_set.freeze
     CURRENCY_RE    = /\A[A-Za-z]{3}\z/.freeze
+    # E.164 phone number — leading `+` then 1-3 digit country code, then up
+    # to 14 more digits. Allows separators (space, dash, dot, parens) but
+    # they don't count toward digit length. A standalone `+15551234567` and
+    # `+1 (555) 123-4567` both classify; bare digit blobs without `+`
+    # stay as :integer / :opaque_id (too ambiguous from a single value).
+    PHONE_RE       = %r{\A\+(?:[ \-.()\d]){7,20}\z}.freeze
+    # JWT: three base64url-encoded segments separated by dots, header
+    # starts with `eyJ` (the `{` JSON prefix base64url-encoded).
+    JWT_RE         = /\Aey[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\z/.freeze
+    # MIME / media type — RFC 2046 top-level types plus a subtype. The
+    # subtype side is permissive (letters/digits/+-.) so `application/vnd.api+json`
+    # and `image/svg+xml` both match.
+    MIME_RE        = %r{\A(?:text|image|video|audio|application|multipart|message|font|model)/[A-Za-z0-9!#$&^_+\-.]+\z}.freeze
+    # HTTP status — bare 3-digit integer in the 100..599 window. Same
+    # corpus-promotion pattern as :year: a single 3-digit int is ambiguous,
+    # but a position whose values cluster inside the HTTP status window is
+    # almost certainly statuses. See Cluster#param_type for the promotion.
+    HTTP_STATUS_RANGE = 100..599
     # Plausible year — 4-digit integer in the 1900..2100 window. Checked
     # inside classify_integer so we don't shadow shorter / longer ints.
     YEAR_RANGE = 1900..2100
@@ -133,17 +161,21 @@ module Iriq
       # LITERAL fallback (which today swallows email + URL + IPv6).
       case segment
       when UUID_RE     then :uuid
+      when JWT_RE      then :jwt
       when URL_RE      then :url
       when EMAIL_RE    then :email
+      when MIME_RE     then :mime
+      when SCHEMELESS_URL_RE then :url
       when IPV4_RE     then classify_ipv4(segment)
       when IPV6_RE     then :ipv6
       when HASH_RE     then :hash
       when VERSION_RE  then :version
       when BOOLEAN_RE  then :boolean
-      when LOCALE_RE   then :locale
+      when LOCALE_RE   then classify_locale_pair(segment)
       when LOCALE_BARE_RE then classify_locale(segment)
       when DATE_RE, DATE_SLASH_RE, DATE_US_RE then :date
       when ISO_TIME_RE then :timestamp
+      when PHONE_RE    then classify_phone(segment)
       when INTEGER_RE  then classify_integer(segment)
       when FLOAT_RE    then :float
       when CURRENCY_RE then classify_currency(segment)
@@ -163,6 +195,16 @@ module Iriq
       :ipv4
     end
 
+    # Validate E.164-shaped phone: count digits (ignoring separators) and
+    # ensure between 7 and 15 inclusive. The shape regex permits a wide
+    # range — the digit count is the meaningful guardrail.
+    def classify_phone(segment)
+      digits = segment.count("0-9")
+      return :phone if digits.between?(7, 15)
+
+      :opaque_id
+    end
+
     # Three-letter shape — only call it :currency if it's actually in the
     # ISO 4217 allowlist (case-insensitive). Otherwise fall through to the
     # literal/opaque rules.
@@ -179,6 +221,16 @@ module Iriq
       return :locale if LOCALE_LANGUAGE_CODES.include?(segment)
 
       :literal
+    end
+
+    # Dashed/underscored locale form (`en-US`, `zh-Hans`). Only promote to
+    # :locale when the language portion is in the ISO 639-1 allowlist —
+    # otherwise tokens like `by-locale` would slip through.
+    def classify_locale_pair(segment)
+      lang = segment[/\A[a-z]{2,3}/]
+      return :locale if LOCALE_LANGUAGE_CODES.include?(lang)
+
+      segment.match?(SLUG_RE) ? :slug : :literal
     end
 
     def classify_integer(segment)
@@ -211,6 +263,24 @@ module Iriq
     # Shared singleton — preferred default for callers that don't bring
     # their own classifier (saves a per-call allocation).
     DEFAULT = new
+
+    # Display name for a type in `--normalize` placeholders. Collapses
+    # `:ipv4` and `:ipv6` to `:ip` (callers that want the specific family
+    # read it off the classifier directly or via cluster stats).
+    def self.display_type(type)
+      return :ip if type == :ipv4 || type == :ipv6
+
+      type
+    end
+
+    # Canonicalize a currency code to uppercase ISO 4217. Returns nil if
+    # the value isn't a known code. Used by --normalize so /pricing/usd and
+    # /pricing/USD both render as /pricing/USD.
+    def self.canonical_currency(value)
+      return nil if value.nil?
+      up = value.upcase
+      CURRENCY_CODES.include?(up) ? up : nil
+    end
 
     # Canonicalize a recognized date string to ISO 8601 (YYYY-MM-DD). Returns
     # nil if the value isn't one of our accepted date forms. Used by --normalize

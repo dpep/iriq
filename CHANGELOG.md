@@ -1,3 +1,16 @@
+###  0.9.0  (2026-05-27)
+- Semantic types (`:version`, `:locale`, `:currency`, `:date`, `:boolean`, `:timestamp`, etc.) now surface as `{type}` placeholders instead of being run through the noun-singularize hint. `/api/v1/status` renders `/api/{version}/status` rather than the misleading `/api/{api_id}/status`. Only ID-shaped types (`:integer`, `:uuid`, `:hash`, `:opaque_id`, `:slug`) keep the `{noun_id}` form.
+- `--normalize` collapses `:ipv4` and `:ipv6` to `{ip}` in placeholder form (previously rendered as `{ipv4}` / `{ipv6}`). The classifier still tracks the specific family; cluster summary keeps the distinct types.
+- `--normalize` canonicalizes currency segments and params to ISO 4217 upper case — `/pricing/usd` → `/pricing/USD`, `?currency=eur` → `?currency=EUR`. Mirrors the existing date canonicalization (`canonical_currencies: true` flag on `PathShape`).
+- `LOCALE_RE` tightened: the region/script portion now caps at 2-4 alphanumeric chars and the language portion is validated against the ISO 639-1 allowlist — `by-locale` no longer wrongly classifies as `:locale`.
+- New classifier types: `:phone` (E.164 — `+` then 7-15 digits with optional separators), `:jwt` (three base64url segments separated by dots), `:mime` (RFC 2046 top-level type + subtype, e.g. `image/png`, `application/vnd.api+json`).
+- New corpus-promoted type `:http_status` — integer positions whose observed range falls inside 100..599 with ≥2 distinct values and ≥5 samples get promoted. Same range-analysis pattern as `:year`.
+- Scheme-less URL detection: query values like `?redirect=foo.com/path` classify as `:url`. Requires a dotted host with a TLD-like ≥2-letter suffix followed by a slash, so `image.png` stays as `:opaque_id`.
+- `Cluster#param_summary` adds two new fields:
+  - `:value_distribution` — fractions per tracked value, for `:boolean` and `:enum` positions (e.g. `{ "true" => 0.97, "false" => 0.03 }`). Same data already in `value_counts`, surfaced as ratios.
+  - `:subtype_distribution` — int-vs-float split for `:number` positions (e.g. `{ integer: 0.4, float: 0.6 }`).
+- `:boolean` now wins over `:enum` when the dominant type is boolean — a position of pure `true`/`false` stays `:boolean` rather than being demoted to a 2-value enum.
+
 ###  0.8.0  (2026-05-27)
 - **Breaking**: `:numeric` umbrella renamed to `:number` (Ruby) / `TypeNumeric` → `TypeNumber` (Go). Same semantics.
 - New classifier types: `:boolean` (`true`/`false`, any case), `:version` (`v1`, `v2.0.1`, `v1.2.3-beta` — requires the `v` prefix), `:locale` (BCP 47-ish full forms like `en-US`/`fr_CA`, plus bare 2-letter language codes from an inline ISO 639-1 allowlist of ~55 entries — `en`, `fr`, `ja`, etc.), `:currency` (3-letter codes from an inline ISO 4217 allowlist of ~35 entries).

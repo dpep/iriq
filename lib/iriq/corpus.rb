@@ -234,7 +234,7 @@ module Iriq
     def placeholder(entry)
       return entry[:value] unless entry[:variable]
 
-      "{#{entry[:hint] || entry[:type]}}"
+      "{#{entry[:hint] || SegmentClassifier.display_type(entry[:type])}}"
     end
 
     # Shape-y types whose values are often a small fixed set (e.g.
@@ -343,7 +343,7 @@ module Iriq
       if type == :date && (canon = SegmentClassifier.canonical_date(value))
         canon
       elsif @classifier.variable?(type)
-        "{#{type}}"
+        "{#{SegmentClassifier.display_type(type)}}"
       else
         value
       end
@@ -365,7 +365,7 @@ module Iriq
       if entry[:type] == :date && (canon = SegmentClassifier.canonical_date(entry[:value]))
         return canon
       end
-      return "{#{entry[:hint] || entry[:type]}}" if entry[:variable]
+      return "{#{entry[:hint] || SegmentClassifier.display_type(entry[:type])}}" if entry[:variable]
 
       # corpus-inferred variable: classifier said literal, corpus says
       # otherwise. Derive a hint from the prefix's last literal segment if

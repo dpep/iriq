@@ -31,8 +31,18 @@ func DeriveHints(segments []string, c *SegmentClassifier) []SegmentHint {
 	return out
 }
 
+// hintEligibleTypes lists the ID-shaped types that get the
+// noun-singularize hint. Semantic types (version, locale, currency, date,
+// etc.) are more informative as `{type}` than as `{noun}_id`.
+var hintEligibleTypes = map[SegmentType]struct{}{
+	TypeInteger: {}, TypeUUID: {}, TypeHash: {}, TypeOpaqueID: {}, TypeSlug: {},
+}
+
 func hintFor(segments []string, i int, t SegmentType, variable bool, c *SegmentClassifier) string {
 	if !variable || i == 0 {
+		return ""
+	}
+	if _, ok := hintEligibleTypes[t]; !ok {
 		return ""
 	}
 	prev := segments[i-1]

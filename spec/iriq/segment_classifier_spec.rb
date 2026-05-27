@@ -59,6 +59,18 @@ describe Iriq::SegmentClassifier do
       "1999"                                 => :integer,
       "1800"                                 => :integer,
       "2200"                                 => :integer,
+      "by-locale"                            => :slug,
+      "+15551234567"                         => :phone,
+      "+1 (555) 123-4567"                    => :phone,
+      "+44 20 7946 0958"                     => :phone,
+      "+1"                                   => :literal,
+      "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dQw4w9WgXcQ" => :jwt,
+      "image/png"                            => :mime,
+      "application/vnd.api+json"             => :mime,
+      "text/html"                            => :mime,
+      "foo.com/bar"                          => :url,
+      "sub.foo.com/"                         => :url,
+      "image.png"                            => :opaque_id,
     }.each do |input, expected|
       it "classifies #{input.inspect} as #{expected}" do
         expect(classifier.classify(input)).to eq(expected)

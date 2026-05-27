@@ -49,6 +49,31 @@
       "input": "https://foo.com/files/d41d8cd98f00b204e9800998ecf8427e",
       "hints": true,
       "output": "https://foo.com/files/{file_id}"
+    },
+    {
+      "input": "https://shop.com/pricing/usd/checkout",
+      "hints": true,
+      "output": "https://shop.com/pricing/USD/checkout"
+    },
+    {
+      "input": "https://shop.com/price?currency=eur",
+      "hints": true,
+      "output": "https://shop.com/price?currency=EUR"
+    },
+    {
+      "input": "https://foo.com/probe/192.168.1.1",
+      "hints": true,
+      "output": "https://foo.com/probe/{ip}"
+    },
+    {
+      "input": "https://foo.com/probe/::1",
+      "hints": true,
+      "output": "https://foo.com/probe/{ip}"
+    },
+    {
+      "input": "https://foo.com/api/v1/status",
+      "hints": true,
+      "output": "https://foo.com/api/{version}/status"
     }
   ]
 }
