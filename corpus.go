@@ -1,6 +1,9 @@
 package iriq
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 // Classification labels mirror the symbols Ruby's Corpus#explain emits.
 type Classification string
@@ -58,7 +61,7 @@ func NewCorpusWith(c *SegmentClassifier, maxValues int) *Corpus {
 	if c == nil {
 		c = DefaultClassifier
 	}
-	return &Corpus{Classifier: c, storage: NewMemoryStorage(maxValues)}
+	return &Corpus{Classifier: c, storage: NewMemoryStorageWith(maxValues, c)}
 }
 
 // NewCorpusWithStorage wraps any Storage in a Corpus.
@@ -72,7 +75,7 @@ func NewCorpusWithStorage(c *SegmentClassifier, s Storage) *Corpus {
 // OpenCorpus opens a corpus against path; file extension picks the backend
 // (.db/.sqlite/.sqlite3 = SQLite, anything else = JSON).
 func OpenCorpus(path string) (*Corpus, error) {
-	s, err := OpenStorage(path, DefaultMaxValuesPerPosition)
+	s, err := OpenStorageWith(path, DefaultMaxValuesPerPosition, DefaultClassifier)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +128,7 @@ func (cp *Corpus) Normalize(input string) (string, error) {
 }
 
 func (cp *Corpus) NormalizeIdentifier(iri *Identifier) string {
-	if iri.IsURN() || len(iri.PathSegments) == 0 {
+	if iri.IsURN() {
 		return NormalizeIdentifier(iri, cp.Classifier, true)
 	}
 	entries := cp.annotateSegments(iri)
@@ -147,7 +150,67 @@ func (cp *Corpus) NormalizeIdentifier(iri *Identifier) string {
 	}
 	b.WriteByte('/')
 	b.WriteString(strings.Join(tokens, "/"))
+	if iri.QueryParams != nil && iri.QueryParams.Len() > 0 {
+		b.WriteByte('?')
+		b.WriteString(cp.renderQuery(iri))
+	}
 	return b.String()
+}
+
+// ParamsFor returns the inferred parameter summary for the cluster the input
+// would fall into. Empty when no cluster has been observed for this shape.
+func (cp *Corpus) ParamsFor(input interface{}) []ParamSummary {
+	iri, err := coerceIdentifier(input)
+	if err != nil {
+		return nil
+	}
+	cluster := cp.clusterForIRI(iri)
+	if cluster == nil {
+		return nil
+	}
+	return cluster.ParamSummary()
+}
+
+func (cp *Corpus) clusterForIRI(iri *Identifier) *Cluster {
+	hinted := DeriveHints(iri.PathSegments, cp.Classifier)
+	shape := (&PathShape{Classifier: cp.Classifier, Hints: true}).FromEntries(hinted)
+	key, _, _, _ := ClusterKeyFor(iri, cp.Classifier, shape)
+	return cp.storage.ClusterFor(key)
+}
+
+func (cp *Corpus) renderQuery(iri *Identifier) string {
+	cluster := cp.clusterForIRI(iri)
+	keys := iri.QueryParams.Keys()
+	sortedKeys := append([]string(nil), keys...)
+	sort.Strings(sortedKeys)
+	parts := make([]string, 0, len(sortedKeys))
+	for _, k := range sortedKeys {
+		v, _ := iri.QueryParams.Get(k)
+		t := cp.inferredParamType(cluster, k, v)
+		parts = append(parts, k+"="+cp.renderParamValue(v, t))
+	}
+	return strings.Join(parts, "&")
+}
+
+func (cp *Corpus) inferredParamType(cluster *Cluster, name, value string) SegmentType {
+	if cluster != nil {
+		if stats := cluster.ParamStats[name]; stats != nil && stats.Total >= MinObservationsForInference {
+			return stats.DominantType()
+		}
+	}
+	return cp.Classifier.Classify(value)
+}
+
+func (cp *Corpus) renderParamValue(value string, t SegmentType) string {
+	if t == TypeDate {
+		if canon := CanonicalDate(value); canon != "" {
+			return canon
+		}
+	}
+	if cp.Classifier.Variable(t) {
+		return "{" + string(t) + "}"
+	}
+	return value
 }
 
 // Explain returns a corpus-informed per-segment explanation.
@@ -314,6 +377,14 @@ func (cp *Corpus) corpusToken(a annotated) string {
 }
 
 func (cp *Corpus) placeholderForVariable(a annotated) string {
+	// Dates render in canonical ISO form rather than as a `{date}` placeholder
+	// — matches Iriq.normalize's path canonicalization and the renderParamValue
+	// query-param branch.
+	if a.hint.Type == TypeDate {
+		if canon := CanonicalDate(a.hint.Value); canon != "" {
+			return canon
+		}
+	}
 	if a.hint.Variable {
 		if a.hint.Hint != "" {
 			return "{" + a.hint.Hint + "}"

@@ -10,10 +10,16 @@ module Iriq
   #
   #   PathShape.for(["users", "123"], hints: false)
   #   # => "/users/{integer_id}"
+  #
+  # Pass `canonical_dates: true` to render date-typed segments in canonical
+  # ISO form (2024/01/15 → 2024-01-15) instead of as a `{date}` placeholder.
+  # Used by Normalizer for display output; the clusterer keeps the placeholder
+  # form so dated routes still group together.
   class PathShape
-    def initialize(classifier: SegmentClassifier::DEFAULT, hints: true)
-      @classifier = classifier
-      @hints      = hints
+    def initialize(classifier: SegmentClassifier::DEFAULT, hints: true, canonical_dates: false)
+      @classifier      = classifier
+      @hints           = hints
+      @canonical_dates = canonical_dates
     end
 
     def for(segments)
@@ -34,12 +40,17 @@ module Iriq
     def shape_token(entry)
       return entry[:value] unless entry[:variable]
 
+      if @canonical_dates && entry[:type] == :date &&
+         (canon = SegmentClassifier.canonical_date(entry[:value]))
+        return canon
+      end
+
       placeholder = @hints ? (entry[:hint] || entry[:type]) : entry[:type]
       "{#{placeholder}}"
     end
 
-    def self.for(segments, classifier: SegmentClassifier::DEFAULT, hints: true)
-      new(classifier: classifier, hints: hints).for(segments)
+    def self.for(segments, classifier: SegmentClassifier::DEFAULT, hints: true, canonical_dates: false)
+      new(classifier: classifier, hints: hints, canonical_dates: canonical_dates).for(segments)
     end
   end
 end

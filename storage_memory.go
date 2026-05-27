@@ -4,7 +4,8 @@ package iriq
 // frequency map lives in process memory. The JSON backend wraps it with
 // load/save against a file; SQLite is an independent disk-backed alternative.
 type MemoryStorage struct {
-	maxValues int
+	maxValues  int
+	classifier *SegmentClassifier
 
 	hostCounts        map[string]int
 	pathLengthCounts  map[int]int
@@ -19,11 +20,22 @@ type MemoryStorage struct {
 }
 
 func NewMemoryStorage(maxValues int) *MemoryStorage {
+	return NewMemoryStorageWith(maxValues, DefaultClassifier)
+}
+
+// NewMemoryStorageWith lets callers (Corpus.OpenCorpus, tests) thread a
+// specific classifier into the storage so per-cluster ParamStats classify
+// query values with the same classifier the rest of the corpus uses.
+func NewMemoryStorageWith(maxValues int, c *SegmentClassifier) *MemoryStorage {
 	if maxValues <= 0 {
 		maxValues = DefaultMaxValuesPerPosition
 	}
+	if c == nil {
+		c = DefaultClassifier
+	}
 	return &MemoryStorage{
 		maxValues:         maxValues,
+		classifier:        c,
 		hostCounts:        map[string]int{},
 		pathLengthCounts:  map[int]int{},
 		rawShapeCounts:    map[string]int{},
@@ -66,13 +78,17 @@ func (s *MemoryStorage) ObservePosition(host, prefix, value string, t SegmentTyp
 func (s *MemoryStorage) AddToCluster(key, host, scheme, shape string, iri *Identifier) *Cluster {
 	cluster, ok := s.clusters[key]
 	if !ok {
-		cluster = NewCluster(key, host, scheme, shape)
+		cluster = NewClusterWith(key, host, scheme, shape, s.maxValues)
 		s.clusters[key] = cluster
 		s.clusterKeys = append(s.clusterKeys, key)
 	}
-	cluster.Add(iri)
+	cluster.AddWith(iri, s.classifier)
 	return cluster
 }
+
+// ClusterFor is the O(1) lookup used by Corpus.Normalize / ParamsFor — nil
+// if no cluster has been observed under this key yet.
+func (s *MemoryStorage) ClusterFor(key string) *Cluster { return s.clusters[key] }
 
 func (s *MemoryStorage) HostCounts() map[string]int        { return copyMapStringInt(s.hostCounts) }
 func (s *MemoryStorage) PathLengthCounts() map[int]int     { return copyMapIntInt(s.pathLengthCounts) }

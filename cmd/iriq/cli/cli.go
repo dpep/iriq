@@ -663,6 +663,17 @@ func emitClusters(stdout io.Writer, clusters []*iriq.Cluster, opts *options) {
 					"values":   s.Values,
 				}
 			}
+			summaries := c.ParamSummary()
+			params := make([]map[string]interface{}, len(summaries))
+			for j, p := range summaries {
+				params[j] = map[string]interface{}{
+					"name":        p.Name,
+					"count":       p.Count,
+					"type":        string(p.Type),
+					"cardinality": p.Cardinality,
+					"presence":    p.Presence,
+				}
+			}
 			out[i] = map[string]interface{}{
 				"key":      c.Key,
 				"host":     c.Host,
@@ -671,6 +682,7 @@ func emitClusters(stdout io.Writer, clusters []*iriq.Cluster, opts *options) {
 				"count":    c.Count,
 				"examples": examples,
 				"segments": segs,
+				"params":   params,
 			}
 		}
 		emitJSON(stdout, opts, out)

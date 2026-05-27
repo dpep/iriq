@@ -252,4 +252,39 @@ describe Iriq::Corpus do
       expect(later[1][:classification]).to eq(:corpus_inferred_variable)
     end
   end
+
+  describe "query param inference" do
+    it "normalizes query params using cluster-informed types" do
+      10.times do |i|
+        corpus.observe("https://foo.com/search?q=widget&page=#{i + 1}&since=2024/01/#{(i % 28) + 1}")
+      end
+      out = corpus.normalize("https://foo.com/search?q=hammer&page=42&since=2024-02-15")
+      expect(out).to eq("https://foo.com/search?page={integer_id}&q=hammer&since=2024-02-15")
+    end
+
+    it "params_for returns per-param presence + type for the cluster" do
+      10.times do |i|
+        corpus.observe("https://foo.com/items?fields=name&page=#{i}")
+      end
+      summary = corpus.params_for("https://foo.com/items")
+      expect(summary.map { |p| p[:name] }.sort).to eq(%w[fields page])
+      page = summary.find { |p| p[:name] == "page" }
+      expect(page[:type]).to eq(:integer_id)
+      expect(page[:presence]).to eq(1.0)
+    end
+  end
+
+  describe "date canonicalization in normalize" do
+    let(:fresh) { described_class.new }
+
+    it "renders YYYYMMDD path dates as ISO" do
+      expect(Iriq.normalize("https://foo.com/events/20240115/details"))
+        .to eq("https://foo.com/events/2024-01-15/details")
+    end
+
+    it "renders YYYY/MM/DD param dates as ISO" do
+      expect(Iriq.normalize("https://foo.com/events?since=2024/01/15"))
+        .to eq("https://foo.com/events?since=2024-01-15")
+    end
+  end
 end

@@ -140,6 +140,58 @@ func TestCorpusMemoryCaps(t *testing.T) {
 	}
 }
 
+func TestCorpusQueryParamInference(t *testing.T) {
+	c := NewCorpus()
+	for i := 0; i < 10; i++ {
+		// Pad day to 2 digits — dateSlashRE matches 2-digit day/month strictly.
+		day := i + 1
+		dayStr := itoa(day)
+		if day < 10 {
+			dayStr = "0" + dayStr
+		}
+		_, _ = c.Observe("https://foo.com/search?q=widget&page=" + itoa(i+1) + "&since=2024/01/" + dayStr)
+	}
+	got, _ := c.Normalize("https://foo.com/search?q=hammer&page=42&since=2024-02-15")
+	want := "https://foo.com/search?page={integer_id}&q=hammer&since=2024-02-15"
+	if got != want {
+		t.Errorf("Normalize: got %q, want %q", got, want)
+	}
+
+	params := c.ParamsFor("https://foo.com/search")
+	if len(params) != 3 {
+		t.Fatalf("ParamsFor: got %d params, want 3", len(params))
+	}
+	byName := map[string]ParamSummary{}
+	for _, p := range params {
+		byName[p.Name] = p
+	}
+	if byName["page"].Type != TypeIntegerID {
+		t.Errorf("page type = %q, want integer_id", byName["page"].Type)
+	}
+	if byName["since"].Type != TypeDate {
+		t.Errorf("since type = %q, want date", byName["since"].Type)
+	}
+	if byName["q"].Cardinality != 1 {
+		t.Errorf("q cardinality = %d, want 1", byName["q"].Cardinality)
+	}
+}
+
+func TestCanonicalDate(t *testing.T) {
+	cases := map[string]string{
+		"2024-01-15": "2024-01-15",
+		"2024/01/15": "2024-01-15",
+		"20240115":   "2024-01-15",
+		"12345678":   "", // not a plausible date — year 1234
+		"abc":        "",
+		"":           "",
+	}
+	for in, want := range cases {
+		if got := CanonicalDate(in); got != want {
+			t.Errorf("CanonicalDate(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestCorpusClusterExamplesCap(t *testing.T) {
 	c := NewCorpus()
 	for i := 0; i < 30; i++ {

@@ -75,6 +75,26 @@ module Iriq
           count       INTEGER NOT NULL,
           PRIMARY KEY (cluster_key, position, value)
         );
+        CREATE TABLE IF NOT EXISTS cluster_params (
+          cluster_key TEXT NOT NULL,
+          name        TEXT NOT NULL,
+          total       INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (cluster_key, name)
+        );
+        CREATE TABLE IF NOT EXISTS cluster_param_values (
+          cluster_key TEXT NOT NULL,
+          name        TEXT NOT NULL,
+          value       TEXT NOT NULL,
+          count       INTEGER NOT NULL,
+          PRIMARY KEY (cluster_key, name, value)
+        );
+        CREATE TABLE IF NOT EXISTS cluster_param_types (
+          cluster_key TEXT NOT NULL,
+          name        TEXT NOT NULL,
+          type        TEXT NOT NULL,
+          count       INTEGER NOT NULL,
+          PRIMARY KEY (cluster_key, name, type)
+        );
       SQL
 
       attr_reader :path, :max_values_per_position
@@ -251,6 +271,40 @@ module Iriq
           SQL
         end
 
+        # Per-param stats (presence + value cardinality + type) — mirrors the
+        # in-memory Cluster#add path. Value table respects the same per-key
+        # cap as position_values.
+        (identifier.query_params || {}).each do |name, value|
+          v = value.to_s
+          type = @classifier.classify(v).to_s
+
+          @db.execute(<<~SQL, [key, name])
+            INSERT INTO cluster_params (cluster_key, name, total) VALUES (?, ?, 1)
+            ON CONFLICT(cluster_key, name) DO UPDATE SET total = total + 1
+          SQL
+          @db.execute(<<~SQL, [key, name, type])
+            INSERT INTO cluster_param_types (cluster_key, name, type, count) VALUES (?, ?, ?, 1)
+            ON CONFLICT(cluster_key, name, type) DO UPDATE SET count = count + 1
+          SQL
+
+          @db.execute(<<~SQL, [key, name, v])
+            UPDATE cluster_param_values SET count = count + 1
+            WHERE cluster_key = ? AND name = ? AND value = ?
+          SQL
+          if @db.changes.zero?
+            card = @db.get_first_value(
+              "SELECT COUNT(*) FROM cluster_param_values WHERE cluster_key = ? AND name = ?",
+              [key, name],
+            )
+            if card < @max_values_per_position
+              @db.execute(
+                "INSERT INTO cluster_param_values (cluster_key, name, value, count) VALUES (?, ?, ?, 1)",
+                [key, name, v],
+              )
+            end
+          end
+        end
+
         load_cluster(key)
       end
 
@@ -319,6 +373,10 @@ module Iriq
         @db.get_first_value("SELECT COUNT(*) FROM clusters")
       end
 
+      def cluster_for(key)
+        load_cluster(key)
+      end
+
       private
 
       def upsert_shape(table, shape)
@@ -340,7 +398,10 @@ module Iriq
         )
         return nil unless row
 
-        c = Cluster.new(key: row[0], host: row[1], scheme: row[2], shape: row[3])
+        c = Cluster.new(
+          key: row[0], host: row[1], scheme: row[2], shape: row[3],
+          max_values: @max_values_per_position,
+        )
         c.instance_variable_set(:@count, row[4])
 
         examples = []
@@ -359,6 +420,32 @@ module Iriq
           seg_counts[pos][r[1]] = r[2]
         end
         c.instance_variable_set(:@segment_counts, seg_counts)
+
+        # Rebuild @param_stats from the three cluster_param_* tables.
+        params = {}
+        @db.execute(
+          "SELECT name, total FROM cluster_params WHERE cluster_key = ?", [key],
+        ) do |r|
+          # PositionStats.new already initializes empty Hash.new(0) for value
+          # and type counts; only @total needs filling here. The followup
+          # SELECTs below populate value/type rows in place.
+          stats = PositionStats.new(max_values: @max_values_per_position)
+          stats.instance_variable_set(:@total, r[1])
+          params[r[0]] = stats
+        end
+        @db.execute(
+          "SELECT name, value, count FROM cluster_param_values WHERE cluster_key = ?", [key],
+        ) do |r|
+          stats = params[r[0]] or next
+          stats.value_counts[r[1]] = r[2]
+        end
+        @db.execute(
+          "SELECT name, type, count FROM cluster_param_types WHERE cluster_key = ?", [key],
+        ) do |r|
+          stats = params[r[0]] or next
+          stats.type_counts[r[1].to_sym] = r[2]
+        end
+        c.instance_variable_set(:@param_stats, params)
 
         c
       end

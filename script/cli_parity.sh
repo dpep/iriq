@@ -64,6 +64,8 @@ run_pair "normalize -n"      "" -n "https://foo.com/users/123"
 run_pair "normalize -nN"     "" -n -N "https://foo.com/users/123"
 run_pair "parse -p json"     "" -p --json "https://foo.com/users/123/orders/456"
 run_pair "summary unicode"   "" "https://例え.テスト/こんにちは"
+run_pair "normalize date path"   "" -n "https://foo.com/events/20240115/details"
+run_pair "normalize date param"  "" -n "https://foo.com/events?since=2024/01/15&page=5"
 
 # Pipe modes
 run_pair "pipe URL list" \

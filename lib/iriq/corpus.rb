@@ -93,18 +93,36 @@ module Iriq
     end
 
     # Corpus-informed normalization. Falls back to mechanical normalization
-    # when the corpus has no signal for a position.
+    # when the corpus has no signal for a position. Includes any observed
+    # query params, rendered with corpus-informed types when the cluster has
+    # tracked them.
     def normalize(input)
       iri = coerce(input)
-      return Normalizer.normalize_identifier(iri) if iri.urn? || iri.path_segments.empty?
+      return Normalizer.normalize_identifier(iri) if iri.urn?
 
       tokens = annotate_segments(iri).map { |entry| corpus_token(entry) }
       out = +""
       out << "#{iri.scheme}://" if iri.scheme
       out << iri.host if iri.host
       out << ":#{iri.port}" if iri.port
+      # Always emit a path. Empty path renders as "/" to match the mechanical
+      # Iriq.normalize output and to anchor any trailing query string.
       out << "/" << tokens.join("/")
+      out << "?" << render_query(iri) if iri.query_params && !iri.query_params.empty?
       out
+    end
+
+    # Inferred params for the cluster `input` would fall into. Returns the
+    # same shape as Cluster#param_summary — useful for "what query params
+    # might this URL accept?" tooling. Empty array if no cluster has been
+    # observed for this shape yet.
+    def params_for(input)
+      iri = coerce(input)
+      hinted_shape = PathShape.new(classifier: @classifier, hints: true)
+                              .from_entries(SegmentHints.derive(iri.path_segments, @classifier))
+      key, * = Cluster.key_for(iri, classifier: @classifier, shape: hinted_shape)
+      cluster = @storage.cluster_for(key)
+      cluster ? cluster.param_summary : []
     end
 
     # Per-segment explanation with corpus-informed `classification`.
@@ -247,6 +265,45 @@ module Iriq
       stats.value_fraction(value) >= POPULAR_BASELINE_MULTIPLE * baseline
     end
 
+    # Render the query string for normalize output. Prefers the cluster's
+    # observed type for each param (dominant type_count); falls back to the
+    # mechanical Normalizer.shape_query rules when no cluster signal exists.
+    # Date values always emit canonical ISO form regardless of source.
+    def render_query(iri)
+      hinted_shape = PathShape.new(classifier: @classifier, hints: true)
+                              .from_entries(SegmentHints.derive(iri.path_segments, @classifier))
+      key, * = Cluster.key_for(iri, classifier: @classifier, shape: hinted_shape)
+      cluster = @storage.cluster_for(key)
+
+      iri.query_params.keys.sort.map do |k|
+        v = iri.query_params[k].to_s
+        type = inferred_param_type(cluster, k, v)
+        shaped = render_param_value(v, type)
+        "#{k}=#{shaped}"
+      end.join("&")
+    end
+
+    def inferred_param_type(cluster, name, value)
+      # Prefer the cluster's most common type for this param when we have
+      # enough samples; otherwise classify the current value directly.
+      stats = cluster && cluster.param_stats[name]
+      if stats && stats.total >= MIN_OBSERVATIONS_FOR_INFERENCE
+        stats.dominant_type
+      else
+        @classifier.classify(value)
+      end
+    end
+
+    def render_param_value(value, type)
+      if type == :date && (canon = SegmentClassifier.canonical_date(value))
+        canon
+      elsif @classifier.variable?(type)
+        "{#{type}}"
+      else
+        value
+      end
+    end
+
     def corpus_token(entry)
       case entry[:classification]
       when :variable_identifier, :corpus_inferred_variable
@@ -257,6 +314,12 @@ module Iriq
     end
 
     def placeholder_for_variable(entry)
+      # Dates render in canonical ISO form rather than as a `{date}` placeholder
+      # — matches what mechanical Iriq.normalize does for path segments and
+      # what render_param_value does for query params.
+      if entry[:type] == :date && (canon = SegmentClassifier.canonical_date(entry[:value]))
+        return canon
+      end
       return "{#{entry[:hint] || entry[:type]}}" if entry[:variable]
 
       # corpus-inferred variable: classifier said literal, corpus says
