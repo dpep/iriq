@@ -417,10 +417,46 @@ module Iriq
           host  = c.host || "(urn)"
           shape = opts[:hints] ? c.shape : raw_shape_for(c)
           stdout.puts "[#{c.count}] #{host}  #{shape}"
-          c.examples.first(3).each { |e| stdout.puts "    #{e.canonical}" }
-          stdout.puts "    + #{c.count - 3} more" if c.count > 3
+          examples = c.examples.first(3)
+          examples.each { |e| stdout.puts "    #{e.canonical}" }
+          remaining = c.count - examples.size
+          stdout.puts "    + #{remaining} more" if remaining.positive?
+          emit_param_summary(c)
         end
       end
+    end
+
+    # One line per param: type, range (numeric), cardinality, presence.
+    # `page  integer  1..100  avg 50.5  (10 distinct, 100%)`
+    def emit_param_summary(cluster)
+      rows = cluster.param_summary
+      return if rows.empty?
+
+      width = rows.map { |r| r[:name].length }.max
+      rows.each do |r|
+        bits = ["#{r[:type]}"]
+        if r[:min] && r[:max]
+          bits << format_range(r[:min], r[:max])
+          bits << "avg #{format_num(r[:avg])}" if r[:avg]
+        end
+        bits << "(#{r[:cardinality]} distinct, #{format_pct(r[:presence])})"
+        stdout.puts "    #{r[:name].to_s.ljust(width)}  #{bits.join('  ')}"
+      end
+    end
+
+    def format_range(lo, hi)
+      "#{format_num(lo)}..#{format_num(hi)}"
+    end
+
+    def format_num(n)
+      return n.to_s if n.is_a?(Integer)
+      whole = n.to_i
+      return whole.to_s if whole == n
+      n.round(2).to_s
+    end
+
+    def format_pct(frac)
+      "#{(frac * 100).round}%"
     end
 
     def raw_shape_for(cluster)

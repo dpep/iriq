@@ -560,6 +560,7 @@ func (s *SqliteStorage) loadCluster(key string) *Cluster {
 			}
 			if iri, perr := Parse(canonical); perr == nil {
 				c.Examples = append(c.Examples, iri)
+				c.RegisterExampleKey(iri.Canonical())
 			}
 		},
 	)

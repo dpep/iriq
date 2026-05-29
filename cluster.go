@@ -130,6 +130,9 @@ type Cluster struct {
 	// maxValues is the per-param value cardinality cap. Allocated on Add when
 	// a new param is first seen.
 	maxValues int
+	// exampleKeys dedupes Examples by canonical URL so a stream of
+	// identical inputs doesn't fill the slot with copies.
+	exampleKeys map[string]struct{}
 }
 
 func NewCluster(key, host, scheme, shape string) *Cluster {
@@ -142,8 +145,9 @@ func NewClusterWith(key, host, scheme, shape string, maxValues int) *Cluster {
 	}
 	return &Cluster{
 		Key: key, Host: host, Scheme: scheme, Shape: shape,
-		ParamStats: map[string]*PositionStats{},
-		maxValues:  maxValues,
+		ParamStats:  map[string]*PositionStats{},
+		maxValues:   maxValues,
+		exampleKeys: map[string]struct{}{},
 	}
 }
 
@@ -396,12 +400,30 @@ func dominantExcluding(stats *PositionStats, skip SegmentType) SegmentType {
 	return best
 }
 
+// RegisterExampleKey lets backends restore the dedupe set when rehydrating
+// a cluster from persistent storage. Callers that don't go through Add
+// (e.g. JSON / SQLite load) should call this for each example so a
+// later Observe doesn't reintroduce it.
+func (c *Cluster) RegisterExampleKey(canon string) {
+	if c.exampleKeys == nil {
+		c.exampleKeys = map[string]struct{}{}
+	}
+	c.exampleKeys[canon] = struct{}{}
+}
+
 func (c *Cluster) Add(iri *Identifier) { c.AddWith(iri, DefaultClassifier) }
 
 func (c *Cluster) AddWith(iri *Identifier, classifier *SegmentClassifier) {
 	c.Count++
 	if len(c.Examples) < MaxClusterExamples {
-		c.Examples = append(c.Examples, iri)
+		if c.exampleKeys == nil {
+			c.exampleKeys = map[string]struct{}{}
+		}
+		canon := iri.Canonical()
+		if _, dup := c.exampleKeys[canon]; !dup {
+			c.exampleKeys[canon] = struct{}{}
+			c.Examples = append(c.Examples, iri)
+		}
 	}
 	for i, seg := range iri.PathSegments {
 		for len(c.segmentCounts) <= i {

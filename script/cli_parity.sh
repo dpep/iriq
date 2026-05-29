@@ -87,6 +87,8 @@ run_pair "normalize color param"   "" -n "https://foo.com/ui?bg=%23ff00ff"
 run_pair "normalize coordinate"    "" -n "https://foo.com/m/37.7749,-122.4194"
 run_pair "normalize country"       "" -n "https://foo.com/orders?country=US"
 run_pair "normalize base64 token"  "" -n "https://foo.com/x?t=TWFuIGlzIGRpc3Rpbmd1aXNoZWQ%3D"
+run_pair "cluster dedupe + params" $'https://foo.com/items?page=1\nhttps://foo.com/items?page=2\nhttps://foo.com/items?page=1\nhttps://foo.com/items?page=2\nhttps://foo.com/items?page=3\nhttps://foo.com/items?page=4\nhttps://foo.com/items?page=5\nhttps://foo.com/items?page=6\nhttps://foo.com/items?page=7\nhttps://foo.com/items?page=8\nhttps://foo.com/items?page=9\nhttps://foo.com/items?page=10\n'
+run_pair "cluster status enum"     $'https://foo.com/posts?status=published\nhttps://foo.com/posts?status=published\nhttps://foo.com/posts?status=published\nhttps://foo.com/posts?status=draft\nhttps://foo.com/posts?status=draft\nhttps://foo.com/posts?status=draft\nhttps://foo.com/posts?status=draft\nhttps://foo.com/posts?status=draft\nhttps://foo.com/posts?status=archived\nhttps://foo.com/posts?status=archived\nhttps://foo.com/posts?status=archived\nhttps://foo.com/posts?status=archived\nhttps://foo.com/posts?status=archived\nhttps://foo.com/posts?status=published\nhttps://foo.com/posts?status=draft\nhttps://foo.com/posts?status=published\nhttps://foo.com/posts?status=draft\nhttps://foo.com/posts?status=archived\nhttps://foo.com/posts?status=archived\nhttps://foo.com/posts?status=draft\n'
 
 # Pipe modes
 run_pair "pipe URL list" \

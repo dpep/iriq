@@ -237,12 +237,17 @@ module Iriq
       "{#{entry[:hint] || SegmentClassifier.display_type(entry[:type])}}"
     end
 
-    # Shape-y types whose values are often a small fixed set (e.g.
-    # /api/v1/... where only `v1` ever appears). For these, run through
-    # the same cardinality/value-fraction analysis literals get — a
-    # dominant value gets preserved as :stable_literal instead of
-    # being placeholdered as a generic {version}/{locale}/{currency}.
-    STABLE_VARIABLE_TYPES = %i[version locale currency boolean].freeze
+    # Types whose values are often a small fixed set (or a single static
+    # value baked into a REST route). For these, run through the same
+    # cardinality / value-fraction analysis literals get — a dominant
+    # value gets preserved as :stable_literal instead of being
+    # placeholdered as a generic {version}/{slug}/etc.
+    #
+    # Slug + opaque_id are here because a lot of route literals
+    # accidentally match those shapes (`/users/{id}/create-new`,
+    # reference codes like `WK1234`). When a single value dominates the
+    # position, the literal is almost always the better display.
+    STABLE_VARIABLE_TYPES = %i[version locale currency boolean slug opaque_id].freeze
 
     def classify(entry, stats)
       variable = entry[:variable]

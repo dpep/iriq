@@ -354,11 +354,14 @@ func placeholderFor(e SegmentHint) string {
 }
 
 // stableVariableType reports whether a variable-classified segment is one
-// of the shape-y types where a dominant value should still be preserved
-// as a literal (e.g. /api/v1/... with only v1 ever observed).
+// of the types where a dominant value should still be preserved as a
+// literal. Covers shape-y types (Version/Locale/Currency/Boolean) plus
+// Slug/OpaqueID — those often turn out to be route literals like
+// `/users/{id}/create-new` or static reference codes.
 func stableVariableType(t SegmentType) bool {
 	switch t {
-	case TypeVersion, TypeLocale, TypeCurrency, TypeBoolean:
+	case TypeVersion, TypeLocale, TypeCurrency, TypeBoolean,
+		TypeSlug, TypeOpaqueID:
 		return true
 	}
 	return false

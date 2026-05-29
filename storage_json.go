@@ -239,6 +239,7 @@ func loadMemoryFromJSON(m *MemoryStorage, data []byte) error {
 					return err
 				}
 				cluster.Examples = append(cluster.Examples, iri)
+				cluster.RegisterExampleKey(iri.Canonical())
 			}
 			cluster.SetSegmentCounts(c.SegmentCounts)
 			if len(c.ParamStats) > 0 {

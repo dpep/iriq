@@ -35,6 +35,7 @@ module Iriq
       @scheme         = scheme
       @shape          = shape
       @examples       = []
+      @example_keys   = Set.new
       @count          = 0
       @segment_counts = []
       @max_values     = max_values
@@ -46,7 +47,11 @@ module Iriq
 
     def add(identifier, classifier: SegmentClassifier::DEFAULT)
       @count += 1
-      @examples << identifier if @examples.size < MAX_EXAMPLES
+      if @examples.size < MAX_EXAMPLES
+        canon = identifier.canonical
+        @examples << identifier unless @example_keys.include?(canon)
+        @example_keys << canon
+      end
 
       identifier.path_segments.each_with_index do |seg, i|
         @segment_counts[i] ||= Hash.new(0)
@@ -323,7 +328,9 @@ module Iriq
         max_values: max_values,
       )
       cluster.instance_variable_set(:@count, h["count"])
-      cluster.instance_variable_set(:@examples, h["examples"].map { |s| Parser.parse(s) })
+      examples = h["examples"].map { |s| Parser.parse(s) }
+      cluster.instance_variable_set(:@examples, examples)
+      cluster.instance_variable_set(:@example_keys, examples.map(&:canonical).to_set)
       cluster.instance_variable_set(:@segment_counts, h["segment_counts"].map { |sub| Hash.new(0).merge(sub) })
       params = (h["param_stats"] || {}).transform_values { |sd| PositionStats.from_dump(sd) }
       cluster.instance_variable_set(:@param_stats, params)

@@ -812,10 +812,45 @@ func emitClusters(stdout io.Writer, clusters []*iriq.Cluster, opts *options) {
 		for j := 0; j < limit; j++ {
 			fmt.Fprintf(stdout, "    %s\n", c.Examples[j].Canonical())
 		}
-		if c.Count > 3 {
-			fmt.Fprintf(stdout, "    + %d more\n", c.Count-3)
+		if remaining := c.Count - limit; remaining > 0 {
+			fmt.Fprintf(stdout, "    + %d more\n", remaining)
+		}
+		emitParamSummary(stdout, c)
+	}
+}
+
+// emitParamSummary renders one line per query param: type, numeric
+// range (when present), cardinality, presence.
+func emitParamSummary(stdout io.Writer, c *iriq.Cluster) {
+	rows := c.ParamSummary()
+	if len(rows) == 0 {
+		return
+	}
+	width := 0
+	for _, r := range rows {
+		if len(r.Name) > width {
+			width = len(r.Name)
 		}
 	}
+	for _, r := range rows {
+		parts := []string{string(r.Type)}
+		if r.NumericCount > 0 {
+			parts = append(parts, fmt.Sprintf("%s..%s", formatNum(r.Min), formatNum(r.Max)))
+			parts = append(parts, fmt.Sprintf("avg %s", formatNum(r.Avg)))
+		}
+		parts = append(parts, fmt.Sprintf("(%d distinct, %d%%)", r.Cardinality, int(r.Presence*100+0.5)))
+		fmt.Fprintf(stdout, "    %-*s  %s\n", width, r.Name, strings.Join(parts, "  "))
+	}
+}
+
+// formatNum drops a trailing `.0` so `5.0` reads as `5`; rounds the
+// rest to 2 decimal places.
+func formatNum(n float64) string {
+	whole := float64(int64(n))
+	if whole == n {
+		return fmt.Sprintf("%d", int64(n))
+	}
+	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.2f", n), "0"), ".")
 }
 
 func rawShapeFor(c *iriq.Cluster) string {
