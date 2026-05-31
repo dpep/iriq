@@ -53,20 +53,11 @@ const (
 )
 
 var (
-	uuidRE    = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
-	integerRE = regexp.MustCompile(`^\d+$`)
 	// A float requires a decimal point and digits on both sides. Sign
-	// optional. Bare integers fall through to integerRE.
+	// optional. Bare integers fall through to integerRecognizer.
 	floatRE   = regexp.MustCompile(`^-?\d+\.\d+$`)
-	// Date formats we'll canonicalize. Deliberately conservative — only the
-	// unambiguous forms where the year position is fixed. DD/MM/YYYY isn't
-	// recognized (can't be told apart from MM/DD/YYYY from a segment alone).
-	// Slash forms only show up in query-param values — URL path separators
-	// rule them out for path segments.
-	dateRE        = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
-	dateSlashRE   = regexp.MustCompile(`^\d{4}/\d{2}/\d{2}$`)
-	dateUSRE      = regexp.MustCompile(`^(\d{1,2})/(\d{1,2})/(\d{4})$`)
-	dateCompactRE = regexp.MustCompile(`^\d{8}$`)
+	// ISO 8601 timestamp shapes (RFC 3339-ish). Date-only forms live on
+	// dateRecognizer / integerRecognizer.
 	isoTimeRE = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+\-]\d{2}:?\d{2})?$`)
 	hashRE    = regexp.MustCompile(`^[0-9a-fA-F]{32,}$`)
 	slugRE    = regexp.MustCompile(`^[a-z0-9]+(?:[-_][a-z0-9]+)+$`)
@@ -360,11 +351,6 @@ const (
 )
 
 const (
-	tsSecondsMin int64 = 1_000_000_000
-	tsSecondsMax int64 = 9_999_999_999
-	tsMillisMin  int64 = 1_000_000_000_000
-	tsMillisMax  int64 = 9_999_999_999_999
-
 	classifierCacheMax = 10_000
 )
 
@@ -433,9 +419,10 @@ func computeClassification(segment string) SegmentType {
 	hasEq := strings.IndexByte(segment, '=') >= 0
 	hasPlus := strings.IndexByte(segment, '+') >= 0
 
+	if v, ok := UUIDRecognizer.Try(segment); ok {
+		return v.Type
+	}
 	switch {
-	case size == 36 && hasDash && uuidRE.MatchString(segment):
-		return TypeUUID
 	case size > 4 && segment[0] == 'e' && segment[1] == 'y' && strings.Count(segment, ".") == 2 && jwtRE.MatchString(segment):
 		return TypeJWT
 	case first == '#' && colorHexRE.MatchString(segment):
@@ -469,16 +456,24 @@ func computeClassification(segment string) SegmentType {
 		return classifyLocalePair(segment)
 	case size == 2 && localeBareRE.MatchString(segment):
 		return classifyLocaleBare(segment)
-	case (hasDash || hasSlash) && (dateRE.MatchString(segment) || dateSlashRE.MatchString(segment) || dateUSRE.MatchString(segment)):
-		return TypeDate
+	}
+	if v, ok := DateRecognizer.Try(segment); ok {
+		return v.Type
+	}
+	switch {
 	case hasColon && isoTimeRE.MatchString(segment):
 		return TypeTimestamp
 	case first == '+' && phoneRE.MatchString(segment):
 		return classifyPhone(segment)
 	case (hasDash || hasDot || segment[0] == '(') && phoneNANPRE.MatchString(segment):
 		return TypePhone
-	case digit0 && integerRE.MatchString(segment):
-		return classifyInteger(segment)
+	}
+	if digit0 {
+		if v, ok := IntegerRecognizer.Try(segment); ok {
+			return v.Type
+		}
+	}
+	switch {
 	case hasDot && floatRE.MatchString(segment):
 		return TypeFloat
 	case size == 3 && currencyRE.MatchString(segment):
@@ -612,38 +607,6 @@ func classifyIPv4(segment string) SegmentType {
 	return TypeIPv4
 }
 
-func classifyInteger(segment string) SegmentType {
-	n, err := strconv.ParseInt(segment, 10, 64)
-	if err != nil {
-		// Out of int64 range: definitely larger than the timestamp window,
-		// keep as plain integer.
-		return TypeInteger
-	}
-	if n >= tsMillisMin && n <= tsMillisMax {
-		return TypeTimestamp
-	}
-	if n >= tsSecondsMin && n <= tsSecondsMax {
-		return TypeTimestamp
-	}
-
-	// Plausible YYYYMMDD: be strict on year + month + day so 8-digit IDs
-	// don't get mis-classified as dates.
-	if dateCompactRE.MatchString(segment) {
-		y, _ := strconv.Atoi(segment[0:4])
-		m, _ := strconv.Atoi(segment[4:6])
-		d, _ := strconv.Atoi(segment[6:8])
-		if y >= 1900 && y <= 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31 {
-			return TypeDate
-		}
-	}
-
-	// Year detection deliberately doesn't happen here — see Cluster.ParamType
-	// for the corpus-level promotion. A single 4-digit int is ambiguous;
-	// only range analysis across observations is reliable.
-
-	return TypeInteger
-}
-
 // DisplayType returns the type name used in `--normalize` placeholders.
 // Collapses TypeIPv4 and TypeIPv6 to "ip" — callers that want the
 // specific family read it off the classifier directly or via cluster
@@ -674,23 +637,12 @@ func CanonicalCurrency(value string) string {
 // Returns "" if the value isn't one of the accepted date forms or the
 // year/month/day fall outside plausible bounds.
 func CanonicalDate(value string) string {
-	switch {
-	case dateRE.MatchString(value):
-		if plausibleDate(value[0:4], value[5:7], value[8:10]) {
-			return value
-		}
-	case dateSlashRE.MatchString(value):
-		if plausibleDate(value[0:4], value[5:7], value[8:10]) {
-			return value[0:4] + "-" + value[5:7] + "-" + value[8:10]
-		}
-	case dateUSRE.MatchString(value):
-		// MM/DD/YYYY with 1-2 digit month and day — zero-pad both for output.
-		m := dateUSRE.FindStringSubmatch(value)
-		mon, day, year := pad2(m[1]), pad2(m[2]), m[3]
-		if plausibleDate(year, mon, day) {
-			return year + "-" + mon + "-" + day
-		}
-	case dateCompactRE.MatchString(value):
+	if canon := canonicalDateFromForms(value); canon != "" {
+		return canon
+	}
+	// Compact YYYYMMDD lives on integerRecognizer for classification, but
+	// the canonical form is part of the same date family.
+	if compactDatePattern.MatchString(value) {
 		if plausibleDate(value[0:4], value[4:6], value[6:8]) {
 			return value[0:4] + "-" + value[4:6] + "-" + value[6:8]
 		}
@@ -703,13 +655,4 @@ func pad2(s string) string {
 		return "0" + s
 	}
 	return s
-}
-
-// plausibleDate is a fast bounds check on year/month/day. Doesn't validate
-// day-of-month (Feb 30, Apr 31) — more nuance than this heuristic needs.
-func plausibleDate(y, m, d string) bool {
-	yi, _ := strconv.Atoi(y)
-	mi, _ := strconv.Atoi(m)
-	di, _ := strconv.Atoi(d)
-	return yi >= 1900 && yi <= 2100 && mi >= 1 && mi <= 12 && di >= 1 && di <= 31
 }

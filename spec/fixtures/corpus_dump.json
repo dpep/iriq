@@ -106,8 +106,7 @@
             "3": 1
           }
         ],
-        "param_stats": {
-        }
+        "param_stats": {}
       },
       "https://foo.com/posts/{post_id}": {
         "key": "https://foo.com/posts/{post_id}",
@@ -126,8 +125,7 @@
             "abc-123": 1
           }
         ],
-        "param_stats": {
-        }
+        "param_stats": {}
       },
       "https://bar.com/x": {
         "key": "https://bar.com/x",
@@ -143,8 +141,7 @@
             "x": 1
           }
         ],
-        "param_stats": {
-        }
+        "param_stats": {}
       }
     }
   }

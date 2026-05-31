@@ -19,22 +19,13 @@ module Iriq
                ipv4 ipv6 url email boolean version locale currency phone jwt mime
                file color coordinate country base64 http_status enum opaque_id].freeze
 
-    UUID_RE      = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/.freeze
-    INTEGER_RE   = /\A\d+\z/.freeze
     # A float requires a decimal point and digits on both sides. Sign is
     # optional. Bare integers and 4+ char hex/UUID-shaped tokens fall through
     # to their own rules.
     FLOAT_RE     = /\A-?\d+\.\d+\z/.freeze
-    # Date formats we'll canonicalize. Deliberately conservative — we only
-    # accept forms where the year position is unambiguous (so DD/MM/YYYY is
-    # NOT recognized; we can't tell it apart from MM/DD/YYYY from the segment
-    # alone). The slash forms only occur in query-param values — URL path
-    # separators rule them out for path segments.
-    DATE_RE         = /\A\d{4}-\d{2}-\d{2}\z/.freeze
-    DATE_SLASH_RE   = %r{\A\d{4}/\d{2}/\d{2}\z}.freeze
-    DATE_US_RE      = %r{\A(\d{1,2})/(\d{1,2})/(\d{4})\z}.freeze
-    DATE_COMPACT_RE = /\A\d{8}\z/.freeze
-    ISO_TIME_RE     = /\A\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+\-]\d{2}:?\d{2})?\z/.freeze
+    # ISO 8601 timestamp shapes (RFC 3339-ish). Date-only forms live on
+    # Recognizers::Date / Recognizers::Integer.
+    ISO_TIME_RE  = /\A\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+\-]\d{2}:?\d{2})?\z/.freeze
     HASH_RE      = /\A\h{32,}\z/.freeze
     SLUG_RE      = /\A[a-z0-9]+(?:[-_][a-z0-9]+)+\z/.freeze
     LITERAL_RE   = /\A[\p{L}][\p{L}\p{M}_]*\z/u.freeze
@@ -204,11 +195,6 @@ module Iriq
     # inside classify_integer so we don't shadow shorter / longer ints.
     YEAR_RANGE = 1900..2100
 
-    # Plausible UNIX timestamps (10 digit seconds or 13 digit ms) from
-    # roughly 2001 onward.
-    TS_SECONDS_RANGE = 1_000_000_000..9_999_999_999
-    TS_MILLIS_RANGE  = 1_000_000_000_000..9_999_999_999_999
-
     # Bounded memoization: classification of a given string is pure, so
     # repeat segments (e.g. /users in countless paths) can be cached. Cap
     # keeps the cache from unbounded growth when inputs are dominated by
@@ -255,7 +241,9 @@ module Iriq
       # Network / structured-value types take precedence over the generic
       # OPAQUE_RE catch-all (which would otherwise grab IPv4) and the
       # LITERAL fallback (which today swallows email + URL + IPv6).
-      return :uuid                 if size == 36 && has_dash && UUID_RE.match?(segment)
+      if (v = Recognizers::UUID.try(segment))
+        return v[:type]
+      end
       return :jwt                  if segment.start_with?("ey") && segment.count(".") == 2 && JWT_RE.match?(segment)
       return classify_color(segment) if first == 0x23 && COLOR_HEX_RE.match?(segment)  # '#'
       return :url                  if has_colon && segment.include?("://") && URL_RE.match?(segment)
@@ -270,13 +258,15 @@ module Iriq
       return :boolean              if (size >= 4 && size <= 5) && BOOLEAN_RE.match?(segment)
       return classify_locale_pair(segment) if has_sep && LOCALE_RE.match?(segment)
       return classify_locale(segment) if size == 2 && LOCALE_BARE_RE.match?(segment)
-      if (has_dash || has_slash) && (DATE_RE.match?(segment) || DATE_SLASH_RE.match?(segment) || DATE_US_RE.match?(segment))
-        return :date
+      if (v = Recognizers::DATE.try(segment))
+        return v[:type]
       end
       return :timestamp            if has_colon && ISO_TIME_RE.match?(segment)
       return classify_phone(segment) if first == 0x2B && PHONE_RE.match?(segment)  # '+'
       return :phone                if (has_dash || has_dot || segment.include?("(")) && PHONE_NANP_RE.match?(segment)
-      return classify_integer(segment) if digit0 && INTEGER_RE.match?(segment)
+      if digit0 && (v = Recognizers::INTEGER.try(segment))
+        return v[:type]
+      end
       return :float                if has_dot && FLOAT_RE.match?(segment)
       return classify_currency(segment) if size == 3 && CURRENCY_RE.match?(segment)
       return classify_country(segment)  if size == 2 && COUNTRY_RE.match?(segment)
@@ -382,31 +372,6 @@ module Iriq
       return :locale if LOCALE_LANGUAGE_CODES.include?(lang)
 
       segment.match?(SLUG_RE) ? :slug : :literal
-    end
-
-    def classify_integer(segment)
-      n = segment.to_i
-      return :timestamp if TS_MILLIS_RANGE.cover?(n)
-      return :timestamp if TS_SECONDS_RANGE.cover?(n)
-
-      # Plausible YYYYMMDD: 19000101..21001231-ish. We're strict on year to
-      # avoid mis-classifying short 8-digit IDs as dates.
-      if DATE_COMPACT_RE.match?(segment)
-        y = segment[0, 4].to_i
-        m = segment[4, 2].to_i
-        d = segment[6, 2].to_i
-        if y.between?(1900, 2100) && m.between?(1, 12) && d.between?(1, 31)
-          return :date
-        end
-      end
-
-      # Plausible-year window detection deliberately doesn't happen here.
-      # A single 4-digit int in 1900..2100 is ambiguous (could be a year
-      # OR an integer ID). The corpus layer promotes a position to :year
-      # via min/max range analysis once it has enough samples — see
-      # Cluster#param_type.
-
-      :integer
     end
 
     public
@@ -528,27 +493,19 @@ module Iriq
     # /events/2024-01-15 in the output.
     def self.canonical_date(value)
       return nil if value.nil?
+      return nil unless value.is_a?(String)
 
-      case value
-      when DATE_RE
-        plausible_date?(value[0, 4], value[5, 2], value[8, 2]) ? value : nil
-      when DATE_SLASH_RE
-        plausible_date?(value[0, 4], value[5, 2], value[8, 2]) ? value.tr("/", "-") : nil
-      when DATE_US_RE
-        m, d, y = $~[1].rjust(2, "0"), $~[2].rjust(2, "0"), $~[3]
-        plausible_date?(y, m, d) ? "#{y}-#{m}-#{d}" : nil
-      when DATE_COMPACT_RE
+      canon = Recognizers::Date.canonical(value)
+      return canon if canon
+
+      # Compact YYYYMMDD lives on the Integer recognizer for classification,
+      # but the canonical form is part of the same date family.
+      if Recognizers::Integer::COMPACT_DATE_PATTERN.match?(value)
         y, m, d = value[0, 4], value[4, 2], value[6, 2]
-        plausible_date?(y, m, d) ? "#{y}-#{m}-#{d}" : nil
+        return "#{y}-#{m}-#{d}" if Recognizers::Date.plausible?(y, m, d)
       end
-    end
 
-    # Quick bounds check on year/month/day — same window the integer-date
-    # branch uses. Doesn't validate day-of-month (Feb 30, Apr 31) — that's
-    # more nuance than this heuristic warrants.
-    def self.plausible_date?(y, m, d)
-      yi = y.to_i; mi = m.to_i; di = d.to_i
-      yi.between?(1900, 2100) && mi.between?(1, 12) && di.between?(1, 31)
+      nil
     end
   end
 end
