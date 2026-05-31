@@ -84,6 +84,13 @@ module Iriq
       return print_usage(stdout, 0) if opts[:help]
       return print_version          if opts[:version]
 
+      # `iriq completion <shell>` short-circuits — no corpus, no IRI input,
+      # just emit the script bundled with the gem.
+      if args.first == "completion"
+        args.shift
+        return cmd_completion(args)
+      end
+
       explicit_cluster = (args.first == "cluster")
       args.shift if explicit_cluster
 
@@ -376,6 +383,32 @@ module Iriq
       stdout.puts "reinferred #{n} observation#{n == 1 ? '' : 's'}: " \
                   "#{before} → #{after} cluster#{after == 1 ? '' : 's'}"
       0
+    end
+
+    # `completion <shell>` — emit the bundled shell-completion script.
+    # Scripts live in completions/{iriq.bash,_iriq} alongside the gem;
+    # Homebrew installs them automatically, but the user can also do
+    # `source <(iriq completion bash)` in their shell rc.
+    COMPLETIONS_DIR = File.expand_path("../../completions", __dir__).freeze
+    COMPLETION_FILES = {
+      "bash" => File.join(COMPLETIONS_DIR, "iriq.bash"),
+      "zsh"  => File.join(COMPLETIONS_DIR, "_iriq"),
+    }.freeze
+
+    def cmd_completion(args)
+      shell = args.first || default_shell
+      path  = COMPLETION_FILES[shell]
+      unless path
+        stderr.puts "iriq: unknown shell #{shell.inspect} (try bash or zsh)"
+        return 1
+      end
+      stdout.write(File.read(path))
+      0
+    end
+
+    def default_shell
+      shell = ENV["SHELL"].to_s
+      shell.empty? ? "bash" : File.basename(shell).sub(/\.exe\z/, "")
     end
 
     def missing(name)

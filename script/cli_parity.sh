@@ -212,6 +212,26 @@ propose_pair() {
 propose_pair "JSON storage"   ".json"
 propose_pair "SQLite storage" ".db"
 
+# Completion-subcommand parity. Both runtimes embed the same files; the
+# parity test ensures we don't ship divergent scripts.
+completion_pair() {
+  local shell="$1"
+  local ruby_out go_out
+  ruby_out=$( (cd "$REPO_ROOT" && $RUBY completion "$shell") )
+  go_out=$(   "$GO_BIN" completion "$shell" )
+  if [[ "$ruby_out" == "$go_out" ]]; then
+    pass_count=$((pass_count + 1))
+  else
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH: completion $shell"
+    diff <(echo "$ruby_out") <(echo "$go_out") | sed 's/^/    /'
+  fi
+}
+
+completion_pair "bash"
+completion_pair "zsh"
+
 # --host=reg should cluster subdomain-heavy hosts under their registrable apex.
 host_strategy_pair() {
   local label="$1"

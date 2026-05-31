@@ -128,6 +128,12 @@ func Run(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 
+	// `iriq completion <shell>` short-circuits — no corpus, no IRI input,
+	// just emit the embedded script.
+	if len(args) > 0 && args[0] == "completion" {
+		return cmdCompletion(args[1:], stdout, stderr)
+	}
+
 	explicitCluster := false
 	if len(args) > 0 && args[0] == "cluster" {
 		explicitCluster = true
