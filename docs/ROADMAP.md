@@ -87,8 +87,10 @@ Each of these is a non-trivial multi-PR initiative.
 - ✅ **Re-runnable inference (library)** — source-IRI log persisted alongside
   materialized views; `Corpus#reinfer` drops the views and replays the log
   through events + reducers. Lets users tune thresholds or swap the
-  classifier without re-feeding IRIs. CLI exposure is a follow-up.
-  Shipped in v0.21.0.
+  classifier without re-feeding IRIs. Shipped in v0.21.0.
+- ✅ **Re-runnable inference (CLI)** — `iriq --corpus PATH --reinfer`
+  replays the log and prints a before/after summary. Parity scenarios
+  added for JSON + SQLite backends. Shipped in v0.22.0.
 - **Inter-position correlations** — when slot A's value predicts slot B's
   type, surface that. Catches things like "the segment after `/orgs/{org_id}/`
   is almost always `users` or `repos`".

@@ -138,6 +138,41 @@ corpus_pair() {
 corpus_pair "JSON storage"   ".json"
 corpus_pair "SQLite storage" ".db"
 
+# --reinfer parity. After observing the same stream, both CLIs should
+# produce identical --reinfer output, and --stats afterward should still
+# match (idempotent replay).
+reinfer_pair() {
+  local label="$1" ext="$2"
+  local ruby_path="$corpus_dir/ruby-rein$ext"
+  local go_path="$corpus_dir/go-rein$ext"
+  rm -f "$ruby_path" "$go_path"
+  echo -n "$corpus_stream" | (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path") > /dev/null
+  echo -n "$corpus_stream" | "$GO_BIN" --corpus "$go_path" > /dev/null
+  local ruby_out go_out
+  ruby_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" --reinfer < /dev/null) )
+  go_out=$(   "$GO_BIN" --corpus "$go_path" --reinfer < /dev/null )
+  if [[ "$ruby_out" != "$go_out" ]]; then
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH: reinfer $label"
+    diff <(echo "$ruby_out") <(echo "$go_out") | sed 's/^/    /'
+    return
+  fi
+  ruby_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" --stats --json < /dev/null) )
+  go_out=$(   "$GO_BIN" --corpus "$go_path" --stats --json < /dev/null )
+  if [[ "$ruby_out" == "$go_out" ]]; then
+    pass_count=$((pass_count + 1))
+  else
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH: reinfer-stats $label"
+    diff <(echo "$ruby_out") <(echo "$go_out") | sed 's/^/    /'
+  fi
+}
+
+reinfer_pair "JSON storage"   ".json"
+reinfer_pair "SQLite storage" ".db"
+
 # --host=reg should cluster subdomain-heavy hosts under their registrable apex.
 host_strategy_pair() {
   local label="$1"

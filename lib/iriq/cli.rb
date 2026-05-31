@@ -38,6 +38,9 @@ module Iriq
                               full (default), registrable (or reg) strips
                               subdomains, none ignores host entirely.
             --stats           Print rolling aggregates
+            --reinfer         Replay the source-IRI log through the current
+                              classifier + reducers; rebuilds materialized
+                              views from scratch. Requires --corpus.
 
       Other:
         -h, --help            Show this message
@@ -85,11 +88,13 @@ module Iriq
       batch_mode = explicit_cluster || positional_is_file ||
                    (args.empty? && piped_stdin?)
 
-      return print_usage(stdout, 0) if args.empty? && !batch_mode
+      return print_usage(stdout, 0) if args.empty? && !batch_mode && !opts[:reinfer]
 
       corpus = opts[:corpus] ? load_corpus(opts[:corpus], host_strategy: opts[:host_strategy]) : nil
 
-      code = if batch_mode
+      code = if opts[:reinfer]
+        cmd_reinfer(corpus, opts)
+      elsif batch_mode
         cmd_batch(args, opts, corpus, explicit_cluster: explicit_cluster)
       elsif opts[:stats]
         cmd_stats(corpus, opts)
@@ -126,6 +131,7 @@ module Iriq
         sections:    [],
         corpus:        nil,
         stats:         false,
+        reinfer:       false,
         scheme_less:   true,
         host_strategy: :full,
       }
@@ -140,6 +146,7 @@ module Iriq
         o.on("--corpus PATH")        { |v| opts[:corpus] = v }
         o.on("--host MODE")          { |v| opts[:host_strategy] = host_strategy_arg(v) }
         o.on("--stats")              { opts[:stats]   = true }
+        o.on("--reinfer")            { opts[:reinfer] = true }
         o.on("--[no-]scheme-less")   { |v| opts[:scheme_less] = v }
         o.on("-h", "--help")         { opts[:help]    = true }
         o.on("-V", "--version")      { opts[:version] = true }
@@ -298,6 +305,22 @@ module Iriq
       return missing("--corpus") unless corpus
 
       emit_stats(corpus, opts)
+      0
+    end
+
+    # --reinfer: drop the materialized views in the corpus and replay the
+    # source-IRI log through the current classifier + reducers. Prints a
+    # short before/after summary so the user can see what changed.
+    def cmd_reinfer(corpus, _opts)
+      return missing("--corpus") unless corpus
+
+      n      = corpus.observed_iri_count
+      before = corpus.size
+      corpus.reinfer
+      after  = corpus.size
+
+      stdout.puts "reinferred #{n} observation#{n == 1 ? '' : 's'}: " \
+                  "#{before} → #{after} cluster#{after == 1 ? '' : 's'}"
       0
     end
 

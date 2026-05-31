@@ -40,6 +40,9 @@ Corpus + stats:
                         full (default), registrable (or reg) strips
                         subdomains, none ignores host entirely.
       --stats           Print rolling aggregates
+      --reinfer         Replay the source-IRI log through the current
+                        classifier + reducers; rebuilds materialized
+                        views from scratch. Requires --corpus.
 
 Other:
   -h, --help            Show this message
@@ -87,6 +90,7 @@ type options struct {
 	sections     []section
 	corpus       string
 	stats        bool
+	reinfer      bool
 	schemeLess   bool
 	hostStrategy iriq.HostStrategy
 }
@@ -127,7 +131,7 @@ func Run(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 
 	batchMode := explicitCluster || positionalIsFile || (len(args) == 0 && pipedStdin(stdin))
 
-	if len(args) == 0 && !batchMode {
+	if len(args) == 0 && !batchMode && !opts.reinfer {
 		fmt.Fprint(stdout, usage)
 		return 0
 	}
@@ -144,6 +148,8 @@ func Run(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 
 	var code int
 	switch {
+	case opts.reinfer:
+		code = cmdReinfer(stdout, stderr, corpus)
 	case batchMode:
 		code = cmdBatch(stdin, stdout, stderr, args, opts, corpus, explicitCluster)
 	case opts.stats:
@@ -238,6 +244,8 @@ func parseOptions(argv []string) ([]string, *options, error) {
 			opts.ndjson = true
 		case a == "--stats":
 			opts.stats = true
+		case a == "--reinfer":
+			opts.reinfer = true
 		case a == "--hints":
 			opts.hints = true
 		case a == "--no-hints" || a == "-N":
@@ -387,6 +395,33 @@ func cmdBatch(stdin io.Reader, stdout, stderr io.Writer, args []string, opts *op
 	default:
 		emitURLList(stdout, iris, opts)
 	}
+	return 0
+}
+
+// cmdReinfer drops the materialized views in the corpus and replays the
+// source-IRI log through the current classifier + reducers. Prints a short
+// before/after summary.
+func cmdReinfer(stdout, stderr io.Writer, corpus *iriq.Corpus) int {
+	if corpus == nil {
+		fmt.Fprintln(stderr, "iriq: missing argument <--corpus>")
+		return 1
+	}
+	n := corpus.ObservedIRICount()
+	before := corpus.Size()
+	if err := corpus.Reinfer(); err != nil {
+		fmt.Fprintf(stderr, "iriq: %s\n", err)
+		return 1
+	}
+	after := corpus.Size()
+	noun := "observations"
+	if n == 1 {
+		noun = "observation"
+	}
+	clusters := "clusters"
+	if after == 1 {
+		clusters = "cluster"
+	}
+	fmt.Fprintf(stdout, "reinferred %d %s: %d → %d %s\n", n, noun, before, after, clusters)
 	return 0
 }
 
