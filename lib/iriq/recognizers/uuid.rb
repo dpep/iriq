@@ -7,7 +7,7 @@ module Iriq
       def try(segment)
         return nil unless segment.size == 36 && segment.include?("-") && PATTERN.match?(segment)
 
-        { type: :uuid, confidence: 1.0 }
+        { type: :uuid, confidence: 1.0, specificity: Specificity::SEMANTIC }
       end
     end
 

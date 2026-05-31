@@ -21,6 +21,32 @@ module Iriq
     def try(_segment)
       raise NotImplementedError
     end
+
+    # Run each Recognizer against the segment and return the winning
+    # Verdict — the one with max(specificity × confidence). Ties go to
+    # the earlier Recognizer in the list (stable, deterministic).
+    # Returns nil when no Recognizer fires.
+    #
+    # Stepping-stone toward the full scored ensemble: today only three
+    # Recognizers participate (uuid, date, integer) and they're
+    # mutually-exclusive on shape, so the ensemble is effectively a
+    # short-circuit OR. As more Recognizers carve out of SegmentClassifier
+    # they'll join the pool and the scoring becomes load-bearing.
+    def self.ensemble(segment, *recognizers)
+      best = nil
+      best_score = -1.0
+      recognizers.each do |r|
+        v = r.try(segment)
+        next unless v
+
+        score = (v[:specificity] || 0.0) * (v[:confidence] || 0.0)
+        if score > best_score
+          best       = v
+          best_score = score
+        end
+      end
+      best
+    end
   end
 
   module Recognizers

@@ -419,9 +419,15 @@ func computeClassification(segment string) SegmentType {
 	hasEq := strings.IndexByte(segment, '=') >= 0
 	hasPlus := strings.IndexByte(segment, '+') >= 0
 
-	if v, ok := UUIDRecognizer.Try(segment); ok {
+	// Scored ensemble over the extracted Recognizers. Today only three
+	// participate (uuid, date, integer) and they're mutually-exclusive on
+	// shape, so the ensemble's max-specificity tie-break never actually
+	// fires — but the seam is in place for follow-up commits that carve
+	// more Recognizers out and let scoring decide.
+	if v, ok := Ensemble(segment, UUIDRecognizer, DateRecognizer, IntegerRecognizer); ok {
 		return v.Type
 	}
+
 	switch {
 	case size > 4 && segment[0] == 'e' && segment[1] == 'y' && strings.Count(segment, ".") == 2 && jwtRE.MatchString(segment):
 		return TypeJWT
@@ -456,24 +462,12 @@ func computeClassification(segment string) SegmentType {
 		return classifyLocalePair(segment)
 	case size == 2 && localeBareRE.MatchString(segment):
 		return classifyLocaleBare(segment)
-	}
-	if v, ok := DateRecognizer.Try(segment); ok {
-		return v.Type
-	}
-	switch {
 	case hasColon && isoTimeRE.MatchString(segment):
 		return TypeTimestamp
 	case first == '+' && phoneRE.MatchString(segment):
 		return classifyPhone(segment)
 	case (hasDash || hasDot || segment[0] == '(') && phoneNANPRE.MatchString(segment):
 		return TypePhone
-	}
-	if digit0 {
-		if v, ok := IntegerRecognizer.Try(segment); ok {
-			return v.Type
-		}
-	}
-	switch {
 	case hasDot && floatRE.MatchString(segment):
 		return TypeFloat
 	case size == 3 && currencyRE.MatchString(segment):

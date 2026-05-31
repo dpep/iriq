@@ -238,12 +238,18 @@ module Iriq
       has_sep   = has_dash || segment.include?("_")
       has_comma = segment.include?(",")
 
+      # Scored ensemble over the extracted Recognizers. Today only three
+      # participate (uuid, date, integer) and they're mutually-exclusive
+      # on shape, so the ensemble's max-specificity tie-break never
+      # actually fires — but the seam is in place for follow-up commits
+      # that carve more Recognizers out and let scoring decide.
+      if (v = Recognizer.ensemble(segment, Recognizers::UUID, Recognizers::DATE, Recognizers::INTEGER))
+        return v[:type]
+      end
+
       # Network / structured-value types take precedence over the generic
       # OPAQUE_RE catch-all (which would otherwise grab IPv4) and the
       # LITERAL fallback (which today swallows email + URL + IPv6).
-      if (v = Recognizers::UUID.try(segment))
-        return v[:type]
-      end
       return :jwt                  if segment.start_with?("ey") && segment.count(".") == 2 && JWT_RE.match?(segment)
       return classify_color(segment) if first == 0x23 && COLOR_HEX_RE.match?(segment)  # '#'
       return :url                  if has_colon && segment.include?("://") && URL_RE.match?(segment)
@@ -258,15 +264,9 @@ module Iriq
       return :boolean              if (size >= 4 && size <= 5) && BOOLEAN_RE.match?(segment)
       return classify_locale_pair(segment) if has_sep && LOCALE_RE.match?(segment)
       return classify_locale(segment) if size == 2 && LOCALE_BARE_RE.match?(segment)
-      if (v = Recognizers::DATE.try(segment))
-        return v[:type]
-      end
       return :timestamp            if has_colon && ISO_TIME_RE.match?(segment)
       return classify_phone(segment) if first == 0x2B && PHONE_RE.match?(segment)  # '+'
       return :phone                if (has_dash || has_dot || segment.include?("(")) && PHONE_NANP_RE.match?(segment)
-      if digit0 && (v = Recognizers::INTEGER.try(segment))
-        return v[:type]
-      end
       return :float                if has_dot && FLOAT_RE.match?(segment)
       return classify_currency(segment) if size == 3 && CURRENCY_RE.match?(segment)
       return classify_country(segment)  if size == 2 && COUNTRY_RE.match?(segment)

@@ -21,7 +21,7 @@ module Iriq
           return nil
         end
 
-        { type: :date, confidence: 1.0 }
+        { type: :date, confidence: 1.0, specificity: Specificity::STRUCTURED }
       end
 
       # Canonicalize a recognized date to ISO 8601 (YYYY-MM-DD). nil for

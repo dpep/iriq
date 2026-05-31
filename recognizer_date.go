@@ -31,7 +31,7 @@ func (dateRecognizer) Try(segment string) (Verdict, bool) {
 		!dateUSPattern.MatchString(segment) {
 		return Verdict{}, false
 	}
-	return Verdict{Type: TypeDate, Confidence: 1.0}, true
+	return Verdict{Type: TypeDate, Confidence: 1.0, Specificity: SpecificityStructured}, true
 }
 
 // DateRecognizer is the shared singleton.

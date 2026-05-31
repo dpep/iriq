@@ -36,11 +36,9 @@ func (integerRecognizer) Try(segment string) (Verdict, bool) {
 	}
 
 	if n, err := strconv.ParseInt(segment, 10, 64); err == nil {
-		if n >= tsMillisRangeMin && n <= tsMillisRangeMax {
-			return Verdict{Type: TypeTimestamp, Confidence: 1.0}, true
-		}
-		if n >= tsSecondsRangeMin && n <= tsSecondsRangeMax {
-			return Verdict{Type: TypeTimestamp, Confidence: 1.0}, true
+		if (n >= tsMillisRangeMin && n <= tsMillisRangeMax) ||
+			(n >= tsSecondsRangeMin && n <= tsSecondsRangeMax) {
+			return Verdict{Type: TypeTimestamp, Confidence: 1.0, Specificity: SpecificityBounded}, true
 		}
 	}
 
@@ -49,11 +47,11 @@ func (integerRecognizer) Try(segment string) (Verdict, bool) {
 		m, _ := strconv.Atoi(segment[4:6])
 		d, _ := strconv.Atoi(segment[6:8])
 		if y >= 1900 && y <= 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31 {
-			return Verdict{Type: TypeDate, Confidence: 1.0}, true
+			return Verdict{Type: TypeDate, Confidence: 1.0, Specificity: SpecificityStructured}, true
 		}
 	}
 
-	return Verdict{Type: TypeInteger, Confidence: 1.0}, true
+	return Verdict{Type: TypeInteger, Confidence: 1.0, Specificity: SpecificityTyped}, true
 }
 
 // IntegerRecognizer is the shared singleton.

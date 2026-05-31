@@ -15,7 +15,7 @@ func (uuidRecognizer) Try(segment string) (Verdict, bool) {
 	if len(segment) != 36 || strings.IndexByte(segment, '-') < 0 || !uuidPattern.MatchString(segment) {
 		return Verdict{}, false
 	}
-	return Verdict{Type: TypeUUID, Confidence: 1.0}, true
+	return Verdict{Type: TypeUUID, Confidence: 1.0, Specificity: SpecificitySemantic}, true
 }
 
 // UUIDRecognizer is the shared singleton — Recognizers are stateless, so

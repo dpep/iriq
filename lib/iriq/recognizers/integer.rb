@@ -15,19 +15,20 @@ module Iriq
         return nil unless digit0 && PATTERN.match?(segment)
 
         n = segment.to_i
-        return { type: :timestamp, confidence: 1.0 } if TS_MILLIS_RANGE.cover?(n)
-        return { type: :timestamp, confidence: 1.0 } if TS_SECONDS_RANGE.cover?(n)
+        if TS_MILLIS_RANGE.cover?(n) || TS_SECONDS_RANGE.cover?(n)
+          return { type: :timestamp, confidence: 1.0, specificity: Specificity::BOUNDED }
+        end
 
         if COMPACT_DATE_PATTERN.match?(segment)
           y = segment[0, 4].to_i
           m = segment[4, 2].to_i
           d = segment[6, 2].to_i
           if y.between?(1900, 2100) && m.between?(1, 12) && d.between?(1, 31)
-            return { type: :date, confidence: 1.0 }
+            return { type: :date, confidence: 1.0, specificity: Specificity::STRUCTURED }
           end
         end
 
-        { type: :integer, confidence: 1.0 }
+        { type: :integer, confidence: 1.0, specificity: Specificity::TYPED }
       end
     end
 
