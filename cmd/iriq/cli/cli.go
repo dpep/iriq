@@ -43,6 +43,14 @@ Corpus + stats:
       --reinfer         Replay the source-IRI log through the current
                         classifier + reducers; rebuilds materialized
                         views from scratch. Requires --corpus.
+      --propose-recognizers
+                        Scan observed values for shape patterns that
+                        recur enough to suggest a new Recognizer.
+                        Combine with --json for structured output.
+                        Requires --corpus.
+      --min-observations N  (proposal threshold; default 20)
+      --min-coverage F  (proposal threshold; default 0.7)
+      --min-hosts N     (proposal threshold; default 1)
 
 Other:
   -h, --help            Show this message
@@ -91,6 +99,10 @@ type options struct {
 	corpus       string
 	stats        bool
 	reinfer      bool
+	propose      bool
+	proposeMinObs      int
+	proposeMinCoverage float64
+	proposeMinHosts    int
 	schemeLess   bool
 	hostStrategy iriq.HostStrategy
 }
@@ -131,7 +143,7 @@ func Run(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 
 	batchMode := explicitCluster || positionalIsFile || (len(args) == 0 && pipedStdin(stdin))
 
-	if len(args) == 0 && !batchMode && !opts.reinfer {
+	if len(args) == 0 && !batchMode && !opts.reinfer && !opts.propose {
 		fmt.Fprint(stdout, usage)
 		return 0
 	}
@@ -150,6 +162,8 @@ func Run(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 	switch {
 	case opts.reinfer:
 		code = cmdReinfer(stdout, stderr, corpus)
+	case opts.propose:
+		code = cmdPropose(stdout, stderr, corpus, opts)
 	case batchMode:
 		code = cmdBatch(stdin, stdout, stderr, args, opts, corpus, explicitCluster)
 	case opts.stats:
@@ -246,6 +260,38 @@ func parseOptions(argv []string) ([]string, *options, error) {
 			opts.stats = true
 		case a == "--reinfer":
 			opts.reinfer = true
+		case a == "--propose-recognizers":
+			opts.propose = true
+		case a == "--min-observations":
+			if i+1 >= len(argv) {
+				return nil, nil, fmt.Errorf("missing argument: --min-observations N")
+			}
+			n, err := strconv.Atoi(argv[i+1])
+			if err != nil {
+				return nil, nil, fmt.Errorf("--min-observations N: %w", err)
+			}
+			opts.proposeMinObs = n
+			i++
+		case a == "--min-coverage":
+			if i+1 >= len(argv) {
+				return nil, nil, fmt.Errorf("missing argument: --min-coverage F")
+			}
+			f, err := strconv.ParseFloat(argv[i+1], 64)
+			if err != nil {
+				return nil, nil, fmt.Errorf("--min-coverage F: %w", err)
+			}
+			opts.proposeMinCoverage = f
+			i++
+		case a == "--min-hosts":
+			if i+1 >= len(argv) {
+				return nil, nil, fmt.Errorf("missing argument: --min-hosts N")
+			}
+			n, err := strconv.Atoi(argv[i+1])
+			if err != nil {
+				return nil, nil, fmt.Errorf("--min-hosts N: %w", err)
+			}
+			opts.proposeMinHosts = n
+			i++
 		case a == "--hints":
 			opts.hints = true
 		case a == "--no-hints" || a == "-N":
@@ -394,6 +440,104 @@ func cmdBatch(stdin io.Reader, stdout, stderr io.Writer, args []string, opts *op
 		emitClusters(stdout, corpus.Clusters(), opts)
 	default:
 		emitURLList(stdout, iris, opts)
+	}
+	return 0
+}
+
+// formatFloatRubyStyle matches Ruby's JSON.generate output for floats:
+// whole-number floats render with a trailing ".0" (1.0 → "1.0", not "1"),
+// fractional floats use the shortest accurate representation. Used for
+// coverage values where parity vs the Ruby CLI matters.
+func formatFloatRubyStyle(f float64) string {
+	s := strconv.FormatFloat(f, 'g', -1, 64)
+	if !strings.ContainsAny(s, ".eE") {
+		s += ".0"
+	}
+	return s
+}
+
+// cmdPropose scans observed values for prefix patterns that recur enough
+// to suggest a new Recognizer. One block per proposal in human mode,
+// JSON array under --json.
+func cmdPropose(stdout, stderr io.Writer, corpus *iriq.Corpus, opts *options) int {
+	if corpus == nil {
+		fmt.Fprintln(stderr, "iriq: missing argument <--corpus>")
+		return 1
+	}
+
+	proposals := corpus.ProposeRecognizers(nil, iriq.ProposalOptions{
+		MinObservations: opts.proposeMinObs,
+		MinCoverage:     opts.proposeMinCoverage,
+		MinHosts:        opts.proposeMinHosts,
+	})
+
+	if opts.json {
+		// Match Ruby's RecognizerProposal#to_h field order + numeric
+		// formatting so JSON parity holds byte-for-byte.
+		//   * Position fields ordered (host, scope, locator) via explicit
+		//     struct tags; Go's encoder would alphabetize a map[string]any.
+		//   * Coverage emitted as a json.RawMessage so we control the
+		//     decimal representation: Ruby's JSON.generate keeps "1.0"
+		//     for whole-number floats; Go's default would drop to "1".
+		type positionJSON struct {
+			Host    string `json:"host"`
+			Scope   string `json:"scope"`
+			Locator string `json:"locator"`
+		}
+		type proposalJSON struct {
+			Prefix           string          `json:"prefix"`
+			SuggestedType    string          `json:"suggested_type"`
+			Positions        []positionJSON  `json:"positions"`
+			Hosts            []string        `json:"hosts"`
+			Coverage         json.RawMessage `json:"coverage"`
+			ObservationCount int             `json:"observation_count"`
+			SampleValues     []string        `json:"sample_values"`
+			Strategy         string          `json:"strategy"`
+		}
+		out := make([]proposalJSON, 0, len(proposals))
+		for _, p := range proposals {
+			positions := make([]positionJSON, len(p.Positions))
+			for i, pos := range p.Positions {
+				positions[i] = positionJSON{
+					Host: pos.Host, Scope: string(pos.Scope), Locator: pos.Locator,
+				}
+			}
+			out = append(out, proposalJSON{
+				Prefix:           p.Prefix,
+				SuggestedType:    p.SuggestedType,
+				Positions:        positions,
+				Hosts:            p.Hosts,
+				Coverage:         json.RawMessage(formatFloatRubyStyle(p.Coverage)),
+				ObservationCount: p.ObservationCount,
+				SampleValues:     p.SampleValues,
+				Strategy:         p.Strategy,
+			})
+		}
+		data, _ := json.Marshal(out)
+		fmt.Fprintln(stdout, string(data))
+		return 0
+	}
+
+	if len(proposals) == 0 {
+		fmt.Fprintf(stdout, "no recognizer proposals (%d observations scanned)\n", corpus.ObservedIRICount())
+		return 0
+	}
+
+	for i, p := range proposals {
+		if i > 0 {
+			fmt.Fprintln(stdout)
+		}
+		fmt.Fprintf(stdout, "proposal: %s (%s)\n", p.SuggestedType, p.Prefix)
+		fmt.Fprintf(stdout, "  strategy:    %s\n", p.Strategy)
+		fmt.Fprintf(stdout, "  coverage:    %.2f\n", p.Coverage)
+		fmt.Fprintf(stdout, "  observations: %d\n", p.ObservationCount)
+		fmt.Fprintf(stdout, "  hosts:       %s\n", strings.Join(p.Hosts, ", "))
+		fmt.Fprintf(stdout, "  positions:   %d\n", len(p.Positions))
+		samples := p.SampleValues
+		if len(samples) > 3 {
+			samples = samples[:3]
+		}
+		fmt.Fprintf(stdout, "  samples:     %s\n", strings.Join(samples, ", "))
 	}
 	return 0
 }

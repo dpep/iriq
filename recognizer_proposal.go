@@ -79,7 +79,7 @@ func (PrefixUnderscoreIdStrategy) Propose(s Storage, opts ProposalOptions) []Rec
 		hosts                 map[string]struct{}
 		matchingCount         int
 		positionObservations  int
-		samples               []string
+		matches               []string // every match; sorted + capped at emit time
 	}
 	perPrefix := map[string]*accumulator{}
 
@@ -108,9 +108,7 @@ func (PrefixUnderscoreIdStrategy) Propose(s Storage, opts ProposalOptions) []Rec
 				acc.positionObservations += stats.Total
 			}
 			acc.hosts[pos.Host] = struct{}{}
-			if len(acc.samples) < 5 {
-				acc.samples = append(acc.samples, value)
-			}
+			acc.matches = append(acc.matches, value)
 		}
 	})
 
@@ -140,6 +138,15 @@ func (PrefixUnderscoreIdStrategy) Propose(s Storage, opts ProposalOptions) []Rec
 		}
 		sort.Strings(hostList)
 
+		// Sort + cap to 5 so Ruby and Go produce identical samples
+		// regardless of underlying map iteration order. Samples are
+		// illustrative for humans; alphabetical is fine.
+		samples := append([]string(nil), acc.matches...)
+		sort.Strings(samples)
+		if len(samples) > 5 {
+			samples = samples[:5]
+		}
+
 		out = append(out, RecognizerProposal{
 			Prefix:           prefix,
 			SuggestedType:    strings.TrimSuffix(prefix, "_"),
@@ -147,7 +154,7 @@ func (PrefixUnderscoreIdStrategy) Propose(s Storage, opts ProposalOptions) []Rec
 			Hosts:            hostList,
 			Coverage:         coverage,
 			ObservationCount: acc.matchingCount,
-			SampleValues:     acc.samples,
+			SampleValues:     samples,
 			Strategy:         PrefixUnderscoreIdStrategy{}.Name(),
 		})
 	}

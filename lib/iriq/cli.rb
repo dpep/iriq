@@ -41,6 +41,14 @@ module Iriq
             --reinfer         Replay the source-IRI log through the current
                               classifier + reducers; rebuilds materialized
                               views from scratch. Requires --corpus.
+            --propose-recognizers
+                              Scan observed values for shape patterns that
+                              recur enough to suggest a new Recognizer.
+                              Combine with --json for structured output.
+                              Requires --corpus.
+            --min-observations N  (proposal threshold; default 20)
+            --min-coverage F  (proposal threshold; default 0.7)
+            --min-hosts N     (proposal threshold; default 1)
 
       Other:
         -h, --help            Show this message
@@ -88,12 +96,14 @@ module Iriq
       batch_mode = explicit_cluster || positional_is_file ||
                    (args.empty? && piped_stdin?)
 
-      return print_usage(stdout, 0) if args.empty? && !batch_mode && !opts[:reinfer]
+      return print_usage(stdout, 0) if args.empty? && !batch_mode && !opts[:reinfer] && !opts[:propose]
 
       corpus = opts[:corpus] ? load_corpus(opts[:corpus], host_strategy: opts[:host_strategy]) : nil
 
       code = if opts[:reinfer]
         cmd_reinfer(corpus, opts)
+      elsif opts[:propose]
+        cmd_propose(corpus, opts)
       elsif batch_mode
         cmd_batch(args, opts, corpus, explicit_cluster: explicit_cluster)
       elsif opts[:stats]
@@ -132,6 +142,10 @@ module Iriq
         corpus:        nil,
         stats:         false,
         reinfer:       false,
+        propose:       false,
+        propose_min_obs:      nil,
+        propose_min_coverage: nil,
+        propose_min_hosts:    nil,
         scheme_less:   true,
         host_strategy: :full,
       }
@@ -147,6 +161,10 @@ module Iriq
         o.on("--host MODE")          { |v| opts[:host_strategy] = host_strategy_arg(v) }
         o.on("--stats")              { opts[:stats]   = true }
         o.on("--reinfer")            { opts[:reinfer] = true }
+        o.on("--propose-recognizers") { opts[:propose] = true }
+        o.on("--min-observations N", Integer) { |v| opts[:propose_min_obs]      = v }
+        o.on("--min-coverage F", Float)       { |v| opts[:propose_min_coverage] = v }
+        o.on("--min-hosts N", Integer)        { |v| opts[:propose_min_hosts]    = v }
         o.on("--[no-]scheme-less")   { |v| opts[:scheme_less] = v }
         o.on("-h", "--help")         { opts[:help]    = true }
         o.on("-V", "--version")      { opts[:version] = true }
@@ -305,6 +323,42 @@ module Iriq
       return missing("--corpus") unless corpus
 
       emit_stats(corpus, opts)
+      0
+    end
+
+    # --propose-recognizers: scan observed values for prefix patterns
+    # that recur enough to suggest a new Recognizer. Prints one block
+    # per proposal in human mode, or a JSON array under --json.
+    def cmd_propose(corpus, opts)
+      return missing("--corpus") unless corpus
+
+      kwargs = {}
+      kwargs[:min_observations] = opts[:propose_min_obs]      if opts[:propose_min_obs]
+      kwargs[:min_coverage]     = opts[:propose_min_coverage] if opts[:propose_min_coverage]
+      kwargs[:min_hosts]        = opts[:propose_min_hosts]    if opts[:propose_min_hosts]
+
+      proposals = corpus.propose_recognizers(**kwargs)
+
+      if opts[:json]
+        stdout.puts JSON.generate(proposals.map(&:to_h))
+        return 0
+      end
+
+      if proposals.empty?
+        stdout.puts "no recognizer proposals (#{corpus.observed_iri_count} observations scanned)"
+        return 0
+      end
+
+      proposals.each_with_index do |p, i|
+        stdout.puts if i > 0
+        stdout.puts "proposal: #{p.suggested_type} (#{p.prefix})"
+        stdout.puts "  strategy:    #{p.strategy}"
+        stdout.puts "  coverage:    #{format('%.2f', p.coverage)}"
+        stdout.puts "  observations: #{p.observation_count}"
+        stdout.puts "  hosts:       #{p.hosts.to_a.sort.join(', ')}"
+        stdout.puts "  positions:   #{p.positions.size}"
+        stdout.puts "  samples:     #{p.sample_values.first(3).join(', ')}"
+      end
       0
     end
 

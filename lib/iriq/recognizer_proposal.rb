@@ -93,7 +93,10 @@ module Iriq
             acc[:position_observations] += stats.total unless acc[:positions].include?(position)
             acc[:positions] << position
             acc[:hosts] << position.host
-            acc[:samples] << value if acc[:samples].size < 5
+            # Collect every match; we'll sort + cap to a stable top-N at
+            # emission time so Ruby and Go produce identical samples
+            # regardless of underlying Hash / map iteration order.
+            acc[:matches] << value
           end
         end
 
@@ -111,7 +114,10 @@ module Iriq
             hosts:             acc[:hosts],
             coverage:          coverage,
             observation_count: acc[:matching_count],
-            sample_values:     acc[:samples],
+            # Sort + cap to 5 so Ruby and Go produce identical samples
+            # regardless of underlying Hash / map iteration order. The
+            # samples are illustrative for humans; alphabetical is fine.
+            sample_values:     acc[:matches].sort.first(5),
             strategy:          NAME,
           )
         end
@@ -125,7 +131,7 @@ module Iriq
           hosts:                 Set.new,
           matching_count:        0,
           position_observations: 0,
-          samples:               [],
+          matches:               [],
         }
       end
 

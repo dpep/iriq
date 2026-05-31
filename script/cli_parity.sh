@@ -173,6 +173,45 @@ reinfer_pair() {
 reinfer_pair "JSON storage"   ".json"
 reinfer_pair "SQLite storage" ".db"
 
+# --propose-recognizers parity. Both human and JSON output should match
+# byte-for-byte after the same observation stream. Use a stream that
+# triggers the PrefixUnderscoreId strategy ≥20 times.
+propose_pair() {
+  local label="$1" ext="$2"
+  local ruby_path="$corpus_dir/ruby-propose$ext"
+  local go_path="$corpus_dir/go-propose$ext"
+  rm -f "$ruby_path" "$go_path"
+  local propose_stream=""
+  for i in $(seq 1 25); do
+    propose_stream+="https://api.github.com/auth/ghp_aaaa$(printf '%04d' "$i")xyzzy"$'\n'
+  done
+  echo -n "$propose_stream" | (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path") > /dev/null
+  echo -n "$propose_stream" | "$GO_BIN" --corpus "$go_path" > /dev/null
+  local ruby_out go_out
+  ruby_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" --propose-recognizers < /dev/null) )
+  go_out=$(   "$GO_BIN" --corpus "$go_path" --propose-recognizers < /dev/null )
+  if [[ "$ruby_out" != "$go_out" ]]; then
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH: propose-recognizers $label (human)"
+    diff <(echo "$ruby_out") <(echo "$go_out") | sed 's/^/    /'
+    return
+  fi
+  ruby_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" --propose-recognizers --json < /dev/null) )
+  go_out=$(   "$GO_BIN" --corpus "$go_path" --propose-recognizers --json < /dev/null )
+  if [[ "$ruby_out" == "$go_out" ]]; then
+    pass_count=$((pass_count + 1))
+  else
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH: propose-recognizers $label (json)"
+    diff <(echo "$ruby_out") <(echo "$go_out") | sed 's/^/    /'
+  fi
+}
+
+propose_pair "JSON storage"   ".json"
+propose_pair "SQLite storage" ".db"
+
 # --host=reg should cluster subdomain-heavy hosts under their registrable apex.
 host_strategy_pair() {
   local label="$1"
