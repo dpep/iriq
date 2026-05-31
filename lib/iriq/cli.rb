@@ -52,6 +52,10 @@ module Iriq
             --activate-above F  Promote every proposal at or above
                               coverage F into a live Recognizer on the
                               corpus, then reinfer.
+            --cross-host-shapes
+                              List route shapes that recur across
+                              multiple hosts. Combine with --min-hosts.
+                              Requires --corpus.
 
       Other:
         -h, --help            Show this message
@@ -106,7 +110,7 @@ module Iriq
       batch_mode = explicit_cluster || positional_is_file ||
                    (args.empty? && piped_stdin?)
 
-      return print_usage(stdout, 0) if args.empty? && !batch_mode && !opts[:reinfer] && !opts[:propose]
+      return print_usage(stdout, 0) if args.empty? && !batch_mode && !opts[:reinfer] && !opts[:propose] && !opts[:cross_host_shapes]
 
       corpus = opts[:corpus] ? load_corpus(opts[:corpus], host_strategy: opts[:host_strategy]) : nil
 
@@ -114,6 +118,8 @@ module Iriq
         cmd_reinfer(corpus, opts)
       elsif opts[:propose]
         cmd_propose(corpus, opts)
+      elsif opts[:cross_host_shapes]
+        cmd_cross_host_shapes(corpus, opts)
       elsif batch_mode
         cmd_batch(args, opts, corpus, explicit_cluster: explicit_cluster)
       elsif opts[:stats]
@@ -155,8 +161,12 @@ module Iriq
         propose:       false,
         propose_min_obs:      nil,
         propose_min_coverage: nil,
-        propose_min_hosts:    nil,
+        # --min-hosts is generic: it applies to both --propose-recognizers
+        # (proposal threshold) and --cross-host-shapes (cross-host
+        # recurrence threshold).
+        min_hosts:            nil,
         activate_above:       nil,
+        cross_host_shapes:    false,
         scheme_less:   true,
         host_strategy: :full,
       }
@@ -175,8 +185,9 @@ module Iriq
         o.on("--propose-recognizers") { opts[:propose] = true }
         o.on("--min-observations N", Integer) { |v| opts[:propose_min_obs]      = v }
         o.on("--min-coverage F", Float)       { |v| opts[:propose_min_coverage] = v }
-        o.on("--min-hosts N", Integer)        { |v| opts[:propose_min_hosts]    = v }
+        o.on("--min-hosts N", Integer)        { |v| opts[:min_hosts]           = v }
         o.on("--activate-above F", Float)     { |v| opts[:activate_above]       = v }
+        o.on("--cross-host-shapes")           { opts[:cross_host_shapes]        = true }
         o.on("--[no-]scheme-less")   { |v| opts[:scheme_less] = v }
         o.on("-h", "--help")         { opts[:help]    = true }
         o.on("-V", "--version")      { opts[:version] = true }
@@ -351,7 +362,7 @@ module Iriq
       kwargs = {}
       kwargs[:min_observations] = opts[:propose_min_obs]      if opts[:propose_min_obs]
       kwargs[:min_coverage]     = opts[:propose_min_coverage] if opts[:propose_min_coverage]
-      kwargs[:min_hosts]        = opts[:propose_min_hosts]    if opts[:propose_min_hosts]
+      kwargs[:min_hosts]        = opts[:min_hosts]            if opts[:min_hosts]
 
       if opts[:activate_above]
         activated = corpus.activate_proposals_above(opts[:activate_above], **kwargs)
@@ -430,6 +441,33 @@ module Iriq
     def default_shell
       shell = ENV["SHELL"].to_s
       shell.empty? ? "bash" : File.basename(shell).sub(/\.exe\z/, "")
+    end
+
+    # --cross-host-shapes: list route shapes that recur across multiple
+    # hosts in the corpus. One block per shape in human mode, JSON array
+    # under --json. Tunable via --min-hosts (default 2).
+    def cmd_cross_host_shapes(corpus, opts)
+      return missing("--corpus") unless corpus
+
+      kwargs = {}
+      kwargs[:min_hosts] = opts[:min_hosts] if opts[:min_hosts]
+      shapes = corpus.cross_host_shapes(**kwargs)
+
+      if opts[:json]
+        stdout.puts JSON.generate(shapes.map(&:to_h))
+        return 0
+      end
+
+      if shapes.empty?
+        stdout.puts "no cross-host shapes (#{corpus.size} cluster#{corpus.size == 1 ? '' : 's'} scanned)"
+        return 0
+      end
+
+      shapes.each do |s|
+        host_list = s.hosts.to_a.sort.join(", ")
+        stdout.puts "#{s.shape}  (#{s.host_count} host#{s.host_count == 1 ? '' : 's'}: #{host_list})  obs=#{s.observation_count}"
+      end
+      0
     end
 
     def missing(name)

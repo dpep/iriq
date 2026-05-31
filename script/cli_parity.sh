@@ -264,6 +264,41 @@ activate_pair() {
 activate_pair "JSON storage"   ".json"
 activate_pair "SQLite storage" ".db"
 
+# --cross-host-shapes parity. Stream IRIs across multiple hosts that
+# share the same shape; both runtimes should report identical output.
+cross_host_pair() {
+  local label="$1" ext="$2"
+  local ruby_path="$corpus_dir/ruby-xh$ext"
+  local go_path="$corpus_dir/go-xh$ext"
+  rm -f "$ruby_path" "$go_path"
+  local xh_stream=$'https://foo.com/users/1\nhttps://bar.com/users/2\nhttps://baz.com/users/3\nhttps://foo.com/posts/abc\nhttps://bar.com/posts/def\n'
+  echo -n "$xh_stream" | (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path") > /dev/null
+  echo -n "$xh_stream" | "$GO_BIN" --corpus "$go_path" > /dev/null
+  local ruby_out go_out
+  ruby_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" --cross-host-shapes < /dev/null) )
+  go_out=$(   "$GO_BIN" --corpus "$go_path" --cross-host-shapes < /dev/null )
+  if [[ "$ruby_out" != "$go_out" ]]; then
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH: cross-host-shapes $label (human)"
+    diff <(echo "$ruby_out") <(echo "$go_out") | sed 's/^/    /'
+    return
+  fi
+  ruby_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" --cross-host-shapes --json < /dev/null) )
+  go_out=$(   "$GO_BIN" --corpus "$go_path" --cross-host-shapes --json < /dev/null )
+  if [[ "$ruby_out" == "$go_out" ]]; then
+    pass_count=$((pass_count + 1))
+  else
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH: cross-host-shapes $label (json)"
+    diff <(echo "$ruby_out") <(echo "$go_out") | sed 's/^/    /'
+  fi
+}
+
+cross_host_pair "JSON storage"   ".json"
+cross_host_pair "SQLite storage" ".db"
+
 # --host=reg should cluster subdomain-heavy hosts under their registrable apex.
 host_strategy_pair() {
   local label="$1"

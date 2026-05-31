@@ -109,8 +109,12 @@ Each of these is a non-trivial multi-PR initiative.
       (v0.26.0).
     * `iriq --corpus PATH --propose-recognizers --activate-above F`
       auto-activates every proposal at or above coverage F (v0.26.0).
-- **Cross-host learning** — same Shape across many hosts is strong evidence
-  of semantic identity.
+- ✅ **Cross-host learning** — `Corpus#cross_host_shapes(min_hosts:)` lists
+  route shapes that recur across multiple hosts (independent evidence
+  of semantic pattern, not host-local quirk). CLI flag
+  `--cross-host-shapes [--min-hosts N] [--json]`. Future: feed cross-host
+  count into RecognizerProposal confidence and corpus-informed
+  normalization. Shipped in v0.27.0.
 - **Near-shape clustering** — edit-distance over Shapes catches
   near-duplicates that today require exact match.
 

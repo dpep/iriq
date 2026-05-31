@@ -192,6 +192,38 @@ module Iriq
       0
     end
 
+    # Route shapes that recur across `min_hosts` or more distinct hosts.
+    # Returns CrossHostShape records sorted by host_count desc, then by
+    # observation_count desc, then by shape (stable, deterministic).
+    #
+    # Cross-host recurrence is independent evidence of a real semantic
+    # pattern — two unrelated hosts inventing the same `/users/{integer}`
+    # structure by accident is unlikely. A natural follow-up is feeding
+    # this signal back into RecognizerProposal confidence: a proposal
+    # supported by N hosts is much stronger than one seen on a single
+    # host with the same per-position coverage.
+    def cross_host_shapes(min_hosts: 2)
+      by_shape = Hash.new { |h, k| h[k] = { hosts: Set.new, count: 0 } }
+      @storage.clusters.each do |cluster|
+        # Skip non-URL clusters (URN clusters have no host).
+        next if cluster.host.nil? || cluster.host.empty?
+
+        agg = by_shape[cluster.shape]
+        agg[:hosts] << cluster.host
+        agg[:count] += cluster.count
+      end
+
+      by_shape.filter_map do |shape, data|
+        next nil if data[:hosts].size < min_hosts
+
+        CrossHostShape.new(
+          shape:             shape,
+          hosts:             data[:hosts],
+          observation_count: data[:count],
+        )
+      end.sort_by { |s| [-s.host_count, -s.observation_count, s.shape] }
+    end
+
     # Build the ordered Event list for `input` without applying it. Useful
     # for inspection, tests, and future event-log persistence. Each call is
     # pure — no storage side-effects.

@@ -54,6 +54,10 @@ Corpus + stats:
       --activate-above F  Promote every proposal at or above coverage F
                         into a live Recognizer on the corpus, then
                         reinfer.
+      --cross-host-shapes
+                        List route shapes that recur across multiple
+                        hosts. Combine with --min-hosts. Requires
+                        --corpus.
 
 Other:
   -h, --help            Show this message
@@ -105,8 +109,12 @@ type options struct {
 	propose      bool
 	proposeMinObs      int
 	proposeMinCoverage float64
-	proposeMinHosts    int
+	// --min-hosts is generic: it applies to both --propose-recognizers
+	// (proposal threshold) and --cross-host-shapes (cross-host
+	// recurrence threshold).
+	minHosts           int
 	activateAbove      float64 // 0 means disabled
+	crossHostShapes    bool
 	schemeLess   bool
 	hostStrategy iriq.HostStrategy
 }
@@ -153,7 +161,7 @@ func Run(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 
 	batchMode := explicitCluster || positionalIsFile || (len(args) == 0 && pipedStdin(stdin))
 
-	if len(args) == 0 && !batchMode && !opts.reinfer && !opts.propose {
+	if len(args) == 0 && !batchMode && !opts.reinfer && !opts.propose && !opts.crossHostShapes {
 		fmt.Fprint(stdout, usage)
 		return 0
 	}
@@ -174,6 +182,8 @@ func Run(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 		code = cmdReinfer(stdout, stderr, corpus)
 	case opts.propose:
 		code = cmdPropose(stdout, stderr, corpus, opts)
+	case opts.crossHostShapes:
+		code = cmdCrossHostShapes(stdout, stderr, corpus, opts)
 	case batchMode:
 		code = cmdBatch(stdin, stdout, stderr, args, opts, corpus, explicitCluster)
 	case opts.stats:
@@ -300,8 +310,10 @@ func parseOptions(argv []string) ([]string, *options, error) {
 			if err != nil {
 				return nil, nil, fmt.Errorf("--min-hosts N: %w", err)
 			}
-			opts.proposeMinHosts = n
+			opts.minHosts = n
 			i++
+		case a == "--cross-host-shapes":
+			opts.crossHostShapes = true
 		case a == "--activate-above":
 			if i+1 >= len(argv) {
 				return nil, nil, fmt.Errorf("missing argument: --activate-above F")
@@ -488,7 +500,7 @@ func cmdPropose(stdout, stderr io.Writer, corpus *iriq.Corpus, opts *options) in
 	popts := iriq.ProposalOptions{
 		MinObservations: opts.proposeMinObs,
 		MinCoverage:     opts.proposeMinCoverage,
-		MinHosts:        opts.proposeMinHosts,
+		MinHosts:        opts.minHosts,
 	}
 
 	if opts.activateAbove > 0 {
@@ -576,6 +588,60 @@ func cmdPropose(stdout, stderr io.Writer, corpus *iriq.Corpus, opts *options) in
 			samples = samples[:3]
 		}
 		fmt.Fprintf(stdout, "  samples:     %s\n", strings.Join(samples, ", "))
+	}
+	return 0
+}
+
+// cmdCrossHostShapes lists route shapes that recur across multiple hosts
+// in the corpus. One line per shape in human mode, JSON array under --json.
+func cmdCrossHostShapes(stdout, stderr io.Writer, corpus *iriq.Corpus, opts *options) int {
+	if corpus == nil {
+		fmt.Fprintln(stderr, "iriq: missing argument <--corpus>")
+		return 1
+	}
+
+	min := opts.minHosts
+	if min == 0 {
+		min = 2
+	}
+	shapes := corpus.CrossHostShapes(min)
+
+	if opts.json {
+		type shapeJSON struct {
+			Shape            string   `json:"shape"`
+			Hosts            []string `json:"hosts"`
+			HostCount        int      `json:"host_count"`
+			ObservationCount int      `json:"observation_count"`
+		}
+		out := make([]shapeJSON, 0, len(shapes))
+		for _, s := range shapes {
+			out = append(out, shapeJSON{
+				Shape: s.Shape, Hosts: s.Hosts,
+				HostCount: s.HostCount(), ObservationCount: s.ObservationCount,
+			})
+		}
+		data, _ := json.Marshal(out)
+		fmt.Fprintln(stdout, string(data))
+		return 0
+	}
+
+	if len(shapes) == 0 {
+		size := corpus.Size()
+		noun := "clusters"
+		if size == 1 {
+			noun = "cluster"
+		}
+		fmt.Fprintf(stdout, "no cross-host shapes (%d %s scanned)\n", size, noun)
+		return 0
+	}
+
+	for _, s := range shapes {
+		hostNoun := "hosts"
+		if s.HostCount() == 1 {
+			hostNoun = "host"
+		}
+		fmt.Fprintf(stdout, "%s  (%d %s: %s)  obs=%d\n",
+			s.Shape, s.HostCount(), hostNoun, strings.Join(s.Hosts, ", "), s.ObservationCount)
 	}
 	return 0
 }
