@@ -149,7 +149,9 @@ func (cp *Corpus) Observe(input interface{}) (*Observation, error) {
 	return &Observation{corpus: cp, Identifier: iri, Cluster: cluster}, nil
 }
 
-// Normalize is the corpus-informed analog of Iriq.Normalize.
+// Normalize is the corpus-informed analog of iriq.Normalize. Implemented
+// as a thin call into NormalizeIdentifierWithEvidence — Corpus satisfies
+// the NormalizationEvidence interface via RenderPath / RenderQuery.
 func (cp *Corpus) Normalize(input string) (string, error) {
 	iri, err := Parse(input)
 	if err != nil {
@@ -159,33 +161,27 @@ func (cp *Corpus) Normalize(input string) (string, error) {
 }
 
 func (cp *Corpus) NormalizeIdentifier(iri *Identifier) string {
-	if iri.IsURN() {
-		return NormalizeIdentifier(iri, cp.Classifier, true)
-	}
+	return NormalizeIdentifierWithEvidence(iri, cp.Classifier, true, cp)
+}
+
+// RenderPath satisfies NormalizationEvidence — renders the path using
+// corpus-informed classifications (variability promotion, popular-outlier
+// preservation). Always emits a leading "/" to anchor the URL and any
+// trailing query.
+func (cp *Corpus) RenderPath(iri *Identifier, _ *SegmentClassifier, _ bool) string {
 	entries := cp.annotateSegments(iri)
 	tokens := make([]string, len(entries))
 	for i, e := range entries {
 		tokens[i] = cp.corpusToken(e)
 	}
-	var b strings.Builder
-	if iri.Scheme != "" {
-		b.WriteString(iri.Scheme)
-		b.WriteString("://")
-	}
-	if iri.Host != "" {
-		b.WriteString(iri.Host)
-	}
-	if iri.Port != 0 {
-		b.WriteByte(':')
-		b.WriteString(itoa(iri.Port))
-	}
-	b.WriteByte('/')
-	b.WriteString(strings.Join(tokens, "/"))
-	if iri.QueryParams != nil && iri.QueryParams.Len() > 0 {
-		b.WriteByte('?')
-		b.WriteString(cp.renderQuery(iri))
-	}
-	return b.String()
+	return "/" + strings.Join(tokens, "/")
+}
+
+// RenderQuery satisfies NormalizationEvidence — uses cluster-inferred
+// param types when the cluster has enough samples, falling back to the
+// classifier otherwise.
+func (cp *Corpus) RenderQuery(iri *Identifier, _ *SegmentClassifier) string {
+	return cp.renderQuery(iri)
 }
 
 // ParamsFor returns the inferred parameter summary for the cluster the input

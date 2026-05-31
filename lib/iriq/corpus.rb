@@ -115,23 +115,43 @@ module Iriq
     end
 
     # Corpus-informed normalization. Falls back to mechanical normalization
-    # when the corpus has no signal for a position. Includes any observed
-    # query params, rendered with corpus-informed types when the cluster has
-    # tracked them.
+    # when the corpus has no signal for a position. Implemented as a thin
+    # call into Normalizer with `evidence: self`; the corpus-informed path
+    # and query rendering live in #render_path / #render_query below
+    # (the evidence-source interface).
     def normalize(input)
       iri = coerce(input)
-      return Normalizer.normalize_identifier(iri) if iri.urn?
+      Normalizer.normalize_identifier(iri, classifier: @classifier, hints: true, evidence: self)
+    end
 
+    # Evidence-source interface — called by Normalizer when this Corpus is
+    # passed as `evidence:`. Renders the path using corpus-informed
+    # classifications (variability promotion, popular-outlier preservation).
+    # Always emits a leading "/" — empty path collapses to "/" to match
+    # mechanical output and anchor any trailing query.
+    def render_path(iri, _classifier, _hints)
       tokens = annotate_segments(iri).map { |entry| corpus_token(entry) }
-      out = +""
-      out << "#{iri.scheme}://" if iri.scheme
-      out << iri.host if iri.host
-      out << ":#{iri.port}" if iri.port
-      # Always emit a path. Empty path renders as "/" to match the mechanical
-      # Iriq.normalize output and to anchor any trailing query string.
-      out << "/" << tokens.join("/")
-      out << "?" << render_query(iri) if iri.query_params && !iri.query_params.empty?
-      out
+      "/" + tokens.join("/")
+    end
+
+    # Evidence-source interface — render the query string with
+    # cluster-inferred param types where available. The mechanical
+    # NullEvidenceSource provides the classifier-only fallback; this
+    # version prefers the cluster's observed type per param (dominant
+    # type_count, subject to the corpus thresholds).
+    def render_query(iri, _classifier = @classifier)
+      hinted_shape = PathShape.new(classifier: @classifier, hints: true)
+                              .from_entries(SegmentHints.derive(iri.path_segments, @classifier))
+      key, * = Cluster.key_for(iri, classifier: @classifier, shape: hinted_shape,
+                               host: effective_host(iri.host))
+      cluster = @storage.cluster_for(key)
+
+      iri.query_params.keys.sort.map do |k|
+        v = iri.query_params[k].to_s
+        type = inferred_param_type(cluster, k, v)
+        shaped = render_param_value(v, type)
+        "#{k}=#{shaped}"
+      end.join("&")
     end
 
     # Inferred params for the cluster `input` would fall into. Returns the
@@ -314,25 +334,6 @@ module Iriq
 
       baseline = 1.0 / stats.cardinality
       stats.value_fraction(value) >= POPULAR_BASELINE_MULTIPLE * baseline
-    end
-
-    # Render the query string for normalize output. Prefers the cluster's
-    # observed type for each param (dominant type_count); falls back to the
-    # mechanical Normalizer.shape_query rules when no cluster signal exists.
-    # Date values always emit canonical ISO form regardless of source.
-    def render_query(iri)
-      hinted_shape = PathShape.new(classifier: @classifier, hints: true)
-                              .from_entries(SegmentHints.derive(iri.path_segments, @classifier))
-      key, * = Cluster.key_for(iri, classifier: @classifier, shape: hinted_shape,
-                               host: effective_host(iri.host))
-      cluster = @storage.cluster_for(key)
-
-      iri.query_params.keys.sort.map do |k|
-        v = iri.query_params[k].to_s
-        type = inferred_param_type(cluster, k, v)
-        shaped = render_param_value(v, type)
-        "#{k}=#{shaped}"
-      end.join("&")
     end
 
     def inferred_param_type(cluster, name, value)
