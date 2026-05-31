@@ -59,13 +59,18 @@ func (s *JSONStorage) loadFromFile(path string) error {
 // corpusDump is the JSON shape. Lower-cased struct is intentional — this is
 // purely an implementation detail of the JSON backend.
 type corpusDump struct {
-	HostCounts           map[string]int     `json:"host_counts"`
-	PathLengthCounts     map[string]int     `json:"path_length_counts"`
-	RawShapeCounts       map[string]int     `json:"raw_shape_counts"`
-	FingerprintCounts    map[string]int     `json:"fingerprint_counts"`
-	MaxValuesPerPosition int                `json:"max_values_per_position"`
+	HostCounts           map[string]int           `json:"host_counts"`
+	PathLengthCounts     map[string]int           `json:"path_length_counts"`
+	RawShapeCounts       map[string]int           `json:"raw_shape_counts"`
+	FingerprintCounts    map[string]int           `json:"fingerprint_counts"`
+	MaxValuesPerPosition int                      `json:"max_values_per_position"`
 	PositionStats        []positionStatsEntryDump `json:"position_stats"`
-	Clusterer            clustererDumpShape `json:"clusterer"`
+	Clusterer            clustererDumpShape       `json:"clusterer"`
+	// Source-IRI log. Phase-2 (re-runnable inference) needs the source
+	// IRIs persisted alongside the derived views; Corpus.Reinfer replays
+	// this list. Older JSON dumps (pre-Phase-2) omit the key — load_dump!
+	// treats missing as an empty log.
+	ObservedIRIs         []string                 `json:"observed_iris"`
 }
 
 type clustererDumpShape struct {
@@ -145,6 +150,10 @@ func dumpMemoryToJSON(m *MemoryStorage, path string) error {
 			ParamStats: params,
 		}
 	}
+	observed := m.observedIRIs
+	if observed == nil {
+		observed = []string{}
+	}
 	d := &corpusDump{
 		HostCounts:           m.hostCounts,
 		PathLengthCounts:     plc,
@@ -153,6 +162,7 @@ func dumpMemoryToJSON(m *MemoryStorage, path string) error {
 		MaxValuesPerPosition: m.maxValues,
 		PositionStats:        ps,
 		Clusterer:            clu,
+		ObservedIRIs:         observed,
 	}
 	data, err := json.Marshal(d)
 	if err != nil {
@@ -270,6 +280,13 @@ func loadMemoryFromJSON(m *MemoryStorage, data []byte) error {
 			m.clusters[key] = cluster
 			m.clusterKeys = append(m.clusterKeys, key)
 		}
+	}
+	if msg, ok := raw["observed_iris"]; ok {
+		var observed []string
+		if err := json.Unmarshal(msg, &observed); err != nil {
+			return err
+		}
+		m.observedIRIs = observed
 	}
 	return nil
 }

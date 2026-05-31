@@ -156,5 +156,12 @@
         "param_stats": {}
       }
     }
-  }
+  },
+  "observed_iris": [
+    "https://foo.com/users/1",
+    "https://foo.com/users/2",
+    "https://foo.com/users/3",
+    "https://foo.com/posts/abc-123",
+    "https://bar.com/x"
+  ]
 }

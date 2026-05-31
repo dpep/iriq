@@ -139,12 +139,47 @@ func (cp *Corpus) Observe(input interface{}) (*Observation, error) {
 				}
 			}
 		}
+		cp.storage.RecordObservation(iri.Canonical())
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &Observation{corpus: cp, Identifier: iri, Cluster: cluster}, nil
+}
+
+// Reinfer drops every materialized view (host counts, position stats,
+// clusters, …) and rebuilds them by replaying the source-IRI log
+// through the current events + reducers pipeline. Useful for:
+//
+//   - Tuning thresholds (swap a Corpus constant, call Reinfer)
+//   - Swapping the classifier (open the Corpus with a different
+//     classifier, call Reinfer — events are re-derived from raw IRIs)
+//   - Recovering after a Reducer-set change
+//
+// Wrapped in a single backend transaction so a mid-replay failure
+// leaves the prior views intact.
+func (cp *Corpus) Reinfer() error {
+	return cp.storage.Transaction(func() error {
+		var iris []string
+		cp.storage.EachObservedIRI(func(c string) { iris = append(iris, c) })
+		cp.storage.ClearMaterializedViews()
+		for _, canonical := range iris {
+			iri, err := Parse(canonical)
+			if err != nil {
+				return err
+			}
+			for _, e := range cp.eventsForIRI(iri) {
+				ApplyEvent(e, cp.storage)
+			}
+		}
+		return nil
+	})
+}
+
+// ObservedIRICount returns the size of the source-IRI log.
+func (cp *Corpus) ObservedIRICount() int {
+	return cp.storage.ObservedIRICount()
 }
 
 // EventsFor builds the ordered Event list for input without applying it.

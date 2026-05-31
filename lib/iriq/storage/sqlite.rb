@@ -11,7 +11,7 @@ module Iriq
     # the existing `iriq --corpus c.db <url>` pattern works without a flock
     # at the application layer.
     class Sqlite
-      SCHEMA_VERSION = 2
+      SCHEMA_VERSION = 3
 
       SCHEMA = <<~SQL.freeze
         CREATE TABLE IF NOT EXISTS meta (
@@ -102,6 +102,14 @@ module Iriq
           type        TEXT NOT NULL,
           count       INTEGER NOT NULL,
           PRIMARY KEY (cluster_key, name, type)
+        );
+        -- Source-IRI log. The materialized views above are derived from
+        -- this log via events + reducers. Corpus#reinfer drops the views
+        -- and replays the log to rebuild them. id is monotonic so
+        -- iteration order is observation order.
+        CREATE TABLE IF NOT EXISTS observed_iris (
+          id        INTEGER PRIMARY KEY AUTOINCREMENT,
+          canonical TEXT NOT NULL
         );
       SQL
 
@@ -316,6 +324,43 @@ module Iriq
         end
 
         load_cluster(key)
+      end
+
+      # Append a canonical IRI to the source-IRI log. Inside the same
+      # transaction as the event reducers, so the log and views stay
+      # consistent.
+      def record_observation(canonical)
+        @db.execute("INSERT INTO observed_iris (canonical) VALUES (?)", [canonical])
+      end
+
+      def each_observed_iri
+        @db.execute("SELECT canonical FROM observed_iris ORDER BY id") do |row|
+          yield row[0]
+        end
+      end
+
+      def observed_iri_count
+        @db.get_first_value("SELECT COUNT(*) FROM observed_iris") || 0
+      end
+
+      # Drop every materialized view without touching the source-IRI log.
+      # Corpus#reinfer calls this before replaying the log.
+      def clear_materialized_views
+        @db.execute_batch(<<~SQL)
+          DELETE FROM host_counts;
+          DELETE FROM path_length_counts;
+          DELETE FROM raw_shape_counts;
+          DELETE FROM fingerprint_counts;
+          DELETE FROM position_stats;
+          DELETE FROM position_values;
+          DELETE FROM position_types;
+          DELETE FROM clusters;
+          DELETE FROM cluster_examples;
+          DELETE FROM cluster_segments;
+          DELETE FROM cluster_params;
+          DELETE FROM cluster_param_values;
+          DELETE FROM cluster_param_types;
+        SQL
       end
 
       # --- Reads ------------------------------------------------------------

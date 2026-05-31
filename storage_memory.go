@@ -17,6 +17,10 @@ type MemoryStorage struct {
 
 	clusters    map[string]*Cluster
 	clusterKeys []string
+
+	// Source-IRI log. The materialized views above are derived from this
+	// log; Reinfer drops the views and replays the log.
+	observedIRIs []string
 }
 
 func NewMemoryStorage(maxValues int) *MemoryStorage {
@@ -114,6 +118,32 @@ func (s *MemoryStorage) Clusters() []*Cluster {
 }
 
 func (s *MemoryStorage) ClusterSize() int { return len(s.clusters) }
+
+func (s *MemoryStorage) RecordObservation(canonical string) {
+	s.observedIRIs = append(s.observedIRIs, canonical)
+}
+
+func (s *MemoryStorage) EachObservedIRI(fn func(canonical string)) {
+	for _, c := range s.observedIRIs {
+		fn(c)
+	}
+}
+
+func (s *MemoryStorage) ObservedIRICount() int { return len(s.observedIRIs) }
+
+// ClearMaterializedViews drops every derived view (host counts, position
+// stats, clusters, …) without touching the source-IRI log. Corpus.Reinfer
+// calls this before replaying the log to rebuild views from scratch.
+func (s *MemoryStorage) ClearMaterializedViews() {
+	s.hostCounts = map[string]int{}
+	s.pathLengthCounts = map[int]int{}
+	s.rawShapeCounts = map[string]int{}
+	s.fingerprintCounts = map[string]int{}
+	s.positionStats = map[Position]*PositionStats{}
+	s.positionKeys = nil
+	s.clusters = map[string]*Cluster{}
+	s.clusterKeys = nil
+}
 
 func (s *MemoryStorage) SaveTo(path string) error {
 	return dumpMemoryToJSON(s, path)

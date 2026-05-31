@@ -82,11 +82,13 @@ recognizers and re-runnable-inference-ready event emission.
 
 ## Phase 2 — Year 2: learning that compounds on the new substrate
 
-Each of these is a non-trivial multi-PR initiative; we'll plan them in
-detail after Phase 1 lands.
+Each of these is a non-trivial multi-PR initiative.
 
-- **Re-runnable inference** — CLI commands to re-infer over a stored corpus
-  without re-feeding source IRIs. Tune-and-export workflows.
+- ✅ **Re-runnable inference (library)** — source-IRI log persisted alongside
+  materialized views; `Corpus#reinfer` drops the views and replays the log
+  through events + reducers. Lets users tune thresholds or swap the
+  classifier without re-feeding IRIs. CLI exposure is a follow-up.
+  Shipped in v0.21.0.
 - **Inter-position correlations** — when slot A's value predicts slot B's
   type, surface that. Catches things like "the segment after `/orgs/{org_id}/`
   is almost always `users` or `repos`".

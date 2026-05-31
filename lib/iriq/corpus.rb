@@ -102,9 +102,41 @@ module Iriq
           result = Reducer.apply(e, s)
           cluster = result if e.is_a?(Event::ClusterAddition)
         end
+        s.record_observation(iri.canonical) if s.respond_to?(:record_observation)
       end
 
       Observation.new(corpus: self, identifier: iri, cluster: cluster)
+    end
+
+    # Drop every materialized view (host counts, position stats, clusters,
+    # …) and rebuild them by replaying the source-IRI log through the
+    # current events + reducers pipeline. Useful for:
+    #
+    #   - Tuning thresholds (swap a Corpus constant, call reinfer)
+    #   - Swapping the classifier (open the Corpus with a different
+    #     classifier, call reinfer — events are re-derived from raw IRIs)
+    #   - Recovering after a Reducer-set change
+    #
+    # Wrapped in a single backend transaction so a failure mid-replay
+    # leaves the prior views intact.
+    def reinfer
+      @storage.transaction do |s|
+        iris = []
+        s.each_observed_iri { |canonical| iris << canonical }
+        s.clear_materialized_views
+        iris.each do |canonical|
+          iri = Parser.parse(canonical)
+          events_for(iri).each { |e| Reducer.apply(e, s) }
+        end
+      end
+      nil
+    end
+
+    # Number of IRIs in the source-IRI log. The materialized views are
+    # derived from this log; reinfer replays it.
+    def observed_iri_count
+      return @storage.observed_iri_count if @storage.respond_to?(:observed_iri_count)
+      0
     end
 
     # Build the ordered Event list for `input` without applying it. Useful

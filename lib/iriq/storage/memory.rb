@@ -11,10 +11,13 @@ module Iriq
     #   increment_fingerprint(shape)
     #   observe_position(position, value, type)        # position is Iriq::Position
     #   add_to_cluster(key, host, scheme, shape, identifier)
+    #   record_observation(canonical)                  # append to source-IRI log
     #
     #   host_counts / path_length_counts / raw_shape_counts / fingerprint_counts
     #   position_stats(position)
     #   each_position_stats { |position, stats| ... }
+    #   each_observed_iri { |canonical| ... }
+    #   clear_materialized_views                       # for reinfer
     #   clusters / cluster_size
     #
     #   transaction { ... }    # backends may batch within
@@ -37,6 +40,10 @@ module Iriq
         @fingerprint_counts      = Hash.new(0)
         @position_stats          = {}
         @clusters                = {}
+        # The source-IRI log. Persisted alongside materialized views; the
+        # log is the source of truth, the views are derived. Corpus#reinfer
+        # drops the views and replays the log through events + reducers.
+        @observed_iris           = []
       end
 
       def transaction
@@ -85,6 +92,33 @@ module Iriq
         cluster
       end
 
+      # Append a canonical IRI to the source-IRI log. Called by Corpus#observe
+      # after the event reducers have applied; the log is the source of truth
+      # that Corpus#reinfer replays.
+      def record_observation(canonical)
+        @observed_iris << canonical
+      end
+
+      def each_observed_iri(&block)
+        @observed_iris.each(&block)
+      end
+
+      def observed_iri_count
+        @observed_iris.size
+      end
+
+      # Drop every materialized view (host_counts, position_stats, clusters,
+      # …) without touching the source-IRI log. Corpus#reinfer calls this
+      # before replaying the log so views rebuild from scratch.
+      def clear_materialized_views
+        @host_counts        = Hash.new(0)
+        @path_length_counts = Hash.new(0)
+        @raw_shape_counts   = Hash.new(0)
+        @fingerprint_counts = Hash.new(0)
+        @position_stats     = {}
+        @clusters           = {}
+      end
+
       # --- Reads ------------------------------------------------------------
 
       def host_counts;        @host_counts;        end
@@ -129,6 +163,7 @@ module Iriq
         end
         cdump = h.fetch("clusterer", { "clusters" => {} })
         @clusters = cdump["clusters"].transform_values { |c| Cluster.from_dump(c, max_values: @max_values_per_position) }
+        @observed_iris = h.fetch("observed_iris", [])
         self
       end
 
@@ -145,6 +180,7 @@ module Iriq
           "clusterer"               => {
             "clusters" => @clusters.transform_values(&:dump),
           },
+          "observed_iris"           => @observed_iris,
         }
       end
     end

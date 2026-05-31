@@ -32,6 +32,15 @@ type Storage interface {
 	ClusterFor(key string) *Cluster
 	ClusterSize() int
 
+	// Source-IRI log. The materialized views above are derived from this
+	// log; Corpus.Reinfer drops the views and replays the log to rebuild
+	// them. RecordObservation appends; EachObservedIRI iterates;
+	// ClearMaterializedViews drops the views without touching the log.
+	RecordObservation(canonical string)
+	EachObservedIRI(func(canonical string))
+	ObservedIRICount() int
+	ClearMaterializedViews()
+
 	// Lifecycle.
 	MaxValues() int
 	Transaction(func() error) error

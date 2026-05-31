@@ -14,7 +14,7 @@ import (
 // Compiled-in when `-tags sqlite` is set.
 const HasSqlite = true
 
-const sqliteSchemaVersion = 2
+const sqliteSchemaVersion = 3
 
 const sqliteSchema = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -105,6 +105,14 @@ CREATE TABLE IF NOT EXISTS cluster_param_types (
   type        TEXT NOT NULL,
   count       INTEGER NOT NULL,
   PRIMARY KEY (cluster_key, name, type)
+);
+-- Source-IRI log. The materialized views above are derived from this log
+-- via events + reducers. Corpus.Reinfer drops the views and replays the
+-- log to rebuild them. id is monotonic so iteration order is observation
+-- order.
+CREATE TABLE IF NOT EXISTS observed_iris (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  canonical TEXT NOT NULL
 );
 `
 
@@ -343,6 +351,56 @@ func (s *SqliteStorage) ObservePosition(pos Position, value string, t SegmentTyp
 				host, scope, locator, value,
 			)
 		}
+	}
+}
+
+// RecordObservation appends a canonical IRI to the source log. Called by
+// Corpus.Observe inside the same transaction as the event reducers, so the
+// log and views stay consistent.
+func (s *SqliteStorage) RecordObservation(canonical string) {
+	_, _ = s.ex().Exec("INSERT INTO observed_iris (canonical) VALUES (?)", canonical)
+}
+
+func (s *SqliteStorage) EachObservedIRI(fn func(canonical string)) {
+	rows, err := s.ex().Query("SELECT canonical FROM observed_iris ORDER BY id")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err == nil {
+			fn(c)
+		}
+	}
+}
+
+func (s *SqliteStorage) ObservedIRICount() int {
+	var n int
+	_ = s.ex().QueryRow("SELECT COUNT(*) FROM observed_iris").Scan(&n)
+	return n
+}
+
+// ClearMaterializedViews drops every derived view without touching the
+// source-IRI log. Corpus.Reinfer calls this before replaying the log.
+func (s *SqliteStorage) ClearMaterializedViews() {
+	stmts := []string{
+		"DELETE FROM host_counts",
+		"DELETE FROM path_length_counts",
+		"DELETE FROM raw_shape_counts",
+		"DELETE FROM fingerprint_counts",
+		"DELETE FROM position_stats",
+		"DELETE FROM position_values",
+		"DELETE FROM position_types",
+		"DELETE FROM clusters",
+		"DELETE FROM cluster_examples",
+		"DELETE FROM cluster_segments",
+		"DELETE FROM cluster_params",
+		"DELETE FROM cluster_param_values",
+		"DELETE FROM cluster_param_types",
+	}
+	for _, q := range stmts {
+		_, _ = s.ex().Exec(q)
 	}
 }
 
