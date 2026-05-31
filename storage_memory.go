@@ -21,6 +21,11 @@ type MemoryStorage struct {
 	// Source-IRI log. The materialized views above are derived from this
 	// log; Reinfer drops the views and replays the log.
 	observedIRIs []string
+
+	// Recognizers promoted from RecognizerProposal via
+	// Corpus.ActivateProposal. Reopens re-apply them onto the corpus's
+	// classifier so a stored corpus retains its learned patterns.
+	activatedRecognizers []map[string]any
 }
 
 func NewMemoryStorage(maxValues int) *MemoryStorage {
@@ -130,6 +135,28 @@ func (s *MemoryStorage) EachObservedIRI(fn func(canonical string)) {
 }
 
 func (s *MemoryStorage) ObservedIRICount() int { return len(s.observedIRIs) }
+
+func (s *MemoryStorage) RecordActivatedRecognizer(dump map[string]any) {
+	prefix, _ := dump["prefix"].(string)
+	// De-dupe by prefix so activating the same proposal twice is a no-op.
+	for i, existing := range s.activatedRecognizers {
+		if p, _ := existing["prefix"].(string); p == prefix {
+			s.activatedRecognizers[i] = dump
+			return
+		}
+	}
+	s.activatedRecognizers = append(s.activatedRecognizers, dump)
+}
+
+func (s *MemoryStorage) EachActivatedRecognizer(fn func(dump map[string]any)) {
+	for _, d := range s.activatedRecognizers {
+		fn(d)
+	}
+}
+
+func (s *MemoryStorage) ActivatedRecognizerCount() int {
+	return len(s.activatedRecognizers)
+}
 
 // ClearMaterializedViews drops every derived view (host counts, position
 // stats, clusters, …) without touching the source-IRI log. Corpus.Reinfer

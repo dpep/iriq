@@ -232,6 +232,38 @@ completion_pair() {
 completion_pair "bash"
 completion_pair "zsh"
 
+# Auto-activation parity. After observing the same PAT-shaped stream and
+# activating the proposal in both runtimes, classify("ghp_xyz") should
+# return :ghp in both — verify via --stats post-reinfer and reinfer
+# output. We use --activate-above to drive the activation through the
+# CLI and assert the output lines match.
+activate_pair() {
+  local label="$1" ext="$2"
+  local ruby_path="$corpus_dir/ruby-act$ext"
+  local go_path="$corpus_dir/go-act$ext"
+  rm -f "$ruby_path" "$go_path"
+  local pat_stream=""
+  for i in $(seq 1 25); do
+    pat_stream+="https://api.github.com/auth/ghp_aaaa$(printf '%04d' "$i")xyzzy"$'\n'
+  done
+  echo -n "$pat_stream" | (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path") > /dev/null
+  echo -n "$pat_stream" | "$GO_BIN" --corpus "$go_path" > /dev/null
+  local ruby_out go_out
+  ruby_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" --propose-recognizers --activate-above 0.9 < /dev/null) )
+  go_out=$(   "$GO_BIN" --corpus "$go_path" --propose-recognizers --activate-above 0.9 < /dev/null )
+  if [[ "$ruby_out" == "$go_out" ]]; then
+    pass_count=$((pass_count + 1))
+  else
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH: activate-above $label"
+    diff <(echo "$ruby_out") <(echo "$go_out") | sed 's/^/    /'
+  fi
+}
+
+activate_pair "JSON storage"   ".json"
+activate_pair "SQLite storage" ".db"
+
 # --host=reg should cluster subdomain-heavy hosts under their registrable apex.
 host_strategy_pair() {
   local label="$1"

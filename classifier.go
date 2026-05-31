@@ -354,15 +354,46 @@ const (
 	classifierCacheMax = 10_000
 )
 
-// SegmentClassifier is a heuristic classifier for individual path segments and
-// query values. Returns the first matching type — order matters.
+// SegmentClassifier is a heuristic classifier for individual path segments
+// and query values. Returns the first matching type — order matters.
+//
+// The recognizer ensemble consulted at classify time is held on the
+// instance (recognizers field). Defaults to the built-in three (uuid,
+// date, integer); Corpus.ActivateProposal appends SynthesizedRecognizer
+// instances at runtime so a corpus picks up its learned patterns
+// without classifier surgery.
 type SegmentClassifier struct {
-	mu    sync.Mutex
-	cache map[string]SegmentType
+	mu          sync.Mutex
+	cache       map[string]SegmentType
+	recognizers []Recognizer
 }
 
 func NewSegmentClassifier() *SegmentClassifier {
-	return &SegmentClassifier{cache: map[string]SegmentType{}}
+	return &SegmentClassifier{
+		cache:       map[string]SegmentType{},
+		recognizers: []Recognizer{UUIDRecognizer, DateRecognizer, IntegerRecognizer},
+	}
+}
+
+// RegisterRecognizer appends a Recognizer to the ensemble. Called by
+// Corpus.ActivateProposal to promote a RecognizerProposal into a live
+// Recognizer. Busts the classify cache so subsequent Classify() calls
+// see the new Recognizer.
+func (c *SegmentClassifier) RegisterRecognizer(r Recognizer) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.recognizers = append(c.recognizers, r)
+	c.cache = map[string]SegmentType{}
+}
+
+// Recognizers returns a snapshot of the live ensemble. Useful for tests
+// and tooling that want to inspect which Recognizers a corpus consults.
+func (c *SegmentClassifier) Recognizers() []Recognizer {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]Recognizer, len(c.recognizers))
+	copy(out, c.recognizers)
+	return out
 }
 
 // DefaultClassifier mirrors Ruby's SegmentClassifier::DEFAULT — a shared,
@@ -383,7 +414,10 @@ func (c *SegmentClassifier) Classify(segment string) SegmentType {
 	}
 	c.mu.Unlock()
 
-	t := computeClassification(segment)
+	c.mu.Lock()
+	rs := c.recognizers
+	c.mu.Unlock()
+	t := computeClassification(segment, rs)
 
 	c.mu.Lock()
 	c.cache[segment] = t
@@ -397,7 +431,7 @@ func (c *SegmentClassifier) Variable(t SegmentType) bool {
 	return t != TypeLiteral
 }
 
-func computeClassification(segment string) SegmentType {
+func computeClassification(segment string, recognizers []Recognizer) SegmentType {
 	// Cheap composition checks short-circuit regex matches that can't
 	// possibly fire. Each `xRE.MatchString` below is preceded by an
 	// `IndexByte` / `size` guard so a literal like "users" walks past
@@ -424,7 +458,7 @@ func computeClassification(segment string) SegmentType {
 	// shape, so the ensemble's max-specificity tie-break never actually
 	// fires — but the seam is in place for follow-up commits that carve
 	// more Recognizers out and let scoring decide.
-	if v, ok := Ensemble(segment, UUIDRecognizer, DateRecognizer, IntegerRecognizer); ok {
+	if v, ok := Ensemble(segment, recognizers...); ok {
 		return v.Type
 	}
 

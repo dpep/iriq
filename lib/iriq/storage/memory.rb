@@ -44,6 +44,11 @@ module Iriq
         # log is the source of truth, the views are derived. Corpus#reinfer
         # drops the views and replays the log through events + reducers.
         @observed_iris           = []
+        # Recognizers promoted from RecognizerProposal via
+        # Corpus#activate_proposal. Stored as {prefix, type, specificity}
+        # hashes so reopens can re-synthesize them onto the corpus's
+        # classifier.
+        @activated_recognizers   = []
       end
 
       def transaction
@@ -107,6 +112,20 @@ module Iriq
         @observed_iris.size
       end
 
+      # --- Activated recognizers (Corpus#activate_proposal) -----------------
+
+      def record_activated_recognizer(dump)
+        @activated_recognizers << dump
+      end
+
+      def each_activated_recognizer(&block)
+        @activated_recognizers.each(&block)
+      end
+
+      def activated_recognizer_count
+        @activated_recognizers.size
+      end
+
       # Drop every materialized view (host_counts, position_stats, clusters,
       # …) without touching the source-IRI log. Corpus#reinfer calls this
       # before replaying the log so views rebuild from scratch.
@@ -163,7 +182,8 @@ module Iriq
         end
         cdump = h.fetch("clusterer", { "clusters" => {} })
         @clusters = cdump["clusters"].transform_values { |c| Cluster.from_dump(c, max_values: @max_values_per_position) }
-        @observed_iris = h.fetch("observed_iris", [])
+        @observed_iris         = h.fetch("observed_iris", [])
+        @activated_recognizers = h.fetch("activated_recognizers", [])
         self
       end
 
@@ -181,6 +201,7 @@ module Iriq
             "clusters" => @clusters.transform_values(&:dump),
           },
           "observed_iris"           => @observed_iris,
+          "activated_recognizers"   => @activated_recognizers,
         }
       end
     end

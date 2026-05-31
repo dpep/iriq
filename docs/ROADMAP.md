@@ -94,14 +94,21 @@ Each of these is a non-trivial multi-PR initiative.
 - **Inter-position correlations** — when slot A's value predicts slot B's
   type, surface that. Catches things like "the segment after `/orgs/{org_id}/`
   is almost always `users` or `repos`".
-- 🟡 **Learned recognizers** — `Corpus#propose_recognizers` scans observed
-  values via pluggable ProposalStrategy strategies. v1 ships the
-  PrefixUnderscoreId strategy (detects `ghp_…`, `cus_…`, `sk_…`
-  shape proposals at slug/opaque_id positions). Proposals carry
-  prefix / suggested_type / positions / hosts / coverage /
-  observation_count / sample_values — human reviewer decides whether
-  to bake the Recognizer in. Auto-activation + CLI flag deferred.
-  Shipped in v0.23.0.
+- ✅ **Learned recognizers** — full loop:
+    * `Corpus#propose_recognizers` scans observed values via pluggable
+      ProposalStrategy strategies (v0.23.0). v1 ships PrefixUnderscoreId
+      (detects `ghp_…`, `cus_…`, `sk_…` shapes at slug/opaque_id
+      positions).
+    * `iriq --corpus PATH --propose-recognizers [--json]` CLI flag with
+      tunable `--min-observations` / `--min-coverage` / `--min-hosts`
+      thresholds (v0.24.0).
+    * `Corpus#activate_proposal(p)` promotes a proposal into a live
+      SynthesizedRecognizer on the corpus's classifier, persists it,
+      and reinfers. Reopens re-apply via `Corpus.open`. Doesn't leak
+      to the module-level DEFAULT classifier — corpora are isolated
+      (v0.26.0).
+    * `iriq --corpus PATH --propose-recognizers --activate-above F`
+      auto-activates every proposal at or above coverage F (v0.26.0).
 - **Cross-host learning** — same Shape across many hosts is strong evidence
   of semantic identity.
 - **Near-shape clustering** — edit-distance over Shapes catches

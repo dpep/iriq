@@ -44,7 +44,7 @@ module Iriq
 
     HOST_STRATEGIES = %i[full registrable none].freeze
 
-    attr_reader :storage, :host_strategy
+    attr_reader :storage, :host_strategy, :classifier
 
     def initialize(classifier: SegmentClassifier::DEFAULT,
                    max_values_per_position: PositionStats::DEFAULT_MAX_VALUES,
@@ -70,7 +70,9 @@ module Iriq
       storage = Storage.open(path,
                              classifier: classifier,
                              max_values_per_position: max_values_per_position)
-      new(classifier: classifier, storage: storage, host_strategy: host_strategy)
+      corpus = new(classifier: classifier, storage: storage, host_strategy: host_strategy)
+      corpus.send(:reapply_activated_recognizers!) if storage.respond_to?(:each_activated_recognizer)
+      corpus
     end
 
     # Normalize the host for keying purposes. `:full` keeps the original
@@ -150,6 +152,44 @@ module Iriq
     # what passes the noise floor.
     def propose_recognizers(strategies: ProposalStrategy::DEFAULTS, **opts)
       strategies.flat_map { |s| s.propose(@storage, **opts) }
+    end
+
+    # Promote a RecognizerProposal into a live Recognizer for this corpus.
+    #
+    # Mechanics:
+    #   1. Synthesize a SynthesizedRecognizer from the proposal's prefix.
+    #   2. Switch to a per-corpus classifier (if we were sharing the
+    #      module-level DEFAULT) so activation doesn't leak to other
+    #      corpora using the same default singleton.
+    #   3. Register the Recognizer on the classifier — the ensemble
+    #      picks it up on the next classify() call.
+    #   4. Persist the activation in storage so reopens re-apply it.
+    #   5. Reinfer so existing observations get re-classified through
+    #      the new Recognizer.
+    #
+    # Returns the synthesized Recognizer.
+    def activate_proposal(proposal)
+      recognizer = SynthesizedRecognizer.from_proposal(proposal)
+      ensure_per_corpus_classifier!
+      @classifier.register_recognizer(recognizer)
+      if @storage.respond_to?(:record_activated_recognizer)
+        @storage.record_activated_recognizer(recognizer.to_dump)
+      end
+      reinfer
+      recognizer
+    end
+
+    # Convenience: activate every proposal whose coverage clears the
+    # given threshold. Returns the activated Recognizers.
+    def activate_proposals_above(coverage_threshold, **propose_opts)
+      proposals = propose_recognizers(**propose_opts)
+      proposals.select { |p| p.coverage >= coverage_threshold }.map { |p| activate_proposal(p) }
+    end
+
+    # Number of activated recognizers persisted with this corpus.
+    def activated_recognizer_count
+      return @storage.activated_recognizer_count if @storage.respond_to?(:activated_recognizer_count)
+      0
     end
 
     # Build the ordered Event list for `input` without applying it. Useful
@@ -304,6 +344,27 @@ module Iriq
     end
 
     private
+
+    # If we're still sharing the module-level DEFAULT classifier, switch
+    # to our own copy so register_recognizer doesn't leak into other
+    # corpora using the same default singleton.
+    def ensure_per_corpus_classifier!
+      return if @classifier != SegmentClassifier::DEFAULT
+
+      @classifier = SegmentClassifier.new
+    end
+
+    # On Corpus.open, walk the stored activations and register each one
+    # on this corpus's classifier. Switches to a per-corpus classifier
+    # if any activations exist.
+    def reapply_activated_recognizers!
+      return if @storage.activated_recognizer_count.zero?
+
+      ensure_per_corpus_classifier!
+      @storage.each_activated_recognizer do |dump|
+        @classifier.register_recognizer(SynthesizedRecognizer.from_dump(dump))
+      end
+    end
 
     def coerce(input)
       input.is_a?(Identifier) ? input : Parser.parse(input)

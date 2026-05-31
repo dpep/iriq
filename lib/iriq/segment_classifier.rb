@@ -203,6 +203,11 @@ module Iriq
 
     def initialize
       @cache = {}
+      # The recognizer ensemble consulted at classify time. Starts with
+      # the built-in three (uuid, date, integer); Corpus#activate_proposal
+      # appends SynthesizedRecognizer instances at runtime so a corpus
+      # picks up its learned patterns without classifier surgery.
+      @recognizers = [Recognizers::UUID, Recognizers::DATE, Recognizers::INTEGER]
     end
 
     def classify(segment)
@@ -213,6 +218,22 @@ module Iriq
 
       @cache.clear if @cache.size >= CACHE_MAX
       @cache[segment] = compute_classification(segment)
+    end
+
+    # Append a Recognizer to the ensemble. Called by Corpus#activate_proposal
+    # to promote a learned RecognizerProposal into a live Recognizer.
+    # Busts the classify cache so subsequent classify() calls see the
+    # new Recognizer.
+    def register_recognizer(recognizer)
+      @recognizers << recognizer
+      @cache.clear
+      recognizer
+    end
+
+    # Snapshot of the live ensemble. Useful for tests and tooling that
+    # want to inspect which Recognizers a corpus is consulting.
+    def recognizers
+      @recognizers.dup
     end
 
     # Anything except :literal is considered variable for shape/explain.
@@ -238,12 +259,10 @@ module Iriq
       has_sep   = has_dash || segment.include?("_")
       has_comma = segment.include?(",")
 
-      # Scored ensemble over the extracted Recognizers. Today only three
-      # participate (uuid, date, integer) and they're mutually-exclusive
-      # on shape, so the ensemble's max-specificity tie-break never
-      # actually fires — but the seam is in place for follow-up commits
-      # that carve more Recognizers out and let scoring decide.
-      if (v = Recognizer.ensemble(segment, Recognizers::UUID, Recognizers::DATE, Recognizers::INTEGER))
+      # Scored ensemble over the live Recognizer list — built-ins +
+      # anything Corpus#activate_proposal has registered for this
+      # classifier instance.
+      if (v = Recognizer.ensemble(segment, *@recognizers))
         return v[:type]
       end
 

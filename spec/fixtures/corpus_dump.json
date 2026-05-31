@@ -163,5 +163,6 @@
     "https://foo.com/users/3",
     "https://foo.com/posts/abc-123",
     "https://bar.com/x"
-  ]
+  ],
+  "activated_recognizers": []
 }

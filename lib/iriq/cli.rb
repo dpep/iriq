@@ -49,6 +49,9 @@ module Iriq
             --min-observations N  (proposal threshold; default 20)
             --min-coverage F  (proposal threshold; default 0.7)
             --min-hosts N     (proposal threshold; default 1)
+            --activate-above F  Promote every proposal at or above
+                              coverage F into a live Recognizer on the
+                              corpus, then reinfer.
 
       Other:
         -h, --help            Show this message
@@ -153,6 +156,7 @@ module Iriq
         propose_min_obs:      nil,
         propose_min_coverage: nil,
         propose_min_hosts:    nil,
+        activate_above:       nil,
         scheme_less:   true,
         host_strategy: :full,
       }
@@ -172,6 +176,7 @@ module Iriq
         o.on("--min-observations N", Integer) { |v| opts[:propose_min_obs]      = v }
         o.on("--min-coverage F", Float)       { |v| opts[:propose_min_coverage] = v }
         o.on("--min-hosts N", Integer)        { |v| opts[:propose_min_hosts]    = v }
+        o.on("--activate-above F", Float)     { |v| opts[:activate_above]       = v }
         o.on("--[no-]scheme-less")   { |v| opts[:scheme_less] = v }
         o.on("-h", "--help")         { opts[:help]    = true }
         o.on("-V", "--version")      { opts[:version] = true }
@@ -335,7 +340,11 @@ module Iriq
 
     # --propose-recognizers: scan observed values for prefix patterns
     # that recur enough to suggest a new Recognizer. Prints one block
-    # per proposal in human mode, or a JSON array under --json.
+    # per proposal in human mode, or a JSON array under --json. With
+    # --activate-above F, every proposal at or above coverage F is
+    # promoted to a live Recognizer on the corpus's classifier and the
+    # corpus reinfers to apply the new classifier to existing
+    # observations.
     def cmd_propose(corpus, opts)
       return missing("--corpus") unless corpus
 
@@ -343,6 +352,18 @@ module Iriq
       kwargs[:min_observations] = opts[:propose_min_obs]      if opts[:propose_min_obs]
       kwargs[:min_coverage]     = opts[:propose_min_coverage] if opts[:propose_min_coverage]
       kwargs[:min_hosts]        = opts[:propose_min_hosts]    if opts[:propose_min_hosts]
+
+      if opts[:activate_above]
+        activated = corpus.activate_proposals_above(opts[:activate_above], **kwargs)
+        if activated.empty?
+          stdout.puts "no proposals at or above coverage #{opts[:activate_above]}"
+        else
+          activated.each do |r|
+            stdout.puts "activated: #{r.type} (#{r.prefix})"
+          end
+        end
+        return 0
+      end
 
       proposals = corpus.propose_recognizers(**kwargs)
 

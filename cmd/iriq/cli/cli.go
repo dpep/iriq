@@ -51,6 +51,9 @@ Corpus + stats:
       --min-observations N  (proposal threshold; default 20)
       --min-coverage F  (proposal threshold; default 0.7)
       --min-hosts N     (proposal threshold; default 1)
+      --activate-above F  Promote every proposal at or above coverage F
+                        into a live Recognizer on the corpus, then
+                        reinfer.
 
 Other:
   -h, --help            Show this message
@@ -103,6 +106,7 @@ type options struct {
 	proposeMinObs      int
 	proposeMinCoverage float64
 	proposeMinHosts    int
+	activateAbove      float64 // 0 means disabled
 	schemeLess   bool
 	hostStrategy iriq.HostStrategy
 }
@@ -298,6 +302,16 @@ func parseOptions(argv []string) ([]string, *options, error) {
 			}
 			opts.proposeMinHosts = n
 			i++
+		case a == "--activate-above":
+			if i+1 >= len(argv) {
+				return nil, nil, fmt.Errorf("missing argument: --activate-above F")
+			}
+			f, err := strconv.ParseFloat(argv[i+1], 64)
+			if err != nil {
+				return nil, nil, fmt.Errorf("--activate-above F: %w", err)
+			}
+			opts.activateAbove = f
+			i++
 		case a == "--hints":
 			opts.hints = true
 		case a == "--no-hints" || a == "-N":
@@ -471,11 +485,29 @@ func cmdPropose(stdout, stderr io.Writer, corpus *iriq.Corpus, opts *options) in
 		return 1
 	}
 
-	proposals := corpus.ProposeRecognizers(nil, iriq.ProposalOptions{
+	popts := iriq.ProposalOptions{
 		MinObservations: opts.proposeMinObs,
 		MinCoverage:     opts.proposeMinCoverage,
 		MinHosts:        opts.proposeMinHosts,
-	})
+	}
+
+	if opts.activateAbove > 0 {
+		activated, err := corpus.ActivateProposalsAbove(opts.activateAbove, popts)
+		if err != nil {
+			fmt.Fprintf(stderr, "iriq: %s\n", err)
+			return 1
+		}
+		if len(activated) == 0 {
+			fmt.Fprintf(stdout, "no proposals at or above coverage %g\n", opts.activateAbove)
+			return 0
+		}
+		for _, r := range activated {
+			fmt.Fprintf(stdout, "activated: %s (%s)\n", r.Type, r.Prefix)
+		}
+		return 0
+	}
+
+	proposals := corpus.ProposeRecognizers(nil, popts)
 
 	if opts.json {
 		// Match Ruby's RecognizerProposal#to_h field order + numeric

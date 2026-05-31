@@ -11,7 +11,7 @@ module Iriq
     # the existing `iriq --corpus c.db <url>` pattern works without a flock
     # at the application layer.
     class Sqlite
-      SCHEMA_VERSION = 3
+      SCHEMA_VERSION = 4
 
       SCHEMA = <<~SQL.freeze
         CREATE TABLE IF NOT EXISTS meta (
@@ -110,6 +110,16 @@ module Iriq
         CREATE TABLE IF NOT EXISTS observed_iris (
           id        INTEGER PRIMARY KEY AUTOINCREMENT,
           canonical TEXT NOT NULL
+        );
+        -- Recognizers promoted from RecognizerProposal via
+        -- Corpus#activate_proposal. Re-applied to the corpus's
+        -- classifier on Corpus.open so a reopen picks up its learned
+        -- patterns. Keyed by prefix; activating the same prefix twice
+        -- is a no-op.
+        CREATE TABLE IF NOT EXISTS activated_recognizers (
+          prefix      TEXT PRIMARY KEY,
+          type        TEXT NOT NULL,
+          specificity REAL NOT NULL DEFAULT 1.0
         );
       SQL
 
@@ -341,6 +351,25 @@ module Iriq
 
       def observed_iri_count
         @db.get_first_value("SELECT COUNT(*) FROM observed_iris") || 0
+      end
+
+      # --- Activated recognizers --------------------------------------------
+
+      def record_activated_recognizer(dump)
+        @db.execute(<<~SQL, [dump["prefix"], dump["type"], dump.fetch("specificity", 1.0)])
+          INSERT INTO activated_recognizers (prefix, type, specificity) VALUES (?, ?, ?)
+          ON CONFLICT(prefix) DO UPDATE SET type = excluded.type, specificity = excluded.specificity
+        SQL
+      end
+
+      def each_activated_recognizer
+        @db.execute("SELECT prefix, type, specificity FROM activated_recognizers ORDER BY prefix") do |row|
+          yield({ "prefix" => row[0], "type" => row[1], "specificity" => row[2] })
+        end
+      end
+
+      def activated_recognizer_count
+        @db.get_first_value("SELECT COUNT(*) FROM activated_recognizers") || 0
       end
 
       # Drop every materialized view without touching the source-IRI log.

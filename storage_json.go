@@ -71,6 +71,10 @@ type corpusDump struct {
 	// this list. Older JSON dumps (pre-Phase-2) omit the key — load_dump!
 	// treats missing as an empty log.
 	ObservedIRIs         []string                 `json:"observed_iris"`
+	// Recognizers promoted from RecognizerProposal via
+	// Corpus.ActivateProposal. Stored as {prefix, type, specificity}
+	// hashes; reopens re-synthesize them onto the corpus's classifier.
+	ActivatedRecognizers []map[string]any         `json:"activated_recognizers"`
 }
 
 type clustererDumpShape struct {
@@ -154,6 +158,10 @@ func dumpMemoryToJSON(m *MemoryStorage, path string) error {
 	if observed == nil {
 		observed = []string{}
 	}
+	activated := m.activatedRecognizers
+	if activated == nil {
+		activated = []map[string]any{}
+	}
 	d := &corpusDump{
 		HostCounts:           m.hostCounts,
 		PathLengthCounts:     plc,
@@ -163,6 +171,7 @@ func dumpMemoryToJSON(m *MemoryStorage, path string) error {
 		PositionStats:        ps,
 		Clusterer:            clu,
 		ObservedIRIs:         observed,
+		ActivatedRecognizers: activated,
 	}
 	data, err := json.Marshal(d)
 	if err != nil {
@@ -287,6 +296,13 @@ func loadMemoryFromJSON(m *MemoryStorage, data []byte) error {
 			return err
 		}
 		m.observedIRIs = observed
+	}
+	if msg, ok := raw["activated_recognizers"]; ok {
+		var activated []map[string]any
+		if err := json.Unmarshal(msg, &activated); err != nil {
+			return err
+		}
+		m.activatedRecognizers = activated
 	}
 	return nil
 }

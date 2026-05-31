@@ -109,7 +109,9 @@ func OpenCorpus(path string) (*Corpus, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewCorpusWithStorage(DefaultClassifier, s), nil
+	cp := NewCorpusWithStorage(DefaultClassifier, s)
+	cp.reapplyActivatedRecognizers()
+	return cp, nil
 }
 
 // Storage exposes the underlying backend.
@@ -191,6 +193,81 @@ func (cp *Corpus) ObservedIRICount() int {
 // Strategies are pluggable; the default set lives in
 // DefaultProposalStrategies. Pass strategies = nil for the default;
 // pass an empty slice to disable all detection (useful for tests).
+// ActivateProposal promotes a RecognizerProposal into a live Recognizer
+// for this corpus.
+//
+// Mechanics:
+//   1. Synthesize a *SynthesizedRecognizer from the proposal's prefix.
+//   2. Switch to a per-corpus classifier if we were sharing the global
+//      DefaultClassifier — keeps the activation from leaking to other
+//      corpora using the same singleton.
+//   3. Register the Recognizer on the classifier so the ensemble picks
+//      it up on the next Classify call.
+//   4. Persist the activation in storage so reopens re-apply it.
+//   5. Reinfer so existing observations get re-classified through the
+//      new Recognizer.
+//
+// Returns the synthesized Recognizer.
+func (cp *Corpus) ActivateProposal(p RecognizerProposal) (*SynthesizedRecognizer, error) {
+	r := SynthesizedRecognizerFromProposal(p)
+	cp.ensurePerCorpusClassifier()
+	cp.Classifier.RegisterRecognizer(r)
+	cp.storage.RecordActivatedRecognizer(r.Dump())
+	if err := cp.Reinfer(); err != nil {
+		return r, err
+	}
+	return r, nil
+}
+
+// ActivateProposalsAbove activates every proposal whose coverage clears
+// the threshold. Convenience for `iriq --propose-recognizers --activate-above`.
+func (cp *Corpus) ActivateProposalsAbove(coverageThreshold float64, opts ProposalOptions) ([]*SynthesizedRecognizer, error) {
+	proposals := cp.ProposeRecognizers(nil, opts)
+	var activated []*SynthesizedRecognizer
+	for _, p := range proposals {
+		if p.Coverage < coverageThreshold {
+			continue
+		}
+		r, err := cp.ActivateProposal(p)
+		if err != nil {
+			return activated, err
+		}
+		activated = append(activated, r)
+	}
+	return activated, nil
+}
+
+// ActivatedRecognizerCount returns the number of persisted activations.
+func (cp *Corpus) ActivatedRecognizerCount() int {
+	return cp.storage.ActivatedRecognizerCount()
+}
+
+// ensurePerCorpusClassifier swaps cp.Classifier off the global default
+// the first time we need to mutate it. Without this, activating a
+// proposal would register the new Recognizer on DefaultClassifier and
+// leak it to every other corpus sharing that singleton.
+func (cp *Corpus) ensurePerCorpusClassifier() {
+	if cp.Classifier != DefaultClassifier {
+		return
+	}
+	cp.Classifier = NewSegmentClassifier()
+}
+
+// reapplyActivatedRecognizers reads stored activations from storage and
+// registers each one on the corpus's classifier. Called from OpenCorpus
+// so a reopened corpus retains its learned patterns.
+func (cp *Corpus) reapplyActivatedRecognizers() {
+	if cp.storage.ActivatedRecognizerCount() == 0 {
+		return
+	}
+	cp.ensurePerCorpusClassifier()
+	cp.storage.EachActivatedRecognizer(func(dump map[string]any) {
+		if r, err := SynthesizedRecognizerFromDump(dump); err == nil {
+			cp.Classifier.RegisterRecognizer(r)
+		}
+	})
+}
+
 func (cp *Corpus) ProposeRecognizers(strategies []ProposalStrategy, opts ProposalOptions) []RecognizerProposal {
 	if strategies == nil {
 		strategies = DefaultProposalStrategies

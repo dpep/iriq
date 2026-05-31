@@ -41,6 +41,13 @@ type Storage interface {
 	ObservedIRICount() int
 	ClearMaterializedViews()
 
+	// Recognizers promoted from RecognizerProposal via
+	// Corpus.ActivateProposal. Re-applied to the corpus's classifier
+	// on OpenCorpus so a reopen picks up its learned patterns.
+	RecordActivatedRecognizer(dump map[string]any)
+	EachActivatedRecognizer(func(dump map[string]any))
+	ActivatedRecognizerCount() int
+
 	// Lifecycle.
 	MaxValues() int
 	Transaction(func() error) error

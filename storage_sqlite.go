@@ -14,7 +14,7 @@ import (
 // Compiled-in when `-tags sqlite` is set.
 const HasSqlite = true
 
-const sqliteSchemaVersion = 3
+const sqliteSchemaVersion = 4
 
 const sqliteSchema = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -113,6 +113,15 @@ CREATE TABLE IF NOT EXISTS cluster_param_types (
 CREATE TABLE IF NOT EXISTS observed_iris (
   id        INTEGER PRIMARY KEY AUTOINCREMENT,
   canonical TEXT NOT NULL
+);
+-- Recognizers promoted from RecognizerProposal via Corpus.ActivateProposal.
+-- Re-applied to the corpus's classifier on OpenCorpus so a reopen picks
+-- up its learned patterns. Keyed by prefix so activating the same prefix
+-- twice is a no-op (the type/specificity get refreshed).
+CREATE TABLE IF NOT EXISTS activated_recognizers (
+  prefix      TEXT PRIMARY KEY,
+  type        TEXT NOT NULL,
+  specificity REAL NOT NULL DEFAULT 1.0
 );
 `
 
@@ -378,6 +387,40 @@ func (s *SqliteStorage) EachObservedIRI(fn func(canonical string)) {
 func (s *SqliteStorage) ObservedIRICount() int {
 	var n int
 	_ = s.ex().QueryRow("SELECT COUNT(*) FROM observed_iris").Scan(&n)
+	return n
+}
+
+func (s *SqliteStorage) RecordActivatedRecognizer(dump map[string]any) {
+	prefix, _ := dump["prefix"].(string)
+	typeStr, _ := dump["type"].(string)
+	spec, _ := dump["specificity"].(float64)
+	if spec == 0 {
+		spec = 1.0
+	}
+	_, _ = s.ex().Exec(`
+		INSERT INTO activated_recognizers (prefix, type, specificity) VALUES (?, ?, ?)
+		ON CONFLICT(prefix) DO UPDATE SET type = excluded.type, specificity = excluded.specificity
+	`, prefix, typeStr, spec)
+}
+
+func (s *SqliteStorage) EachActivatedRecognizer(fn func(dump map[string]any)) {
+	rows, err := s.ex().Query("SELECT prefix, type, specificity FROM activated_recognizers ORDER BY prefix")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var prefix, typeStr string
+		var spec float64
+		if err := rows.Scan(&prefix, &typeStr, &spec); err == nil {
+			fn(map[string]any{"prefix": prefix, "type": typeStr, "specificity": spec})
+		}
+	}
+}
+
+func (s *SqliteStorage) ActivatedRecognizerCount() int {
+	var n int
+	_ = s.ex().QueryRow("SELECT COUNT(*) FROM activated_recognizers").Scan(&n)
 	return n
 }
 
