@@ -6,6 +6,16 @@ module Iriq
   class Cluster
     attr_reader :key, :host, :scheme, :shape, :examples, :count, :param_stats, :max_values
 
+    # Structured Shape lazily derived from the first observed example —
+    # Iriq::Shape, or nil if no examples are present yet. Cached after the
+    # first call.
+    def shape_object(classifier: SegmentClassifier::DEFAULT)
+      return @shape_object if @shape_object
+      return nil if @examples.empty?
+
+      @shape_object = Shape.from_segments(@examples.first.path_segments, classifier: classifier)
+    end
+
     MAX_EXAMPLES = 10
 
     # Share of date-typed observations required before the corpus promotes
@@ -34,6 +44,7 @@ module Iriq
       @host           = host
       @scheme         = scheme
       @shape          = shape
+      @shape_object   = nil
       @examples       = []
       @example_keys   = Set.new
       @count          = 0
