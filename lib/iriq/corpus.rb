@@ -86,32 +86,57 @@ module Iriq
     end
 
     # Observe a single IRI. Returns an Observation.
+    #
+    # Internally: builds an Event list for the IRI, then applies each event
+    # through the Reducer registry inside a single storage transaction. The
+    # event list is transient today — a future commit can persist it and
+    # replay against alternate reducers / thresholds for re-runnable
+    # inference. See lib/iriq/event.rb and lib/iriq/reducer.rb.
     def observe(input)
+      iri     = coerce(input)
+      events  = events_for(iri)
+      cluster = nil
+
+      @storage.transaction do |s|
+        events.each do |e|
+          result = Reducer.apply(e, s)
+          cluster = result if e.is_a?(Event::ClusterAddition)
+        end
+      end
+
+      Observation.new(corpus: self, identifier: iri, cluster: cluster)
+    end
+
+    # Build the ordered Event list for `input` without applying it. Useful
+    # for inspection, tests, and future event-log persistence. Each call is
+    # pure — no storage side-effects.
+    def events_for(input)
       iri = coerce(input)
       hinted_entries = SegmentHints.derive(iri.path_segments, @classifier)
       raw_shape    = PathShape.new(classifier: @classifier, hints: false).from_entries(hinted_entries)
       hinted_shape = PathShape.new(classifier: @classifier, hints: true).from_entries(hinted_entries)
       keying_host  = effective_host(iri.host)
 
-      cluster = nil
-      @storage.transaction do |s|
-        s.increment_host(keying_host)
-        s.increment_path_length(iri.path_segments.size)
-        s.increment_raw_shape(raw_shape)
-        s.increment_fingerprint(hinted_shape)
+      events = [
+        Event::HostSeen.new(keying_host),
+        Event::PathLengthSeen.new(iri.path_segments.size),
+        Event::RawShapeSeen.new(raw_shape),
+        Event::FingerprintSeen.new(hinted_shape),
+      ]
 
-        prefix = ""
-        hinted_entries.each do |entry|
-          s.observe_position(Position.path(host: keying_host, prefix: prefix),
-                             entry[:value], entry[:type])
-          prefix = "#{prefix}/#{placeholder(entry)}"
-        end
-
-        key, host, scheme, shape = Cluster.key_for(iri, classifier: @classifier, shape: hinted_shape, host: keying_host)
-        cluster = s.add_to_cluster(key, host, scheme, shape, iri)
+      prefix = ""
+      hinted_entries.each do |entry|
+        events << Event::PositionSeen.new(
+          Position.path(host: keying_host, prefix: prefix),
+          entry[:value], entry[:type],
+        )
+        prefix = "#{prefix}/#{placeholder(entry)}"
       end
 
-      Observation.new(corpus: self, identifier: iri, cluster: cluster)
+      key, host, scheme, shape = Cluster.key_for(iri, classifier: @classifier, shape: hinted_shape, host: keying_host)
+      events << Event::ClusterAddition.new(key, host, scheme, shape, iri)
+
+      events
     end
 
     # Corpus-informed normalization. Falls back to mechanical normalization

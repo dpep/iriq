@@ -116,37 +116,76 @@ func OpenCorpus(path string) (*Corpus, error) {
 func (cp *Corpus) Storage() Storage { return cp.storage }
 
 // Observe records a single IRI (or string) and returns an Observation.
+//
+// Internally: builds an Event list for the IRI, then applies each event
+// through the Reducer registry inside a single storage transaction. The
+// event list is transient today — a future commit can persist it and
+// replay against alternate reducers for re-runnable inference. See
+// event.go and reducer.go.
 func (cp *Corpus) Observe(input interface{}) (*Observation, error) {
 	iri, err := coerceIdentifier(input)
 	if err != nil {
 		return nil, err
 	}
-	hinted := DeriveHints(iri.PathSegments, cp.Classifier)
-	rawShape := (&PathShape{Classifier: cp.Classifier, Hints: false}).FromEntries(hinted)
-	hintedShape := (&PathShape{Classifier: cp.Classifier, Hints: true}).FromEntries(hinted)
-	keyingHost := cp.effectiveHost(iri.Host)
+	events := cp.eventsForIRI(iri)
 
 	var cluster *Cluster
 	err = cp.storage.Transaction(func() error {
-		cp.storage.IncrementHost(keyingHost)
-		cp.storage.IncrementPathLength(len(iri.PathSegments))
-		cp.storage.IncrementRawShape(rawShape)
-		cp.storage.IncrementFingerprint(hintedShape)
-
-		prefix := ""
-		for _, e := range hinted {
-			cp.storage.ObservePosition(PathPosition(keyingHost, prefix), e.Value, e.Type)
-			prefix = prefix + "/" + placeholderFor(e)
+		for _, e := range events {
+			result := ApplyEvent(e, cp.storage)
+			if _, ok := e.(EventClusterAddition); ok {
+				if c, _ := result.(*Cluster); c != nil {
+					cluster = c
+				}
+			}
 		}
-
-		key, host, scheme, shape := ClusterKeyForHost(iri, cp.Classifier, hintedShape, keyingHost)
-		cluster = cp.storage.AddToCluster(key, host, scheme, shape, iri)
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &Observation{corpus: cp, Identifier: iri, Cluster: cluster}, nil
+}
+
+// EventsFor builds the ordered Event list for input without applying it.
+// Useful for inspection, tests, and the future event-log persistence.
+// Pure — no storage side-effects.
+func (cp *Corpus) EventsFor(input interface{}) ([]Event, error) {
+	iri, err := coerceIdentifier(input)
+	if err != nil {
+		return nil, err
+	}
+	return cp.eventsForIRI(iri), nil
+}
+
+func (cp *Corpus) eventsForIRI(iri *Identifier) []Event {
+	hinted := DeriveHints(iri.PathSegments, cp.Classifier)
+	rawShape := (&PathShape{Classifier: cp.Classifier, Hints: false}).FromEntries(hinted)
+	hintedShape := (&PathShape{Classifier: cp.Classifier, Hints: true}).FromEntries(hinted)
+	keyingHost := cp.effectiveHost(iri.Host)
+
+	events := []Event{
+		EventHostSeen{Host: keyingHost},
+		EventPathLengthSeen{Length: len(iri.PathSegments)},
+		EventRawShapeSeen{Shape: rawShape},
+		EventFingerprintSeen{Shape: hintedShape},
+	}
+
+	prefix := ""
+	for _, e := range hinted {
+		events = append(events, EventPositionSeen{
+			Position: PathPosition(keyingHost, prefix),
+			Value:    e.Value, Type: e.Type,
+		})
+		prefix = prefix + "/" + placeholderFor(e)
+	}
+
+	key, host, scheme, shape := ClusterKeyForHost(iri, cp.Classifier, hintedShape, keyingHost)
+	events = append(events, EventClusterAddition{
+		Key: key, Host: host, Scheme: scheme, Shape: shape, Identifier: iri,
+	})
+
+	return events
 }
 
 // Normalize is the corpus-informed analog of iriq.Normalize. Implemented

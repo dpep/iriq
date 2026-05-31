@@ -23,6 +23,8 @@ require "set"
 
 require "iriq/observation"
 require "iriq/position"
+require "iriq/event"
+require "iriq/reducer"
 require "iriq/registrable_domain"
 require "iriq/storage"
 require "iriq/corpus"
