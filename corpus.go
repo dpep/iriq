@@ -182,6 +182,26 @@ func (cp *Corpus) ObservedIRICount() int {
 	return cp.storage.ObservedIRICount()
 }
 
+// ProposeRecognizers scans observed values for shape patterns that recur
+// frequently enough to suggest a new Recognizer. Returns
+// RecognizerProposal records; nothing is automatically applied — each
+// proposal carries enough evidence for a human to judge whether to bake
+// the Recognizer in.
+//
+// Strategies are pluggable; the default set lives in
+// DefaultProposalStrategies. Pass strategies = nil for the default;
+// pass an empty slice to disable all detection (useful for tests).
+func (cp *Corpus) ProposeRecognizers(strategies []ProposalStrategy, opts ProposalOptions) []RecognizerProposal {
+	if strategies == nil {
+		strategies = DefaultProposalStrategies
+	}
+	var out []RecognizerProposal
+	for _, s := range strategies {
+		out = append(out, s.Propose(cp.storage, opts)...)
+	}
+	return out
+}
+
 // EventsFor builds the ordered Event list for input without applying it.
 // Useful for inspection, tests, and the future event-log persistence.
 // Pure — no storage side-effects.

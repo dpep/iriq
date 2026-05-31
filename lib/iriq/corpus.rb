@@ -139,6 +139,19 @@ module Iriq
       0
     end
 
+    # Scan observed values for shape patterns that recur frequently enough
+    # to suggest a new Recognizer. Returns RecognizerProposal records; nothing
+    # is automatically applied — the proposal carries enough evidence for a
+    # human to decide whether to bake the Recognizer in.
+    #
+    # Strategies are pluggable; the default set lives in
+    # Iriq::ProposalStrategy::DEFAULTS. Pass `strategies:` to limit / extend.
+    # Pass `min_observations:` / `min_coverage:` / `min_hosts:` to tune
+    # what passes the noise floor.
+    def propose_recognizers(strategies: ProposalStrategy::DEFAULTS, **opts)
+      strategies.flat_map { |s| s.propose(@storage, **opts) }
+    end
+
     # Build the ordered Event list for `input` without applying it. Useful
     # for inspection, tests, and future event-log persistence. Each call is
     # pure — no storage side-effects.

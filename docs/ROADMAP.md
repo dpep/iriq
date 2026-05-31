@@ -94,8 +94,14 @@ Each of these is a non-trivial multi-PR initiative.
 - **Inter-position correlations** — when slot A's value predicts slot B's
   type, surface that. Catches things like "the segment after `/orgs/{org_id}/`
   is almost always `users` or `repos`".
-- **Learned recognizers** — when a literal recurs across corpora with
-  enough mass, propose a new recognizer.
+- 🟡 **Learned recognizers** — `Corpus#propose_recognizers` scans observed
+  values via pluggable ProposalStrategy strategies. v1 ships the
+  PrefixUnderscoreId strategy (detects `ghp_…`, `cus_…`, `sk_…`
+  shape proposals at slug/opaque_id positions). Proposals carry
+  prefix / suggested_type / positions / hosts / coverage /
+  observation_count / sample_values — human reviewer decides whether
+  to bake the Recognizer in. Auto-activation + CLI flag deferred.
+  Shipped in v0.23.0.
 - **Cross-host learning** — same Shape across many hosts is strong evidence
   of semantic identity.
 - **Near-shape clustering** — edit-distance over Shapes catches
