@@ -12,7 +12,7 @@ Gem::Specification.new do |s|
   s.license     = "MIT"
   s.summary     = "IRI extraction, normalization, and clustering."
 
-  s.required_ruby_version = ">= 3.2"
+  s.required_ruby_version = ">= 3.4"
 
   s.add_development_dependency 'debug', '>= 1'
   s.add_development_dependency 'rspec', '>= 3.10'
