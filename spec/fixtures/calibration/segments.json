@@ -1,0 +1,1218 @@
+{
+  "version": "1",
+  "description": "Labeled segment calibration corpus. See script/build_calibration.rb.",
+  "segments": [
+    {
+      "value": "users",
+      "expected_type": "literal",
+      "category": "positive",
+      "source": "plain noun, ubiquitous in URLs"
+    },
+    {
+      "value": "posts",
+      "expected_type": "literal",
+      "category": "positive",
+      "source": "plain noun"
+    },
+    {
+      "value": "Profile",
+      "expected_type": "literal",
+      "category": "positive",
+      "source": "mixed-case word"
+    },
+    {
+      "value": "settings",
+      "expected_type": "literal",
+      "category": "positive",
+      "source": "plain noun"
+    },
+    {
+      "value": "admin",
+      "expected_type": "literal",
+      "category": "positive",
+      "source": "plain noun"
+    },
+    {
+      "value": "deadbeef",
+      "expected_type": "literal",
+      "category": "positive",
+      "source": "short hex — not long enough for hash"
+    },
+    {
+      "value": "if",
+      "expected_type": "literal",
+      "category": "negative_locale",
+      "source": "2-letter not in locale allowlist"
+    },
+    {
+      "value": "to",
+      "expected_type": "literal",
+      "category": "negative_locale",
+      "source": "2-letter not in locale allowlist"
+    },
+    {
+      "value": "FAQ",
+      "expected_type": "literal",
+      "category": "negative_currency",
+      "source": "3-letter uppercase not in currency allowlist"
+    },
+    {
+      "value": "OK",
+      "expected_type": "literal",
+      "category": "negative_country",
+      "source": "2-letter not in country allowlist"
+    },
+    {
+      "value": "XX",
+      "expected_type": "literal",
+      "category": "negative_country",
+      "source": "2-letter not in country allowlist"
+    },
+    {
+      "value": "vNext",
+      "expected_type": "literal",
+      "category": "negative_version",
+      "source": "looks like a version tag but no digit"
+    },
+    {
+      "value": "こんにちは",
+      "expected_type": "literal",
+      "category": "positive",
+      "source": "Unicode letters"
+    },
+    {
+      "value": "café",
+      "expected_type": "literal",
+      "category": "positive",
+      "source": "Unicode with combining mark"
+    },
+    {
+      "value": "12:34",
+      "expected_type": "literal",
+      "category": "negative_timestamp",
+      "source": "colon-separated but not a date-time"
+    },
+    {
+      "value": "0",
+      "expected_type": "integer",
+      "category": "positive",
+      "source": "zero"
+    },
+    {
+      "value": "1",
+      "expected_type": "integer",
+      "category": "positive",
+      "source": "one"
+    },
+    {
+      "value": "42",
+      "expected_type": "integer",
+      "category": "positive",
+      "source": "small int"
+    },
+    {
+      "value": "123",
+      "expected_type": "integer",
+      "category": "positive",
+      "source": "three-digit"
+    },
+    {
+      "value": "9999999",
+      "expected_type": "integer",
+      "category": "positive",
+      "source": "seven-digit"
+    },
+    {
+      "value": "2026",
+      "expected_type": "integer",
+      "category": "edge",
+      "source": "year-shape int — corpus may promote :year"
+    },
+    {
+      "value": "1999",
+      "expected_type": "integer",
+      "category": "edge",
+      "source": "year-shape int"
+    },
+    {
+      "value": "1800",
+      "expected_type": "integer",
+      "category": "edge",
+      "source": "year-shape int below corpus window"
+    },
+    {
+      "value": "2200",
+      "expected_type": "integer",
+      "category": "edge",
+      "source": "year-shape int above corpus window"
+    },
+    {
+      "value": "404",
+      "expected_type": "integer",
+      "category": "edge",
+      "source": "HTTP-status-shape int — corpus may promote"
+    },
+    {
+      "value": "200",
+      "expected_type": "integer",
+      "category": "edge",
+      "source": "HTTP-status-shape int"
+    },
+    {
+      "value": "1234567",
+      "expected_type": "integer",
+      "category": "positive",
+      "source": "seven-digit not in timestamp window"
+    },
+    {
+      "value": "999999999",
+      "expected_type": "integer",
+      "category": "positive",
+      "source": "nine-digit just below timestamp window"
+    },
+    {
+      "value": "10000000000",
+      "expected_type": "integer",
+      "category": "edge",
+      "source": "11-digit between sec/ms timestamp windows"
+    },
+    {
+      "value": "99999999999999",
+      "expected_type": "integer",
+      "category": "positive",
+      "source": "14-digit above ms timestamp window"
+    },
+    {
+      "value": "1.5",
+      "expected_type": "float",
+      "category": "positive",
+      "source": "basic positive float"
+    },
+    {
+      "value": "0.0",
+      "expected_type": "float",
+      "category": "positive",
+      "source": "zero float"
+    },
+    {
+      "value": "-1.5",
+      "expected_type": "float",
+      "category": "positive",
+      "source": "negative float"
+    },
+    {
+      "value": "3.14159",
+      "expected_type": "float",
+      "category": "positive",
+      "source": "pi"
+    },
+    {
+      "value": "100.001",
+      "expected_type": "float",
+      "category": "positive",
+      "source": "small fraction"
+    },
+    {
+      "value": ".5",
+      "expected_type": "literal",
+      "category": "negative_float",
+      "source": "missing leading digit — falls to literal fallback (too short for opaque)"
+    },
+    {
+      "value": "1.",
+      "expected_type": "literal",
+      "category": "negative_float",
+      "source": "missing trailing digits — falls to literal fallback"
+    },
+    {
+      "value": "1.2.3",
+      "expected_type": "opaque_id",
+      "category": "negative_float",
+      "source": "multiple dots — matches opaque shape"
+    },
+    {
+      "value": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "expected_type": "uuid",
+      "category": "positive",
+      "source": "canonical RFC 4122 example"
+    },
+    {
+      "value": "00000000-0000-0000-0000-000000000000",
+      "expected_type": "uuid",
+      "category": "positive",
+      "source": "nil UUID"
+    },
+    {
+      "value": "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF",
+      "expected_type": "uuid",
+      "category": "positive",
+      "source": "max UUID, uppercase"
+    },
+    {
+      "value": "550e8400-e29b-41d4-a716-446655440000",
+      "expected_type": "uuid",
+      "category": "positive",
+      "source": "common test UUID"
+    },
+    {
+      "value": "f47ac10b58cc4372a5670e02b2c3d479",
+      "expected_type": "hash",
+      "category": "negative_uuid",
+      "source": "no dashes — classifies as hash"
+    },
+    {
+      "value": "not-a-uuid",
+      "expected_type": "slug",
+      "category": "negative_uuid",
+      "source": "wrong shape"
+    },
+    {
+      "value": "f47ac10b-58cc-4372-a567",
+      "expected_type": "slug",
+      "category": "negative_uuid",
+      "source": "truncated — multi-dash hex falls into slug"
+    },
+    {
+      "value": "2024-05-23",
+      "expected_type": "date",
+      "category": "positive",
+      "source": "ISO 8601"
+    },
+    {
+      "value": "1999-12-31",
+      "expected_type": "date",
+      "category": "positive",
+      "source": "Y2K eve"
+    },
+    {
+      "value": "2100-12-31",
+      "expected_type": "date",
+      "category": "positive",
+      "source": "upper bound of plausible window"
+    },
+    {
+      "value": "1900-01-01",
+      "expected_type": "date",
+      "category": "positive",
+      "source": "lower bound of plausible window"
+    },
+    {
+      "value": "2024/05/23",
+      "expected_type": "date",
+      "category": "positive",
+      "source": "slash form"
+    },
+    {
+      "value": "5/23/2024",
+      "expected_type": "date",
+      "category": "positive",
+      "source": "US M/D/YYYY"
+    },
+    {
+      "value": "12/31/1999",
+      "expected_type": "date",
+      "category": "positive",
+      "source": "US two-digit month/day"
+    },
+    {
+      "value": "20240523",
+      "expected_type": "date",
+      "category": "positive",
+      "source": "compact YYYYMMDD (classified via integer recognizer)"
+    },
+    {
+      "value": "2024-13-01",
+      "expected_type": "date",
+      "category": "edge",
+      "source": "shape matches DATE_RE; classifier doesn't validate month — CanonicalDate would reject"
+    },
+    {
+      "value": "2024-05-23T10:30:00Z",
+      "expected_type": "timestamp",
+      "category": "negative_date",
+      "source": "full timestamp"
+    },
+    {
+      "value": "1899-12-31",
+      "expected_type": "date",
+      "category": "edge",
+      "source": "shape matches DATE_RE; year-plausibility check lives in CanonicalDate"
+    },
+    {
+      "value": "23-05-2024",
+      "expected_type": "slug",
+      "category": "negative_date",
+      "source": "DD-MM-YYYY isn't a recognized date shape; matches slug"
+    },
+    {
+      "value": "2024-05-23T10:30:00Z",
+      "expected_type": "timestamp",
+      "category": "positive",
+      "source": "ISO with Z"
+    },
+    {
+      "value": "2024-05-23T10:30:00+00:00",
+      "expected_type": "timestamp",
+      "category": "positive",
+      "source": "ISO with offset"
+    },
+    {
+      "value": "2024-05-23T10:30:00.123Z",
+      "expected_type": "timestamp",
+      "category": "positive",
+      "source": "ISO with fractional"
+    },
+    {
+      "value": "2024-05-23 10:30:00",
+      "expected_type": "timestamp",
+      "category": "positive",
+      "source": "ISO with space"
+    },
+    {
+      "value": "2024-05-23T10:30",
+      "expected_type": "timestamp",
+      "category": "positive",
+      "source": "no seconds"
+    },
+    {
+      "value": "1716470400",
+      "expected_type": "timestamp",
+      "category": "positive",
+      "source": "UNIX seconds"
+    },
+    {
+      "value": "1716470400000",
+      "expected_type": "timestamp",
+      "category": "positive",
+      "source": "UNIX millis"
+    },
+    {
+      "value": "999999999",
+      "expected_type": "integer",
+      "category": "negative_timestamp",
+      "source": "just below seconds window"
+    },
+    {
+      "value": "9999999999",
+      "expected_type": "timestamp",
+      "category": "positive",
+      "source": "max of seconds window"
+    },
+    {
+      "value": "d41d8cd98f00b204e9800998ecf8427e",
+      "expected_type": "hash",
+      "category": "positive",
+      "source": "MD5"
+    },
+    {
+      "value": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+      "expected_type": "hash",
+      "category": "positive",
+      "source": "SHA-1"
+    },
+    {
+      "value": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "expected_type": "hash",
+      "category": "positive",
+      "source": "SHA-256"
+    },
+    {
+      "value": "DEADBEEFDEADBEEFDEADBEEFDEADBEEF",
+      "expected_type": "hash",
+      "category": "positive",
+      "source": "all-uppercase 32 hex"
+    },
+    {
+      "value": "0123456789abcdef0123456789abcdef",
+      "expected_type": "hash",
+      "category": "positive",
+      "source": "32 hex"
+    },
+    {
+      "value": "deadbeef",
+      "expected_type": "literal",
+      "category": "negative_hash",
+      "source": "too short for hash"
+    },
+    {
+      "value": "ghijklmnopqrstuv12345678901234567890",
+      "expected_type": "opaque_id",
+      "category": "negative_hash",
+      "source": "non-hex chars"
+    },
+    {
+      "value": "my-cool-post",
+      "expected_type": "slug",
+      "category": "positive",
+      "source": "dash-separated"
+    },
+    {
+      "value": "my_cool_post",
+      "expected_type": "slug",
+      "category": "positive",
+      "source": "underscore-separated"
+    },
+    {
+      "value": "foo-bar-baz",
+      "expected_type": "slug",
+      "category": "positive",
+      "source": "multi-dash"
+    },
+    {
+      "value": "a-b",
+      "expected_type": "slug",
+      "category": "positive",
+      "source": "minimal"
+    },
+    {
+      "value": "no-at-sign",
+      "expected_type": "slug",
+      "category": "positive",
+      "source": "looks like email but no @"
+    },
+    {
+      "value": "by-locale",
+      "expected_type": "slug",
+      "category": "positive",
+      "source": "looks like locale-pair but lang not in allowlist"
+    },
+    {
+      "value": "123-456-7890",
+      "expected_type": "slug",
+      "category": "negative_phone",
+      "source": "NANP-shape but starts with 1"
+    },
+    {
+      "value": "100-200-3000",
+      "expected_type": "slug",
+      "category": "negative_phone",
+      "source": "leading 1 invalidates NANP"
+    },
+    {
+      "value": "FOO-BAR",
+      "expected_type": "opaque_id",
+      "category": "negative_slug",
+      "source": "uppercase invalidates slug shape"
+    },
+    {
+      "value": "192.168.1.1",
+      "expected_type": "ipv4",
+      "category": "positive",
+      "source": "private"
+    },
+    {
+      "value": "10.0.0.1",
+      "expected_type": "ipv4",
+      "category": "positive",
+      "source": "private class A"
+    },
+    {
+      "value": "0.0.0.0",
+      "expected_type": "ipv4",
+      "category": "positive",
+      "source": "any-address"
+    },
+    {
+      "value": "255.255.255.255",
+      "expected_type": "ipv4",
+      "category": "positive",
+      "source": "broadcast"
+    },
+    {
+      "value": "127.0.0.1",
+      "expected_type": "ipv4",
+      "category": "positive",
+      "source": "loopback"
+    },
+    {
+      "value": "8.8.8.8",
+      "expected_type": "ipv4",
+      "category": "positive",
+      "source": "Google DNS"
+    },
+    {
+      "value": "999.999.999.999",
+      "expected_type": "opaque_id",
+      "category": "negative_ipv4",
+      "source": "out-of-range octets"
+    },
+    {
+      "value": "256.0.0.1",
+      "expected_type": "opaque_id",
+      "category": "negative_ipv4",
+      "source": "octet > 255"
+    },
+    {
+      "value": "1.2.3",
+      "expected_type": "opaque_id",
+      "category": "negative_ipv4",
+      "source": "only three octets"
+    },
+    {
+      "value": "::1",
+      "expected_type": "ipv6",
+      "category": "positive",
+      "source": "loopback"
+    },
+    {
+      "value": "::",
+      "expected_type": "ipv6",
+      "category": "positive",
+      "source": "all-zero"
+    },
+    {
+      "value": "2001:db8::1",
+      "expected_type": "ipv6",
+      "category": "positive",
+      "source": "documentation prefix"
+    },
+    {
+      "value": "2001:0db8:0000:0000:0000:ff00:0042:8329",
+      "expected_type": "ipv6",
+      "category": "positive",
+      "source": "full form"
+    },
+    {
+      "value": "fe80::1",
+      "expected_type": "ipv6",
+      "category": "positive",
+      "source": "link-local"
+    },
+    {
+      "value": "fe80::abcd:1234:5678:9abc",
+      "expected_type": "ipv6",
+      "category": "positive",
+      "source": "link-local with iface"
+    },
+    {
+      "value": "https://foo.com/bar",
+      "expected_type": "url",
+      "category": "positive",
+      "source": "https"
+    },
+    {
+      "value": "http://x",
+      "expected_type": "url",
+      "category": "positive",
+      "source": "http minimal"
+    },
+    {
+      "value": "ftp://files.example.com/x",
+      "expected_type": "url",
+      "category": "positive",
+      "source": "ftp"
+    },
+    {
+      "value": "https://foo.com",
+      "expected_type": "url",
+      "category": "positive",
+      "source": "no path"
+    },
+    {
+      "value": "file:///etc/passwd",
+      "expected_type": "url",
+      "category": "positive",
+      "source": "file scheme"
+    },
+    {
+      "value": "foo.com/bar",
+      "expected_type": "url",
+      "category": "positive",
+      "source": "schemeless"
+    },
+    {
+      "value": "sub.foo.com/",
+      "expected_type": "url",
+      "category": "positive",
+      "source": "schemeless with subdomain"
+    },
+    {
+      "value": "https://",
+      "expected_type": "literal",
+      "category": "negative_url",
+      "source": "scheme but no host content"
+    },
+    {
+      "value": "alice@example.com",
+      "expected_type": "email",
+      "category": "positive",
+      "source": "basic"
+    },
+    {
+      "value": "user.name+tag@sub.example.co.uk",
+      "expected_type": "email",
+      "category": "positive",
+      "source": "with dots, plus, subdomain"
+    },
+    {
+      "value": "a@b.co",
+      "expected_type": "email",
+      "category": "positive",
+      "source": "minimal"
+    },
+    {
+      "value": "USER@EXAMPLE.COM",
+      "expected_type": "email",
+      "category": "positive",
+      "source": "uppercase"
+    },
+    {
+      "value": "no-at-sign",
+      "expected_type": "slug",
+      "category": "negative_email",
+      "source": "missing @"
+    },
+    {
+      "value": "@nohost.com",
+      "expected_type": "literal",
+      "category": "negative_email",
+      "source": "leading @ rules out literal/opaque shapes; falls to literal fallback"
+    },
+    {
+      "value": "true",
+      "expected_type": "boolean",
+      "category": "positive",
+      "source": "lowercase"
+    },
+    {
+      "value": "false",
+      "expected_type": "boolean",
+      "category": "positive",
+      "source": "lowercase"
+    },
+    {
+      "value": "TRUE",
+      "expected_type": "boolean",
+      "category": "positive",
+      "source": "uppercase"
+    },
+    {
+      "value": "False",
+      "expected_type": "boolean",
+      "category": "positive",
+      "source": "title-case"
+    },
+    {
+      "value": "yes",
+      "expected_type": "literal",
+      "category": "negative_boolean",
+      "source": "yes/no not recognized as boolean"
+    },
+    {
+      "value": "1",
+      "expected_type": "integer",
+      "category": "negative_boolean",
+      "source": "1/0 not recognized as boolean from single value"
+    },
+    {
+      "value": "v1",
+      "expected_type": "version",
+      "category": "positive",
+      "source": "single-digit"
+    },
+    {
+      "value": "v2.0.1",
+      "expected_type": "version",
+      "category": "positive",
+      "source": "semver-ish"
+    },
+    {
+      "value": "v1.2.3-beta",
+      "expected_type": "version",
+      "category": "positive",
+      "source": "with pre-release"
+    },
+    {
+      "value": "v1.2.3+build1",
+      "expected_type": "version",
+      "category": "positive",
+      "source": "with build metadata"
+    },
+    {
+      "value": "v10",
+      "expected_type": "version",
+      "category": "positive",
+      "source": "two-digit major"
+    },
+    {
+      "value": "vNext",
+      "expected_type": "literal",
+      "category": "negative_version",
+      "source": "no digit after v"
+    },
+    {
+      "value": "1.2.3",
+      "expected_type": "opaque_id",
+      "category": "negative_version",
+      "source": "missing v prefix"
+    },
+    {
+      "value": "en",
+      "expected_type": "locale",
+      "category": "positive",
+      "source": "bare ISO 639-1"
+    },
+    {
+      "value": "fr",
+      "expected_type": "locale",
+      "category": "positive",
+      "source": "bare ISO 639-1"
+    },
+    {
+      "value": "ja",
+      "expected_type": "locale",
+      "category": "positive",
+      "source": "bare ISO 639-1"
+    },
+    {
+      "value": "zh",
+      "expected_type": "locale",
+      "category": "positive",
+      "source": "bare ISO 639-1"
+    },
+    {
+      "value": "en-US",
+      "expected_type": "locale",
+      "category": "positive",
+      "source": "language-region"
+    },
+    {
+      "value": "fr_CA",
+      "expected_type": "locale",
+      "category": "positive",
+      "source": "underscore form"
+    },
+    {
+      "value": "zh-Hant",
+      "expected_type": "locale",
+      "category": "positive",
+      "source": "language-script"
+    },
+    {
+      "value": "zh-Hans",
+      "expected_type": "locale",
+      "category": "positive",
+      "source": "language-script"
+    },
+    {
+      "value": "pt-BR",
+      "expected_type": "locale",
+      "category": "positive",
+      "source": "Brazilian Portuguese"
+    },
+    {
+      "value": "xx-YY",
+      "expected_type": "literal",
+      "category": "negative_locale",
+      "source": "language not in allowlist"
+    },
+    {
+      "value": "by-locale",
+      "expected_type": "slug",
+      "category": "negative_locale",
+      "source": "lang not in allowlist, slug shape"
+    },
+    {
+      "value": "USD",
+      "expected_type": "currency",
+      "category": "positive",
+      "source": "ISO 4217 uppercase"
+    },
+    {
+      "value": "eur",
+      "expected_type": "currency",
+      "category": "positive",
+      "source": "ISO 4217 lowercase"
+    },
+    {
+      "value": "GBP",
+      "expected_type": "currency",
+      "category": "positive",
+      "source": "ISO 4217 uppercase"
+    },
+    {
+      "value": "jpy",
+      "expected_type": "currency",
+      "category": "positive",
+      "source": "ISO 4217 lowercase"
+    },
+    {
+      "value": "CHF",
+      "expected_type": "currency",
+      "category": "positive",
+      "source": "ISO 4217 uppercase"
+    },
+    {
+      "value": "FAQ",
+      "expected_type": "literal",
+      "category": "negative_currency",
+      "source": "not in allowlist"
+    },
+    {
+      "value": "XYZ",
+      "expected_type": "literal",
+      "category": "negative_currency",
+      "source": "not in allowlist"
+    },
+    {
+      "value": "+15551234567",
+      "expected_type": "phone",
+      "category": "positive",
+      "source": "E.164 compact"
+    },
+    {
+      "value": "+1 (555) 123-4567",
+      "expected_type": "phone",
+      "category": "positive",
+      "source": "E.164 with separators"
+    },
+    {
+      "value": "+44 20 7946 0958",
+      "expected_type": "phone",
+      "category": "positive",
+      "source": "international"
+    },
+    {
+      "value": "+81-3-1234-5678",
+      "expected_type": "phone",
+      "category": "positive",
+      "source": "Japan"
+    },
+    {
+      "value": "555-666-7777",
+      "expected_type": "phone",
+      "category": "positive",
+      "source": "NANP with dashes"
+    },
+    {
+      "value": "(555) 666-7777",
+      "expected_type": "phone",
+      "category": "positive",
+      "source": "NANP parens"
+    },
+    {
+      "value": "555.666.7777",
+      "expected_type": "phone",
+      "category": "positive",
+      "source": "NANP dots"
+    },
+    {
+      "value": "+1",
+      "expected_type": "literal",
+      "category": "negative_phone",
+      "source": "too few digits"
+    },
+    {
+      "value": "123-456-7890",
+      "expected_type": "slug",
+      "category": "negative_phone",
+      "source": "leading 1 invalidates NANP"
+    },
+    {
+      "value": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dQw4w9WgXcQ",
+      "expected_type": "jwt",
+      "category": "positive",
+      "source": "minimal three-part"
+    },
+    {
+      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NSJ9.SflKxwRJSMeKKF2QT4f",
+      "expected_type": "jwt",
+      "category": "positive",
+      "source": "typical"
+    },
+    {
+      "value": "eyJhbGciOiJIUzI1NiJ9",
+      "expected_type": "opaque_id",
+      "category": "negative_jwt",
+      "source": "only one segment, no base64 disambiguator chars"
+    },
+    {
+      "value": "ey.foo.bar",
+      "expected_type": "opaque_id",
+      "category": "negative_jwt",
+      "source": "JWT regex requires non-empty first segment after `ey`; falls to opaque"
+    },
+    {
+      "value": "image/png",
+      "expected_type": "mime",
+      "category": "positive",
+      "source": "common"
+    },
+    {
+      "value": "application/json",
+      "expected_type": "mime",
+      "category": "positive",
+      "source": "common"
+    },
+    {
+      "value": "text/html",
+      "expected_type": "mime",
+      "category": "positive",
+      "source": "common"
+    },
+    {
+      "value": "application/vnd.api+json",
+      "expected_type": "mime",
+      "category": "positive",
+      "source": "vendor"
+    },
+    {
+      "value": "image/svg+xml",
+      "expected_type": "mime",
+      "category": "positive",
+      "source": "vendor"
+    },
+    {
+      "value": "multipart/form-data",
+      "expected_type": "mime",
+      "category": "positive",
+      "source": "request body"
+    },
+    {
+      "value": "video/mp4",
+      "expected_type": "mime",
+      "category": "positive",
+      "source": "video"
+    },
+    {
+      "value": "image.png",
+      "expected_type": "file",
+      "category": "positive",
+      "source": "image"
+    },
+    {
+      "value": "report.pdf",
+      "expected_type": "file",
+      "category": "positive",
+      "source": "document"
+    },
+    {
+      "value": "data.csv",
+      "expected_type": "file",
+      "category": "positive",
+      "source": "data"
+    },
+    {
+      "value": "user-photo.jpg",
+      "expected_type": "file",
+      "category": "positive",
+      "source": "image with slug stem"
+    },
+    {
+      "value": "archive.tar.gz",
+      "expected_type": "file",
+      "category": "positive",
+      "source": "double-extension"
+    },
+    {
+      "value": "script.rb",
+      "expected_type": "file",
+      "category": "positive",
+      "source": "code"
+    },
+    {
+      "value": "video.mp4",
+      "expected_type": "file",
+      "category": "positive",
+      "source": "video"
+    },
+    {
+      "value": "page.html",
+      "expected_type": "file",
+      "category": "positive",
+      "source": "web"
+    },
+    {
+      "value": "no-known-ext.qwerty",
+      "expected_type": "opaque_id",
+      "category": "negative_file",
+      "source": "extension not in allowlist"
+    },
+    {
+      "value": "#fff",
+      "expected_type": "color",
+      "category": "positive",
+      "source": "3-hex shorthand"
+    },
+    {
+      "value": "#ffffff",
+      "expected_type": "color",
+      "category": "positive",
+      "source": "6-hex"
+    },
+    {
+      "value": "#ffffff80",
+      "expected_type": "color",
+      "category": "positive",
+      "source": "8-hex with alpha"
+    },
+    {
+      "value": "#abc1",
+      "expected_type": "color",
+      "category": "positive",
+      "source": "4-hex with alpha"
+    },
+    {
+      "value": "#zz",
+      "expected_type": "literal",
+      "category": "negative_color",
+      "source": "non-hex chars"
+    },
+    {
+      "value": "#12",
+      "expected_type": "literal",
+      "category": "negative_color",
+      "source": "too short for any rule, falls to literal fallback"
+    },
+    {
+      "value": "37.7749,-122.4194",
+      "expected_type": "coordinate",
+      "category": "positive",
+      "source": "SF"
+    },
+    {
+      "value": "0,0",
+      "expected_type": "coordinate",
+      "category": "positive",
+      "source": "null island"
+    },
+    {
+      "value": "-90,-180",
+      "expected_type": "coordinate",
+      "category": "positive",
+      "source": "extreme"
+    },
+    {
+      "value": "90,180",
+      "expected_type": "coordinate",
+      "category": "positive",
+      "source": "extreme"
+    },
+    {
+      "value": "51.5074,-0.1278",
+      "expected_type": "coordinate",
+      "category": "positive",
+      "source": "London"
+    },
+    {
+      "value": "200,200",
+      "expected_type": "opaque_id",
+      "category": "negative_coordinate",
+      "source": "both out of range"
+    },
+    {
+      "value": "1000,1000",
+      "expected_type": "opaque_id",
+      "category": "negative_coordinate",
+      "source": "both out of range"
+    },
+    {
+      "value": "US",
+      "expected_type": "country",
+      "category": "positive",
+      "source": "ISO 3166-1 alpha-2"
+    },
+    {
+      "value": "CA",
+      "expected_type": "country",
+      "category": "positive",
+      "source": "ISO 3166-1 alpha-2"
+    },
+    {
+      "value": "GB",
+      "expected_type": "country",
+      "category": "positive",
+      "source": "ISO 3166-1 alpha-2"
+    },
+    {
+      "value": "JP",
+      "expected_type": "country",
+      "category": "positive",
+      "source": "ISO 3166-1 alpha-2"
+    },
+    {
+      "value": "BR",
+      "expected_type": "country",
+      "category": "positive",
+      "source": "ISO 3166-1 alpha-2"
+    },
+    {
+      "value": "DE",
+      "expected_type": "country",
+      "category": "positive",
+      "source": "ISO 3166-1 alpha-2"
+    },
+    {
+      "value": "XX",
+      "expected_type": "literal",
+      "category": "negative_country",
+      "source": "not in allowlist"
+    },
+    {
+      "value": "OK",
+      "expected_type": "literal",
+      "category": "negative_country",
+      "source": "OK is not a country code"
+    },
+    {
+      "value": "TWFuIGlzIGRpc3Rpbmd1aXNoZWQ=",
+      "expected_type": "base64",
+      "category": "positive",
+      "source": "RFC 4648 example with padding"
+    },
+    {
+      "value": "AAAAAAAAAAAAAA+/==",
+      "expected_type": "base64",
+      "category": "positive",
+      "source": "with + / and padding"
+    },
+    {
+      "value": "SGVsbG8gV29ybGQh",
+      "expected_type": "opaque_id",
+      "category": "negative_base64",
+      "source": "no disambiguating + / = chars"
+    },
+    {
+      "value": "short+/=",
+      "expected_type": "literal",
+      "category": "negative_base64",
+      "source": "too short"
+    },
+    {
+      "value": "abc123XYZ",
+      "expected_type": "opaque_id",
+      "category": "positive",
+      "source": "alphanumeric mixed case"
+    },
+    {
+      "value": "session_abc.123",
+      "expected_type": "opaque_id",
+      "category": "positive",
+      "source": "with allowed punctuation"
+    },
+    {
+      "value": "AKIAIOSFODNN7EXAMPLE",
+      "expected_type": "opaque_id",
+      "category": "positive",
+      "source": "AWS access key shape"
+    },
+    {
+      "value": "ghp_abc123def456ghi789jkl0",
+      "expected_type": "slug",
+      "category": "edge",
+      "source": "GitHub PAT — currently SLUG wins over OPAQUE. step 4 should reclassify as opaque_id"
+    },
+    {
+      "value": "abc",
+      "expected_type": "literal",
+      "category": "negative_opaque",
+      "source": "too short (3 chars), hits literal first"
+    },
+    {
+      "value": "a_b",
+      "expected_type": "slug",
+      "category": "negative_opaque",
+      "source": "slug shape with allowed sep"
+    }
+  ]
+}
