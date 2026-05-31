@@ -45,3 +45,91 @@ func TestEvidenceWithNotes(t *testing.T) {
 		t.Errorf("Notes = %v", e.Notes)
 	}
 }
+
+func TestEvidenceForEmitsRecognizerPerSegment(t *testing.T) {
+	ev, err := EvidenceFor("https://foo.com/users/123")
+	if err != nil {
+		t.Fatalf("EvidenceFor: %v", err)
+	}
+	var recogTypes []SegmentType
+	for _, r := range ev {
+		if r.Source == EvidenceRecognizer {
+			if t, ok := r.Payload["type"].(SegmentType); ok {
+				recogTypes = append(recogTypes, t)
+			}
+		}
+	}
+	if len(recogTypes) != 2 || recogTypes[0] != TypeLiteral || recogTypes[1] != TypeInteger {
+		t.Errorf("recognizer types = %v, want [literal integer]", recogTypes)
+	}
+}
+
+func TestEvidenceForCanonicalDate(t *testing.T) {
+	ev, err := EvidenceFor("https://foo.com/c?d=2024/01/15")
+	if err != nil {
+		t.Fatalf("EvidenceFor: %v", err)
+	}
+	var found *Evidence
+	for i := range ev {
+		if ev[i].Source == EvidencePolicy {
+			if r, _ := ev[i].Payload["rule"].(string); r == "canonical_date" {
+				found = &ev[i]
+				break
+			}
+		}
+	}
+	if found == nil {
+		t.Fatalf("no canonical_date policy Evidence in %v", ev)
+	}
+	if got, _ := found.Payload["after"].(string); got != "2024-01-15" {
+		t.Errorf("canonical_date after = %q, want 2024-01-15", got)
+	}
+}
+
+func TestEvidenceForParamNameHint(t *testing.T) {
+	ev, err := EvidenceFor("https://foo.com/c?phone=unknown")
+	if err != nil {
+		t.Fatalf("EvidenceFor: %v", err)
+	}
+	var hint *Evidence
+	for i := range ev {
+		if ev[i].Source == EvidenceNeighbor {
+			if r, _ := ev[i].Payload["rule"].(string); r == "param_name_hint" {
+				hint = &ev[i]
+				break
+			}
+		}
+	}
+	if hint == nil {
+		t.Fatalf("no param_name_hint Evidence")
+	}
+	if got, _ := hint.Payload["after"].(SegmentType); got != TypePhone {
+		t.Errorf("after = %v, want phone", got)
+	}
+}
+
+func TestTraceForNotesEqualEvidenceForNotes(t *testing.T) {
+	input := "https://shop.com/pricing/usd?currency=eur"
+	view, err := Trace(input)
+	if err != nil {
+		t.Fatalf("Trace: %v", err)
+	}
+	ev, err := EvidenceFor(input)
+	if err != nil {
+		t.Fatalf("EvidenceFor: %v", err)
+	}
+	var viewNotes, evNotes []string
+	for _, r := range view.Path {
+		viewNotes = append(viewNotes, r.Notes...)
+	}
+	for _, r := range view.Query {
+		viewNotes = append(viewNotes, r.Notes...)
+	}
+	for _, e := range ev {
+		evNotes = append(evNotes, e.Notes...)
+	}
+	if len(viewNotes) != len(evNotes) {
+		t.Errorf("view notes count %d != ev notes count %d\nview: %v\nev: %v",
+			len(viewNotes), len(evNotes), viewNotes, evNotes)
+	}
+}
