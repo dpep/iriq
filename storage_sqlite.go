@@ -14,7 +14,7 @@ import (
 // Compiled-in when `-tags sqlite` is set.
 const HasSqlite = true
 
-const sqliteSchemaVersion = 1
+const sqliteSchemaVersion = 2
 
 const sqliteSchema = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -37,25 +37,33 @@ CREATE TABLE IF NOT EXISTS fingerprint_counts (
   shape TEXT PRIMARY KEY,
   count INTEGER NOT NULL
 );
+-- Position is (host, scope, locator). For scope='path' the locator is the
+-- typed prefix; for scope='query' it's the param name. Today only 'path'
+-- is observed here (query params live on the cluster_* tables) — scope is
+-- in the schema so future commits can fold query positions in without
+-- another migration.
 CREATE TABLE IF NOT EXISTS position_stats (
-  host   TEXT NOT NULL,
-  prefix TEXT NOT NULL,
-  total  INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (host, prefix)
+  host    TEXT NOT NULL,
+  scope   TEXT NOT NULL,
+  locator TEXT NOT NULL,
+  total   INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (host, scope, locator)
 );
 CREATE TABLE IF NOT EXISTS position_values (
-  host   TEXT NOT NULL,
-  prefix TEXT NOT NULL,
-  value  TEXT NOT NULL,
-  count  INTEGER NOT NULL,
-  PRIMARY KEY (host, prefix, value)
+  host    TEXT NOT NULL,
+  scope   TEXT NOT NULL,
+  locator TEXT NOT NULL,
+  value   TEXT NOT NULL,
+  count   INTEGER NOT NULL,
+  PRIMARY KEY (host, scope, locator, value)
 );
 CREATE TABLE IF NOT EXISTS position_types (
-  host   TEXT NOT NULL,
-  prefix TEXT NOT NULL,
-  type   TEXT NOT NULL,
-  count  INTEGER NOT NULL,
-  PRIMARY KEY (host, prefix, type)
+  host    TEXT NOT NULL,
+  scope   TEXT NOT NULL,
+  locator TEXT NOT NULL,
+  type    TEXT NOT NULL,
+  count   INTEGER NOT NULL,
+  PRIMARY KEY (host, scope, locator, type)
 );
 CREATE TABLE IF NOT EXISTS clusters (
   key    TEXT PRIMARY KEY,
@@ -304,20 +312,21 @@ func (s *SqliteStorage) upsertShape(table, shape string) {
 	`, table), shape)
 }
 
-func (s *SqliteStorage) ObservePosition(host, prefix, value string, t SegmentType) {
+func (s *SqliteStorage) ObservePosition(pos Position, value string, t SegmentType) {
+	host, scope, locator := pos.Host, string(pos.Scope), pos.Locator
 	_, _ = s.ex().Exec(`
-		INSERT INTO position_stats (host, prefix, total) VALUES (?, ?, 1)
-		ON CONFLICT(host, prefix) DO UPDATE SET total = total + 1
-	`, host, prefix)
+		INSERT INTO position_stats (host, scope, locator, total) VALUES (?, ?, ?, 1)
+		ON CONFLICT(host, scope, locator) DO UPDATE SET total = total + 1
+	`, host, scope, locator)
 	_, _ = s.ex().Exec(`
-		INSERT INTO position_types (host, prefix, type, count) VALUES (?, ?, ?, 1)
-		ON CONFLICT(host, prefix, type) DO UPDATE SET count = count + 1
-	`, host, prefix, string(t))
+		INSERT INTO position_types (host, scope, locator, type, count) VALUES (?, ?, ?, ?, 1)
+		ON CONFLICT(host, scope, locator, type) DO UPDATE SET count = count + 1
+	`, host, scope, locator, string(t))
 
 	// Value counts are capped — UPDATE first, INSERT only if under the cap.
 	res, err := s.ex().Exec(
-		"UPDATE position_values SET count = count + 1 WHERE host = ? AND prefix = ? AND value = ?",
-		host, prefix, value,
+		"UPDATE position_values SET count = count + 1 WHERE host = ? AND scope = ? AND locator = ? AND value = ?",
+		host, scope, locator, value,
 	)
 	// err != nil ⇒ res may be nil; treat the update as a no-op (zero rows
 	// affected) so the INSERT path runs. If the INSERT also fails, the outer
@@ -325,12 +334,13 @@ func (s *SqliteStorage) ObservePosition(host, prefix, value string, t SegmentTyp
 	if affected := rowsAffected(res, err); affected == 0 {
 		var card int
 		_ = s.ex().QueryRow(
-			"SELECT COUNT(*) FROM position_values WHERE host = ? AND prefix = ?", host, prefix,
+			"SELECT COUNT(*) FROM position_values WHERE host = ? AND scope = ? AND locator = ?",
+			host, scope, locator,
 		).Scan(&card)
 		if card < s.maxValues {
 			_, _ = s.ex().Exec(
-				"INSERT INTO position_values (host, prefix, value, count) VALUES (?, ?, ?, 1)",
-				host, prefix, value,
+				"INSERT INTO position_values (host, scope, locator, value, count) VALUES (?, ?, ?, ?, 1)",
+				host, scope, locator, value,
 			)
 		}
 	}
@@ -452,10 +462,12 @@ func (s *SqliteStorage) countsHash(table, keyCol string) map[string]int {
 	return out
 }
 
-func (s *SqliteStorage) PositionStatsFor(host, prefix string) *PositionStats {
+func (s *SqliteStorage) PositionStatsFor(pos Position) *PositionStats {
+	host, scope, locator := pos.Host, string(pos.Scope), pos.Locator
 	var total int
 	if err := s.ex().QueryRow(
-		"SELECT total FROM position_stats WHERE host = ? AND prefix = ?", host, prefix,
+		"SELECT total FROM position_stats WHERE host = ? AND scope = ? AND locator = ?",
+		host, scope, locator,
 	).Scan(&total); err != nil {
 		return nil
 	}
@@ -463,7 +475,10 @@ func (s *SqliteStorage) PositionStatsFor(host, prefix string) *PositionStats {
 	ps := NewPositionStats(s.maxValues)
 	ps.Total = total
 
-	rows, err := s.ex().Query("SELECT value, count FROM position_values WHERE host = ? AND prefix = ?", host, prefix)
+	rows, err := s.ex().Query(
+		"SELECT value, count FROM position_values WHERE host = ? AND scope = ? AND locator = ?",
+		host, scope, locator,
+	)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -475,7 +490,10 @@ func (s *SqliteStorage) PositionStatsFor(host, prefix string) *PositionStats {
 		}
 	}
 
-	rows2, err := s.ex().Query("SELECT type, count FROM position_types WHERE host = ? AND prefix = ?", host, prefix)
+	rows2, err := s.ex().Query(
+		"SELECT type, count FROM position_types WHERE host = ? AND scope = ? AND locator = ?",
+		host, scope, locator,
+	)
 	if err == nil {
 		defer rows2.Close()
 		for rows2.Next() {
@@ -489,22 +507,21 @@ func (s *SqliteStorage) PositionStatsFor(host, prefix string) *PositionStats {
 	return ps
 }
 
-func (s *SqliteStorage) EachPositionStats(fn func(host, prefix string, stats *PositionStats)) {
-	rows, err := s.ex().Query("SELECT host, prefix FROM position_stats ORDER BY ROWID")
+func (s *SqliteStorage) EachPositionStats(fn func(pos Position, stats *PositionStats)) {
+	rows, err := s.ex().Query("SELECT host, scope, locator FROM position_stats ORDER BY ROWID")
 	if err != nil {
 		return
 	}
-	type pkv struct{ host, prefix string }
-	var keys []pkv
+	var keys []Position
 	for rows.Next() {
-		var k pkv
-		if err := rows.Scan(&k.host, &k.prefix); err == nil {
-			keys = append(keys, k)
+		var host, scope, locator string
+		if err := rows.Scan(&host, &scope, &locator); err == nil {
+			keys = append(keys, Position{Host: host, Scope: PositionScope(scope), Locator: locator})
 		}
 	}
 	rows.Close()
 	for _, k := range keys {
-		fn(k.host, k.prefix, s.PositionStatsFor(k.host, k.prefix))
+		fn(k, s.PositionStatsFor(k))
 	}
 }
 
@@ -663,10 +680,9 @@ func mirrorIntoMemory(src Storage, dst *MemoryStorage) {
 	for k, v := range src.FingerprintCounts() {
 		dst.fingerprintCounts[k] = v
 	}
-	src.EachPositionStats(func(host, prefix string, stats *PositionStats) {
-		key := positionKey{host, prefix}
-		dst.positionStats[key] = stats
-		dst.positionKeys = append(dst.positionKeys, key)
+	src.EachPositionStats(func(pos Position, stats *PositionStats) {
+		dst.positionStats[pos] = stats
+		dst.positionKeys = append(dst.positionKeys, pos)
 	})
 	for _, c := range src.Clusters() {
 		dst.clusters[c.Key] = c

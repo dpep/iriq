@@ -20,6 +20,7 @@ require "iriq/position_stats"
 require "set"
 
 require "iriq/observation"
+require "iriq/position"
 require "iriq/registrable_domain"
 require "iriq/storage"
 require "iriq/corpus"

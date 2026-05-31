@@ -64,7 +64,7 @@ type corpusDump struct {
 	RawShapeCounts       map[string]int     `json:"raw_shape_counts"`
 	FingerprintCounts    map[string]int     `json:"fingerprint_counts"`
 	MaxValuesPerPosition int                `json:"max_values_per_position"`
-	PositionStats        [][]interface{}    `json:"position_stats"`
+	PositionStats        []positionStatsEntryDump `json:"position_stats"`
 	Clusterer            clustererDumpShape `json:"clusterer"`
 }
 
@@ -92,15 +92,35 @@ type positionStatsDumpShape struct {
 	MaxValues   int            `json:"max_values"`
 }
 
+// positionDumpShape is the serialized form of an Iriq::Position — host,
+// scope, locator. Scope is a string for cross-runtime parity.
+type positionDumpShape struct {
+	Host    string `json:"host"`
+	Scope   string `json:"scope"`
+	Locator string `json:"locator"`
+}
+
+// positionStatsEntryDump pairs a Position with its PositionStats in the
+// corpus dump — the JSON wire form is { "position": {...}, "stats": {...} }
+// so each entry round-trips with structured field names instead of a
+// tuple of unnamed values.
+type positionStatsEntryDump struct {
+	Position positionDumpShape      `json:"position"`
+	Stats    positionStatsDumpShape `json:"stats"`
+}
+
 func dumpMemoryToJSON(m *MemoryStorage, path string) error {
 	plc := make(map[string]int, len(m.pathLengthCounts))
 	for k, v := range m.pathLengthCounts {
 		plc[strconv.Itoa(k)] = v
 	}
-	ps := make([][]interface{}, 0, len(m.positionKeys))
+	ps := make([]positionStatsEntryDump, 0, len(m.positionKeys))
 	for _, k := range m.positionKeys {
 		stats := m.positionStats[k]
-		ps = append(ps, []interface{}{k.Host, k.Prefix, positionStatsDumpFrom(stats)})
+		ps = append(ps, positionStatsEntryDump{
+			Position: positionDumpShape{Host: k.Host, Scope: string(k.Scope), Locator: k.Locator},
+			Stats:    positionStatsDumpFrom(stats),
+		})
 	}
 	clu := clustererDumpShape{Clusters: map[string]clusterDumpShape{}}
 	for _, key := range m.clusterKeys {
@@ -192,37 +212,28 @@ func loadMemoryFromJSON(m *MemoryStorage, data []byte) error {
 		}
 	}
 	if msg, ok := raw["position_stats"]; ok {
-		var entries [][]interface{}
+		var entries []positionStatsEntryDump
 		if err := json.Unmarshal(msg, &entries); err != nil {
 			return err
 		}
 		for _, e := range entries {
-			if len(e) != 3 {
-				continue
-			}
-			host, _ := e[0].(string)
-			prefix, _ := e[1].(string)
-			subRaw, err := json.Marshal(e[2])
-			if err != nil {
-				return err
-			}
-			var sd positionStatsDumpShape
-			if err := json.Unmarshal(subRaw, &sd); err != nil {
-				return err
-			}
-			ps := NewPositionStats(sd.MaxValues)
-			ps.Total = sd.Total
-			ps.ValueCounts = sd.ValueCounts
+			ps := NewPositionStats(e.Stats.MaxValues)
+			ps.Total = e.Stats.Total
+			ps.ValueCounts = e.Stats.ValueCounts
 			if ps.ValueCounts == nil {
 				ps.ValueCounts = map[string]int{}
 			}
 			ps.TypeCounts = map[SegmentType]int{}
-			for k, v := range sd.TypeCounts {
+			for k, v := range e.Stats.TypeCounts {
 				ps.TypeCounts[SegmentType(k)] = v
 			}
-			key := positionKey{host, prefix}
-			m.positionStats[key] = ps
-			m.positionKeys = append(m.positionKeys, key)
+			pos := Position{
+				Host:    e.Position.Host,
+				Scope:   PositionScope(e.Position.Scope),
+				Locator: e.Position.Locator,
+			}
+			m.positionStats[pos] = ps
+			m.positionKeys = append(m.positionKeys, pos)
 		}
 	}
 	if msg, ok := raw["clusterer"]; ok {

@@ -9,11 +9,12 @@ module Iriq
     #   increment_path_length(length)
     #   increment_raw_shape(shape)
     #   increment_fingerprint(shape)
-    #   observe_position(host, prefix, value, type)
+    #   observe_position(position, value, type)        # position is Iriq::Position
     #   add_to_cluster(key, host, scheme, shape, identifier)
     #
     #   host_counts / path_length_counts / raw_shape_counts / fingerprint_counts
-    #   position_stats(host, prefix)
+    #   position_stats(position)
+    #   each_position_stats { |position, stats| ... }
     #   clusters / cluster_size
     #
     #   transaction { ... }    # backends may batch within
@@ -70,8 +71,8 @@ module Iriq
         @fingerprint_counts[shape] += 1
       end
 
-      def observe_position(host, prefix, value, type)
-        stats = @position_stats[[host, prefix]] ||= PositionStats.new(max_values: @max_values_per_position)
+      def observe_position(position, value, type)
+        stats = @position_stats[position] ||= PositionStats.new(max_values: @max_values_per_position)
         stats.observe(value, type)
       end
 
@@ -91,8 +92,8 @@ module Iriq
       def raw_shape_counts;   @raw_shape_counts;   end
       def fingerprint_counts; @fingerprint_counts; end
 
-      def position_stats(host, prefix)
-        @position_stats[[host, prefix]]
+      def position_stats(position)
+        @position_stats[position]
       end
 
       def each_position_stats(&block)
@@ -122,8 +123,9 @@ module Iriq
         @raw_shape_counts   = Hash.new(0).merge(h["raw_shape_counts"])
         @fingerprint_counts = Hash.new(0).merge(h["fingerprint_counts"])
         @max_values_per_position = h.fetch("max_values_per_position", PositionStats::DEFAULT_MAX_VALUES)
-        @position_stats = h["position_stats"].each_with_object({}) do |(host, prefix, sdump), acc|
-          acc[[host, prefix]] = PositionStats.from_dump(sdump)
+        @position_stats = h["position_stats"].each_with_object({}) do |entry, acc|
+          position = Position.from_dump(entry["position"])
+          acc[position] = PositionStats.from_dump(entry["stats"])
         end
         cdump = h.fetch("clusterer", { "clusters" => {} })
         @clusters = cdump["clusters"].transform_values { |c| Cluster.from_dump(c, max_values: @max_values_per_position) }
@@ -137,7 +139,9 @@ module Iriq
           "raw_shape_counts"        => @raw_shape_counts,
           "fingerprint_counts"      => @fingerprint_counts,
           "max_values_per_position" => @max_values_per_position,
-          "position_stats"          => @position_stats.map { |(host, prefix), s| [host, prefix, s.dump] },
+          "position_stats"          => @position_stats.map { |pos, s|
+            { "position" => pos.to_dump, "stats" => s.dump }
+          },
           "clusterer"               => {
             "clusters" => @clusters.transform_values(&:dump),
           },

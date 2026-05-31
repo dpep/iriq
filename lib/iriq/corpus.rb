@@ -102,7 +102,8 @@ module Iriq
 
         prefix = ""
         hinted_entries.each do |entry|
-          s.observe_position(keying_host, prefix, entry[:value], entry[:type])
+          s.observe_position(Position.path(host: keying_host, prefix: prefix),
+                             entry[:value], entry[:type])
           prefix = "#{prefix}/#{placeholder(entry)}"
         end
 
@@ -163,7 +164,7 @@ module Iriq
     def raw_shape_counts;   @storage.raw_shape_counts;   end
     def fingerprint_counts; @storage.fingerprint_counts; end
 
-    # Iterates (host, prefix) → PositionStats over all observed positions.
+    # Iterates Position → PositionStats over all observed positions.
     # Used by inspection tooling; not part of the hot path.
     def each_position_stats(&block)
       @storage.each_position_stats(&block)
@@ -177,10 +178,12 @@ module Iriq
       @storage.cluster_size
     end
 
-    # Stats for a given (host, prefix_shape) — useful for tests and
+    # Stats for a given (host, path-prefix) — useful for tests and
     # debugging. Returns nil if nothing has been observed there.
-    def stats_for(host, prefix)
-      @storage.position_stats(host, prefix)
+    # Accepts either a Position or (host, prefix) for ergonomics.
+    def stats_for(host_or_position, prefix = nil)
+      position = host_or_position.is_a?(Position) ? host_or_position : Position.path(host: host_or_position, prefix: prefix)
+      @storage.position_stats(position)
     end
 
     # Persist the corpus.
@@ -221,7 +224,7 @@ module Iriq
       prefix = ""
       keying_host = effective_host(iri.host)
       hinted.map do |entry|
-        stats = @storage.position_stats(keying_host, prefix)
+        stats = @storage.position_stats(Position.path(host: keying_host, prefix: prefix))
         out = entry.merge(
           prefix:         prefix,
           classification: classify(entry, stats),

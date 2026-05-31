@@ -11,7 +11,7 @@ module Iriq
     # the existing `iriq --corpus c.db <url>` pattern works without a flock
     # at the application layer.
     class Sqlite
-      SCHEMA_VERSION = 1
+      SCHEMA_VERSION = 2
 
       SCHEMA = <<~SQL.freeze
         CREATE TABLE IF NOT EXISTS meta (
@@ -34,25 +34,33 @@ module Iriq
           shape TEXT PRIMARY KEY,
           count INTEGER NOT NULL
         );
+        -- Position is (host, scope, locator). For scope='path' the locator
+        -- is the typed prefix; for scope='query' it's the param name.
+        -- Today only 'path' is observed here (query params live on the
+        -- cluster_* tables) — scope is in the schema so future commits
+        -- can fold query positions in without another migration.
         CREATE TABLE IF NOT EXISTS position_stats (
-          host   TEXT NOT NULL,
-          prefix TEXT NOT NULL,
-          total  INTEGER NOT NULL DEFAULT 0,
-          PRIMARY KEY (host, prefix)
+          host    TEXT NOT NULL,
+          scope   TEXT NOT NULL,
+          locator TEXT NOT NULL,
+          total   INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (host, scope, locator)
         );
         CREATE TABLE IF NOT EXISTS position_values (
-          host   TEXT NOT NULL,
-          prefix TEXT NOT NULL,
-          value  TEXT NOT NULL,
-          count  INTEGER NOT NULL,
-          PRIMARY KEY (host, prefix, value)
+          host    TEXT NOT NULL,
+          scope   TEXT NOT NULL,
+          locator TEXT NOT NULL,
+          value   TEXT NOT NULL,
+          count   INTEGER NOT NULL,
+          PRIMARY KEY (host, scope, locator, value)
         );
         CREATE TABLE IF NOT EXISTS position_types (
-          host   TEXT NOT NULL,
-          prefix TEXT NOT NULL,
-          type   TEXT NOT NULL,
-          count  INTEGER NOT NULL,
-          PRIMARY KEY (host, prefix, type)
+          host    TEXT NOT NULL,
+          scope   TEXT NOT NULL,
+          locator TEXT NOT NULL,
+          type    TEXT NOT NULL,
+          count   INTEGER NOT NULL,
+          PRIMARY KEY (host, scope, locator, type)
         );
         CREATE TABLE IF NOT EXISTS clusters (
           key    TEXT PRIMARY KEY,
@@ -208,36 +216,38 @@ module Iriq
         upsert_shape("fingerprint_counts", shape)
       end
 
-      def observe_position(host, prefix, value, type)
-        host ||= ""
-        @db.execute(<<~SQL, [host, prefix])
-          INSERT INTO position_stats (host, prefix, total) VALUES (?, ?, 1)
-          ON CONFLICT(host, prefix) DO UPDATE SET total = total + 1
+      def observe_position(position, value, type)
+        host    = position.host || ""
+        scope   = position.scope.to_s
+        locator = position.locator
+        @db.execute(<<~SQL, [host, scope, locator])
+          INSERT INTO position_stats (host, scope, locator, total) VALUES (?, ?, ?, 1)
+          ON CONFLICT(host, scope, locator) DO UPDATE SET total = total + 1
         SQL
 
         # Type counts are unbounded — always upsert.
-        @db.execute(<<~SQL, [host, prefix, type.to_s])
-          INSERT INTO position_types (host, prefix, type, count) VALUES (?, ?, ?, 1)
-          ON CONFLICT(host, prefix, type) DO UPDATE SET count = count + 1
+        @db.execute(<<~SQL, [host, scope, locator, type.to_s])
+          INSERT INTO position_types (host, scope, locator, type, count) VALUES (?, ?, ?, ?, 1)
+          ON CONFLICT(host, scope, locator, type) DO UPDATE SET count = count + 1
         SQL
 
         # Value counts are capped at max_values_per_position. If the value
         # already exists, increment it; otherwise insert only when
         # cardinality is below the cap. Two-step rather than ON CONFLICT
         # because we need to enforce the cap on insert.
-        @db.execute(<<~SQL, [host, prefix, value])
+        @db.execute(<<~SQL, [host, scope, locator, value])
           UPDATE position_values SET count = count + 1
-          WHERE host = ? AND prefix = ? AND value = ?
+          WHERE host = ? AND scope = ? AND locator = ? AND value = ?
         SQL
         if @db.changes.zero?
           card = @db.get_first_value(
-            "SELECT COUNT(*) FROM position_values WHERE host = ? AND prefix = ?",
-            [host, prefix],
+            "SELECT COUNT(*) FROM position_values WHERE host = ? AND scope = ? AND locator = ?",
+            [host, scope, locator],
           )
           if card < @max_values_per_position
             @db.execute(
-              "INSERT INTO position_values (host, prefix, value, count) VALUES (?, ?, ?, 1)",
-              [host, prefix, value],
+              "INSERT INTO position_values (host, scope, locator, value, count) VALUES (?, ?, ?, ?, 1)",
+              [host, scope, locator, value],
             )
           end
         end
@@ -328,10 +338,13 @@ module Iriq
         rows_to_count_hash("fingerprint_counts", "shape")
       end
 
-      def position_stats(host, prefix)
-        host ||= ""
+      def position_stats(position)
+        host    = position.host || ""
+        scope   = position.scope.to_s
+        locator = position.locator
         total = @db.get_first_value(
-          "SELECT total FROM position_stats WHERE host = ? AND prefix = ?", [host, prefix],
+          "SELECT total FROM position_stats WHERE host = ? AND scope = ? AND locator = ?",
+          [host, scope, locator],
         )
         return nil if total.nil?
 
@@ -340,13 +353,15 @@ module Iriq
 
         vc = Hash.new(0)
         @db.execute(
-          "SELECT value, count FROM position_values WHERE host = ? AND prefix = ?", [host, prefix]
+          "SELECT value, count FROM position_values WHERE host = ? AND scope = ? AND locator = ?",
+          [host, scope, locator],
         ) { |r| vc[r[0]] = r[1] }
         stats.instance_variable_set(:@value_counts, vc)
 
         tc = Hash.new(0)
         @db.execute(
-          "SELECT type, count FROM position_types WHERE host = ? AND prefix = ?", [host, prefix]
+          "SELECT type, count FROM position_types WHERE host = ? AND scope = ? AND locator = ?",
+          [host, scope, locator],
         ) { |r| tc[r[0].to_sym] = r[1] }
         stats.instance_variable_set(:@type_counts, tc)
 
@@ -355,10 +370,13 @@ module Iriq
 
       def each_position_stats
         seen = []
-        @db.execute("SELECT DISTINCT host, prefix FROM position_stats ORDER BY ROWID") do |row|
+        @db.execute("SELECT DISTINCT host, scope, locator FROM position_stats ORDER BY ROWID") do |row|
           seen << row
         end
-        seen.each { |host, prefix| yield [host, prefix], position_stats(host, prefix) }
+        seen.each do |host, scope, locator|
+          pos = Position.new(host: host, scope: scope.to_sym, locator: locator)
+          yield pos, position_stats(pos)
+        end
       end
 
       def clusters

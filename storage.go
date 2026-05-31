@@ -18,7 +18,7 @@ type Storage interface {
 	IncrementPathLength(length int)
 	IncrementRawShape(shape string)
 	IncrementFingerprint(shape string)
-	ObservePosition(host, prefix, value string, t SegmentType)
+	ObservePosition(pos Position, value string, t SegmentType)
 	AddToCluster(key, host, scheme, shape string, iri *Identifier) *Cluster
 
 	// Reads — materialize what the caller asks for, not the whole corpus.
@@ -26,8 +26,8 @@ type Storage interface {
 	PathLengthCounts() map[int]int
 	RawShapeCounts() map[string]int
 	FingerprintCounts() map[string]int
-	PositionStatsFor(host, prefix string) *PositionStats
-	EachPositionStats(func(host, prefix string, stats *PositionStats))
+	PositionStatsFor(pos Position) *PositionStats
+	EachPositionStats(func(pos Position, stats *PositionStats))
 	Clusters() []*Cluster
 	ClusterFor(key string) *Cluster
 	ClusterSize() int

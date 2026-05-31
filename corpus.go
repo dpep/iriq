@@ -34,13 +34,6 @@ type CorpusEntry struct {
 	Classification Classification
 }
 
-// positionKey is the (host, prefix) tuple under which observation counts
-// accumulate. Defined here so both the corpus and storage backends share it.
-type positionKey struct {
-	Host   string
-	Prefix string
-}
-
 // Corpus is a streaming observer over a (potentially unbounded) corpus of
 // IRIs, maintaining rolling aggregates and per-(host, prefix) frequency
 // stats so classification can improve as more data flows in.
@@ -142,7 +135,7 @@ func (cp *Corpus) Observe(input interface{}) (*Observation, error) {
 
 		prefix := ""
 		for _, e := range hinted {
-			cp.storage.ObservePosition(keyingHost, prefix, e.Value, e.Type)
+			cp.storage.ObservePosition(PathPosition(keyingHost, prefix), e.Value, e.Type)
 			prefix = prefix + "/" + placeholderFor(e)
 		}
 
@@ -283,9 +276,9 @@ func (cp *Corpus) Clusters() []*Cluster { return cp.storage.Clusters() }
 func (cp *Corpus) Size() int            { return cp.storage.ClusterSize() }
 
 // StatsFor returns the PositionStats for (host, prefix) — nil if nothing has
-// been observed there.
+// been observed there. Convenience wrapper that constructs a PathPosition.
 func (cp *Corpus) StatsFor(host, prefix string) *PositionStats {
-	return cp.storage.PositionStatsFor(host, prefix)
+	return cp.storage.PositionStatsFor(PathPosition(host, prefix))
 }
 
 // Save persists the corpus.
@@ -335,7 +328,7 @@ func (cp *Corpus) annotateSegments(iri *Identifier) []annotated {
 	prefix := ""
 	keyingHost := cp.effectiveHost(iri.Host)
 	for i, entry := range hinted {
-		stats := cp.storage.PositionStatsFor(keyingHost, prefix)
+		stats := cp.storage.PositionStatsFor(PathPosition(keyingHost, prefix))
 		cls := cp.classify(entry, stats)
 		out[i] = annotated{hint: entry, prefix: prefix, classification: cls}
 		prefix = prefix + "/" + placeholderFor(entry)

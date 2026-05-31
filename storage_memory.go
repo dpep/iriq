@@ -12,8 +12,8 @@ type MemoryStorage struct {
 	rawShapeCounts    map[string]int
 	fingerprintCounts map[string]int
 
-	positionStats map[positionKey]*PositionStats
-	positionKeys  []positionKey
+	positionStats map[Position]*PositionStats
+	positionKeys  []Position
 
 	clusters    map[string]*Cluster
 	clusterKeys []string
@@ -40,7 +40,7 @@ func NewMemoryStorageWith(maxValues int, c *SegmentClassifier) *MemoryStorage {
 		pathLengthCounts:  map[int]int{},
 		rawShapeCounts:    map[string]int{},
 		fingerprintCounts: map[string]int{},
-		positionStats:     map[positionKey]*PositionStats{},
+		positionStats:     map[Position]*PositionStats{},
 		clusters:          map[string]*Cluster{},
 	}
 }
@@ -65,13 +65,12 @@ func (s *MemoryStorage) IncrementFingerprint(shape string) {
 	s.fingerprintCounts[shape]++
 }
 
-func (s *MemoryStorage) ObservePosition(host, prefix, value string, t SegmentType) {
-	key := positionKey{host, prefix}
-	stats, ok := s.positionStats[key]
+func (s *MemoryStorage) ObservePosition(pos Position, value string, t SegmentType) {
+	stats, ok := s.positionStats[pos]
 	if !ok {
 		stats = NewPositionStats(s.maxValues)
-		s.positionStats[key] = stats
-		s.positionKeys = append(s.positionKeys, key)
+		s.positionStats[pos] = stats
+		s.positionKeys = append(s.positionKeys, pos)
 	}
 	stats.Observe(value, t)
 }
@@ -96,13 +95,13 @@ func (s *MemoryStorage) PathLengthCounts() map[int]int     { return copyMapIntIn
 func (s *MemoryStorage) RawShapeCounts() map[string]int    { return copyMapStringInt(s.rawShapeCounts) }
 func (s *MemoryStorage) FingerprintCounts() map[string]int { return copyMapStringInt(s.fingerprintCounts) }
 
-func (s *MemoryStorage) PositionStatsFor(host, prefix string) *PositionStats {
-	return s.positionStats[positionKey{host, prefix}]
+func (s *MemoryStorage) PositionStatsFor(pos Position) *PositionStats {
+	return s.positionStats[pos]
 }
 
-func (s *MemoryStorage) EachPositionStats(fn func(host, prefix string, stats *PositionStats)) {
+func (s *MemoryStorage) EachPositionStats(fn func(pos Position, stats *PositionStats)) {
 	for _, k := range s.positionKeys {
-		fn(k.Host, k.Prefix, s.positionStats[k])
+		fn(k, s.positionStats[k])
 	}
 }
 
