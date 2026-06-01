@@ -38,6 +38,43 @@ describe Iriq::CLI do
     end
   end
 
+  describe "JSON error envelope" do
+    def error_payload
+      JSON.parse(stderr.string)
+    end
+
+    it "emits a structured parse error to stderr under --json" do
+      expect(run("--json", "just-some-token")).to eq(2)
+      expect(stdout.string).to be_empty
+      expect(error_payload).to match("error" => { "code" => "parse_error", "message" => be_a(String) })
+    end
+
+    it "wraps an unknown option as an option_error" do
+      expect(run("--json", "--frobnicate")).to eq(1)
+      expect(error_payload.dig("error", "code")).to eq("option_error")
+    end
+
+    it "wraps a missing required argument" do
+      expect(run("--propose-recognizers", "--json")).to eq(1)
+      expect(error_payload["error"]).to include("code" => "missing_argument", "message" => "missing argument <--corpus>")
+    end
+
+    it "wraps an unknown completion shell" do
+      expect(run("completion", "fish", "--json")).to eq(1)
+      expect(error_payload.dig("error", "code")).to eq("unknown_shell")
+    end
+
+    it "honors the bundled short -J flag on the error path" do
+      expect(run("-nJ", "just-some-token")).to eq(2)
+      expect(error_payload.dig("error", "code")).to eq("parse_error")
+    end
+
+    it "keeps the plain human error without --json" do
+      expect(run("just-some-token")).to eq(2)
+      expect(stderr.string).to start_with("iriq: parse error:")
+    end
+  end
+
   describe "default (no section flag)" do
     it "runs parse + normalize for a URL-ish input" do
       expect(run("foo.com/users/123")).to eq(0)

@@ -25,7 +25,7 @@ import (
 // cmdCompletion prints a shell-completion script to stdout. With no
 // argument the shell is inferred from $SHELL; pass bash or zsh to
 // override. Returns 0 on success, 1 for unknown shells.
-func cmdCompletion(args []string, stdout, stderr io.Writer) int {
+func cmdCompletion(args []string, stdout, stderr io.Writer, jsonMode bool) int {
 	shell := defaultShell()
 	if len(args) > 0 {
 		shell = args[0]
@@ -38,8 +38,8 @@ func cmdCompletion(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stdout, iriq.CompletionZsh)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "iriq: unknown shell %q (try bash or zsh)\n", shell)
-		return 1
+		return emitError(stderr, jsonMode, "unknown_shell",
+			fmt.Sprintf("unknown shell %q (try bash or zsh)", shell), "", 1)
 	}
 }
 
