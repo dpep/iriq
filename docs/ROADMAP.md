@@ -7,6 +7,42 @@ APIs freely and bump minor versions per shipped feature.
 Source of the plan: principal-engineer architectural review on 2026-05-30,
 captured in the project history.
 
+## Where to pick up next time
+
+Last updated: 2026-05-31, current version **v0.28.0**.
+
+**Phase 1**: complete (v0.11 → v0.19). The structural foundation —
+Recognizer ensemble, Position, Shape, Evidence, single Normalizer,
+events + reducers — is all in place.
+
+**Phase 2**: 5 of 7 items shipped (v0.21 → v0.28).
+- ✅ Re-runnable inference (library + CLI)
+- ✅ Learned recognizers (library + propose CLI + auto-activate CLI)
+- ✅ Cross-host learning (catalog + confidence integration)
+- ⏭️ **Inter-position correlations** — next up. When slot A's value
+  predicts slot B's type, surface that ("after `/orgs/{org_id}/` the
+  next segment is almost always `users` or `repos`"). Read-side query
+  over existing cluster + position stats; no storage changes needed.
+  Estimated scope: similar to cross-host shape learning. One commit.
+- ⏭️ **Near-shape clustering** — edit-distance over Shapes catches
+  near-duplicates that today require exact match. Bigger scope — needs
+  a Shape distance metric, candidate-pair search, and CLI for
+  inspection. Two or three commits.
+
+**Phase 3**: not started. Schema export, PII mode, streaming observatory,
+external recognizer registry.
+
+**Housekeeping done**: Ruby 3.3 dropped (4d49509), shell completion
+with brew auto-install (v0.25), homebrew skill updated, README has the
+full learning-loop documentation, all CLI flags reflected in `-h` and
+completion scripts. Homebrew formula tracks 0.28.0.
+
+**Recommended next commit**: inter-position correlations. The
+read-side seam is clean (walk clusters, group segments by their
+predecessor) and the payoff is concrete (next-segment hints for
+corpus-informed normalization). Falls out of the existing data with
+no schema changes.
+
 ## Operating ground rules (decisions on file)
 
 - **Backward compatibility:** none required while pre-1.0. Break what you must.

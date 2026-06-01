@@ -1,11 +1,17 @@
-# iriq architecture (target model)
+# iriq architecture
 
-This is the **end-state** model we are migrating toward in Phase 1. Current
-code does not match this yet — `ROADMAP.md` tracks the migration.
+As of v0.28.0, this describes the system that's actually in the repo —
+Phase 1 of the rearchitecture roadmap (target model below) is complete,
+and Phase 2 has added the learning layer on top. Originally written as
+the *target* model at the start of Phase 1; the implementation has
+caught up.
 
-For the description of what's in the repo *today*, read the source
-(particularly `lib/iriq/segment_classifier.rb`, `lib/iriq/corpus.rb`, and
-`lib/iriq/cluster.rb`).
+`ROADMAP.md` tracks what's still pending (inter-position correlations,
+near-shape clustering, and Phase 3 productize items).
+
+For the inner details, read the source: `lib/iriq/{recognizer,position,
+shape,evidence,event,reducer,recognizer_proposal,synthesized_recognizer,
+cross_host_shape,corpus}.rb` and their Go counterparts at the repo root.
 
 ## Core principle
 
@@ -168,12 +174,50 @@ re-reads materialized views; it does not require re-running the pipeline.
 - The four `Iriq.*` module methods: `parse`, `normalize`, `explain`,
   `extract`.
 
-## Extensibility (internal-only in v1)
+## Extensibility (where it stands)
 
-The Recognizer registry is internal-only for v1 — `SegmentClassifier::DEFAULT`
-is loaded from a built-in list. The seam exists so an external `register!`
-call drops in as a small follow-up. Designing the v1 internals to support
-this is the explicit goal even though we don't ship the public API yet.
+- **Recognizer registry**: per-classifier and mutable as of v0.26.
+  `SegmentClassifier#register_recognizer` appends to the instance's
+  ensemble; `SegmentClassifier::DEFAULT` is the module-level singleton
+  that fresh corpora share, and the first `Corpus#activate_proposal`
+  call swaps to a private classifier so activations don't leak.
+  External users registering their own Recognizer subclasses works
+  today via the same API; an *external* registry / discovery surface
+  (load Recognizers from a config file or env var) is still future
+  work.
+- **ProposalStrategy**: pluggable via `Iriq::ProposalStrategy::DEFAULTS`.
+  Adding a strategy = define a class with `#propose(storage, **opts)`
+  and append. v1 ships one strategy (PrefixUnderscoreId); next-segment
+  / cross-position correlation strategies are pending Phase 2 work.
+- **Reducer registry**: the dispatch table `Iriq::Reducer::DEFAULTS`
+  maps `Event` subclasses to reducer lambdas. Adding a metric = define
+  an `Event` subtype, write a Reducer, register it. The registry is
+  exposed as a constant; safe to monkeypatch in user code, though no
+  public registration API ships yet.
+- **Storage backends**: three ship (Memory, JSON, SQLite). Adding a
+  fourth = implement the `Storage` interface (lib/iriq/storage/memory.rb
+  is the canonical reference), wire it into `Storage.open` extension
+  routing, add it to `script/cli_parity.sh`.
 
-Same for Reducers: built-in set is fixed in v1; adding the registry surface
-is a Phase 3 deliverable.
+## Learning layer (Phase 2, on top of the substrate above)
+
+The Phase 1 substrate gives us typed observations, structured Shape,
+and re-runnable inference. Phase 2 builds the learning pipeline on top:
+
+- **Source-IRI log** (v0.21). Storage persists every observed canonical
+  IRI alongside the materialized views. `Corpus#reinfer` drops the
+  views and replays the log through the current classifier + reducers
+  — lets us tune thresholds or swap the classifier without re-feeding.
+- **RecognizerProposal** (v0.23). A struct describing a learned
+  pattern: prefix / suggested_type / positions / hosts / coverage /
+  confidence / observation_count / sample_values / strategy.
+  Emitted by ProposalStrategy implementations; not auto-applied.
+- **SynthesizedRecognizer** (v0.26). Built from a proposal's prefix;
+  regex `^<prefix>[A-Za-z0-9]+$`, `Specificity::SEMANTIC`. Same
+  Recognizer interface as the built-ins (UUID, Date, Integer) — the
+  ensemble doesn't know the difference.
+- **CrossHostShape** (v0.27). Read-side: route shapes that recur
+  across multiple hosts. Independent evidence of semantic pattern.
+- **Confidence formula** (v0.28). `min(1.0, coverage + 0.05 *
+  (host_count - 1))`. Single-host proposals are unchanged; cross-host
+  proposals get boosted. `--activate-above F` checks confidence.
