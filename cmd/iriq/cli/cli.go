@@ -48,16 +48,22 @@ Corpus + stats:
                         recur enough to suggest a new Recognizer.
                         Combine with --json for structured output.
                         Requires --corpus.
-      --min-observations N  (proposal threshold; default 20)
-      --min-coverage F  (proposal threshold; default 0.7)
-      --min-hosts N     (proposal threshold; default 1)
-      --activate-above F  Promote every proposal at or above coverage F
-                        into a live Recognizer on the corpus, then
-                        reinfer.
       --cross-host-shapes
                         List route shapes that recur across multiple
                         hosts. Combine with --min-hosts. Requires
                         --corpus.
+      --activate-above F  With --propose-recognizers, promote every
+                        proposal at or above CONFIDENCE F into a live
+                        Recognizer on the corpus, then reinfer.
+                        Confidence integrates coverage and cross-host
+                        corroboration.
+
+Thresholds (apply to --propose-recognizers / --cross-host-shapes):
+      --min-observations N  proposal noise floor (default 20)
+      --min-coverage F  proposal coverage floor (default 0.7)
+      --min-hosts N     proposal: minimum hosts (default 1);
+                        cross-host-shapes: minimum hosts to list
+                        (default 2)
 
 Other:
   -h, --help            Show this message
@@ -540,6 +546,7 @@ func cmdPropose(stdout, stderr io.Writer, corpus *iriq.Corpus, opts *options) in
 			Positions        []positionJSON  `json:"positions"`
 			Hosts            []string        `json:"hosts"`
 			Coverage         json.RawMessage `json:"coverage"`
+			Confidence       json.RawMessage `json:"confidence"`
 			ObservationCount int             `json:"observation_count"`
 			SampleValues     []string        `json:"sample_values"`
 			Strategy         string          `json:"strategy"`
@@ -558,6 +565,7 @@ func cmdPropose(stdout, stderr io.Writer, corpus *iriq.Corpus, opts *options) in
 				Positions:        positions,
 				Hosts:            p.Hosts,
 				Coverage:         json.RawMessage(formatFloatRubyStyle(p.Coverage)),
+				Confidence:       json.RawMessage(formatFloatRubyStyle(p.Confidence)),
 				ObservationCount: p.ObservationCount,
 				SampleValues:     p.SampleValues,
 				Strategy:         p.Strategy,
@@ -580,6 +588,7 @@ func cmdPropose(stdout, stderr io.Writer, corpus *iriq.Corpus, opts *options) in
 		fmt.Fprintf(stdout, "proposal: %s (%s)\n", p.SuggestedType, p.Prefix)
 		fmt.Fprintf(stdout, "  strategy:    %s\n", p.Strategy)
 		fmt.Fprintf(stdout, "  coverage:    %.2f\n", p.Coverage)
+		fmt.Fprintf(stdout, "  confidence:  %.2f\n", p.Confidence)
 		fmt.Fprintf(stdout, "  observations: %d\n", p.ObservationCount)
 		fmt.Fprintf(stdout, "  hosts:       %s\n", strings.Join(p.Hosts, ", "))
 		fmt.Fprintf(stdout, "  positions:   %d\n", len(p.Positions))

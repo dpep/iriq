@@ -30,7 +30,7 @@ _iriq() {
             COMPREPLY=( $(compgen -W "full registrable reg none" -- "$cur") )
             return
             ;;
-        --min-observations|--min-hosts|--min-coverage)
+        --min-observations|--min-hosts|--min-coverage|--activate-above)
             # Numeric argument — no completion candidates.
             return
             ;;
@@ -45,7 +45,8 @@ _iriq() {
         local flags="-h --help -V --version -p --parse -n --normalize -e --explain
                      -j --json -J --ndjson -N --no-hints --hints --no-scheme-less
                      --scheme-less --corpus --host --stats --reinfer
-                     --propose-recognizers --min-observations --min-coverage --min-hosts"
+                     --propose-recognizers --activate-above --cross-host-shapes
+                     --min-observations --min-coverage --min-hosts"
         COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
         return
     fi

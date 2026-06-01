@@ -219,13 +219,15 @@ func (cp *Corpus) ActivateProposal(p RecognizerProposal) (*SynthesizedRecognizer
 	return r, nil
 }
 
-// ActivateProposalsAbove activates every proposal whose coverage clears
-// the threshold. Convenience for `iriq --propose-recognizers --activate-above`.
-func (cp *Corpus) ActivateProposalsAbove(coverageThreshold float64, opts ProposalOptions) ([]*SynthesizedRecognizer, error) {
+// ActivateProposalsAbove activates every proposal whose confidence
+// clears the threshold. Confidence incorporates both per-position
+// coverage AND cross-host corroboration — see computeConfidence.
+// Convenience for `iriq --propose-recognizers --activate-above`.
+func (cp *Corpus) ActivateProposalsAbove(confidenceThreshold float64, opts ProposalOptions) ([]*SynthesizedRecognizer, error) {
 	proposals := cp.ProposeRecognizers(nil, opts)
 	var activated []*SynthesizedRecognizer
 	for _, p := range proposals {
-		if p.Coverage < coverageThreshold {
+		if p.Confidence < confidenceThreshold {
 			continue
 		}
 		r, err := cp.ActivateProposal(p)

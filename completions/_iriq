@@ -30,9 +30,11 @@ _iriq() {
         '--stats[print rolling aggregates]' \
         '--reinfer[replay the source-IRI log]' \
         '--propose-recognizers[propose new Recognizers from observed shapes]' \
+        '--cross-host-shapes[list route shapes seen across multiple hosts]' \
+        '--activate-above[auto-activate proposals at or above this confidence]:F:' \
         '--min-observations[proposal threshold]:N:' \
         '--min-coverage[proposal threshold]:F:' \
-        '--min-hosts[proposal threshold]:N:' \
+        '--min-hosts[threshold for proposals and cross-host shapes]:N:' \
         '1:command or file:->first' \
         '*:file:_files' \
         && return 0

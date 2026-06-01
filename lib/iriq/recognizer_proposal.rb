@@ -22,11 +22,12 @@ module Iriq
   #   strategy           — the ProposalStrategy that emitted this record
   class RecognizerProposal
     attr_reader :prefix, :suggested_type, :positions, :hosts,
-                :coverage, :observation_count, :sample_values, :strategy
+                :coverage, :confidence, :observation_count,
+                :sample_values, :strategy
 
     def initialize(prefix:, suggested_type:, positions:, hosts:,
                    coverage:, observation_count:, sample_values:,
-                   strategy:)
+                   strategy:, confidence: nil)
       @prefix            = prefix
       @suggested_type    = suggested_type
       @positions         = positions.freeze
@@ -35,6 +36,7 @@ module Iriq
       @observation_count = observation_count
       @sample_values     = sample_values.freeze
       @strategy          = strategy
+      @confidence        = confidence.nil? ? compute_confidence : confidence
     end
 
     def to_h
@@ -44,10 +46,24 @@ module Iriq
         positions:         @positions.map(&:to_h),
         hosts:             @hosts.to_a.sort,
         coverage:          @coverage,
+        confidence:        @confidence,
         observation_count: @observation_count,
         sample_values:     @sample_values,
         strategy:          @strategy,
       }
+    end
+
+    private
+
+    # Confidence = coverage + linear cross-host boost, capped at 1.0.
+    # Single-host proposals get their raw coverage as confidence (no
+    # boost). Each additional host adds CROSS_HOST_BOOST_PER_HOST to
+    # the score. A proposal supported by ~10 distinct hosts caps out
+    # regardless of raw coverage; below that, both signals compose.
+    def compute_confidence
+      boost = (@hosts.size - 1) * ProposalStrategy::CROSS_HOST_BOOST_PER_HOST
+      score = @coverage + boost
+      score > 1.0 ? 1.0 : score
     end
   end
 
@@ -65,6 +81,11 @@ module Iriq
     # single-host corpora this defaults to 1; bumping to 2+ promotes
     # cross-host patterns over host-local ones.
     DEFAULT_MIN_HOSTS        = 1
+    # Confidence boost added per additional host beyond the first. A
+    # pattern seen on 10+ hosts caps out the boost (+0.45 ≈ 1.0 when
+    # combined with any reasonable coverage); single-host patterns get
+    # no boost (their coverage IS their confidence).
+    CROSS_HOST_BOOST_PER_HOST = 0.05
 
     # Detects `<prefix>_<alphanumeric>` patterns at slug/opaque_id
     # positions — the GitHub PAT (`ghp_…`), Stripe customer ID (`cus_…`),
@@ -100,7 +121,7 @@ module Iriq
           end
         end
 
-        per_prefix.filter_map do |prefix, acc|
+        per_prefix.filter_map { |prefix, acc|
           next nil if acc[:matching_count] < min_observations
           next nil if acc[:hosts].size < min_hosts
 
@@ -120,7 +141,7 @@ module Iriq
             sample_values:     acc[:matches].sort.first(5),
             strategy:          NAME,
           )
-        end
+        }.sort_by { |p| [-p.confidence, p.prefix] }
       end
 
       private

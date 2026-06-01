@@ -46,16 +46,22 @@ module Iriq
                               recur enough to suggest a new Recognizer.
                               Combine with --json for structured output.
                               Requires --corpus.
-            --min-observations N  (proposal threshold; default 20)
-            --min-coverage F  (proposal threshold; default 0.7)
-            --min-hosts N     (proposal threshold; default 1)
-            --activate-above F  Promote every proposal at or above
-                              coverage F into a live Recognizer on the
-                              corpus, then reinfer.
             --cross-host-shapes
                               List route shapes that recur across
                               multiple hosts. Combine with --min-hosts.
                               Requires --corpus.
+            --activate-above F  With --propose-recognizers, promote every
+                              proposal at or above CONFIDENCE F into a
+                              live Recognizer on the corpus, then
+                              reinfer. Confidence integrates coverage
+                              and cross-host corroboration.
+
+      Thresholds (apply to --propose-recognizers / --cross-host-shapes):
+            --min-observations N  proposal noise floor (default 20)
+            --min-coverage F      proposal coverage floor (default 0.7)
+            --min-hosts N         proposal: minimum hosts (default 1);
+                                  cross-host-shapes: minimum hosts to
+                                  list (default 2)
 
       Other:
         -h, --help            Show this message
@@ -393,6 +399,7 @@ module Iriq
         stdout.puts "proposal: #{p.suggested_type} (#{p.prefix})"
         stdout.puts "  strategy:    #{p.strategy}"
         stdout.puts "  coverage:    #{format('%.2f', p.coverage)}"
+        stdout.puts "  confidence:  #{format('%.2f', p.confidence)}"
         stdout.puts "  observations: #{p.observation_count}"
         stdout.puts "  hosts:       #{p.hosts.to_a.sort.join(', ')}"
         stdout.puts "  positions:   #{p.positions.size}"

@@ -79,6 +79,9 @@ func TestActivateProposalReinfersExistingObservations(t *testing.T) {
 }
 
 func TestActivateProposalPersistsAcrossSQLiteReopens(t *testing.T) {
+	if !HasSqlite {
+		t.Skip("requires build tag: sqlite")
+	}
 	dir, err := os.MkdirTemp("", "iriq-activate")
 	if err != nil {
 		t.Fatal(err)

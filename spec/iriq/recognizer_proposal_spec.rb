@@ -74,6 +74,39 @@ describe "Recognizer proposals" do
       expect(p.hosts).to be_frozen
     end
 
+    it "computes confidence = coverage when host_count is 1 (no boost)" do
+      pos = Iriq::Position.path(host: "foo.com", prefix: "/x")
+      p = described_class.new(
+        prefix: "ghp_", suggested_type: :ghp,
+        positions: [pos], hosts: ["foo.com"],
+        coverage: 0.7, observation_count: 25,
+        sample_values: [],
+        strategy: :prefix_underscore_id,
+      )
+      expect(p.confidence).to be_within(0.0001).of(0.7)
+    end
+
+    it "boosts confidence by 0.05 per additional host, capped at 1.0" do
+      pos = Iriq::Position.path(host: "foo.com", prefix: "/x")
+      multi_host = described_class.new(
+        prefix: "ghp_", suggested_type: :ghp,
+        positions: [pos], hosts: ["a.com", "b.com", "c.com"],
+        coverage: 0.7, observation_count: 25,
+        sample_values: [],
+        strategy: :prefix_underscore_id,
+      )
+      expect(multi_host.confidence).to be_within(0.0001).of(0.8) # 0.7 + 0.05*2
+
+      ceiling = described_class.new(
+        prefix: "ghp_", suggested_type: :ghp,
+        positions: [pos], hosts: (1..15).map { |i| "h#{i}.com" },
+        coverage: 0.9, observation_count: 25,
+        sample_values: [],
+        strategy: :prefix_underscore_id,
+      )
+      expect(ceiling.confidence).to eq(1.0) # 0.9 + 0.05*14 = 1.6 capped
+    end
+
     it "round-trips to a Hash" do
       pos = Iriq::Position.path(host: "foo.com", prefix: "/x")
       p = described_class.new(

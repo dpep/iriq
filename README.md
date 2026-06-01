@@ -307,6 +307,83 @@ top of the deterministic fields:
 | `:corpus_inferred_variable` | Classifier said literal, but position has high entropy |
 | `:ambiguous`                | Insufficient signal — never seen, or mixed           |
 
+### Re-runnable inference
+
+A corpus persists the source-IRI log alongside the materialized views.
+`corpus.reinfer` drops every view and replays the log through the
+current classifier + reducers. Tune a threshold, swap in a different
+classifier, or activate new Recognizers (below) — then `reinfer` to see
+the new results without re-feeding URLs.
+
+```ruby
+corpus.observe(url) for url in stream
+corpus.reinfer   # rebuilds host_counts, position_stats, clusters from log
+```
+
+CLI: `iriq --corpus c.db --reinfer`.
+
+### Learning new types (proposals + activation)
+
+When a literal shape recurs enough, the corpus can propose a new
+`Recognizer` for it. Today the only built-in strategy is
+`PrefixUnderscoreId`, which detects `<prefix>_<alphanumeric>` patterns at
+slug/opaque_id positions — the GitHub-PAT family (`ghp_…`), Stripe IDs
+(`cus_…`), Twilio SIDs, etc.
+
+```ruby
+proposals = corpus.propose_recognizers
+proposals.first.prefix             # "ghp_"
+proposals.first.suggested_type     # :ghp
+proposals.first.coverage           # 1.0  — fraction of position values matching
+proposals.first.confidence         # 1.0  — coverage + cross-host boost (capped at 1.0)
+proposals.first.observation_count  # 1247
+proposals.first.hosts              # Set of hosts seen at
+proposals.first.sample_values      # ["ghp_aaaa0001xyzzy", ...]
+```
+
+Proposal thresholds: `min_observations` (default 20), `min_coverage`
+(0.7), `min_hosts` (1). The strategy interface is pluggable via
+`Iriq::ProposalStrategy::DEFAULTS` so new detection rules drop in
+without touching `Corpus`.
+
+Promote a proposal to a live `Recognizer` and reinfer in one shot:
+
+```ruby
+recognizer = corpus.activate_proposal(proposals.first)
+# ghp_xyz123 now classifies as :ghp, not :slug
+# Existing observations have been re-classified via reinfer.
+```
+
+Activations persist with the corpus — reopen and they reapply. They
+don't leak to other corpora using the module-level `SegmentClassifier::DEFAULT`;
+the first activation swaps the corpus to a private classifier instance.
+
+CLI:
+- `iriq --corpus c.db --propose-recognizers` — print proposals (human or `--json`)
+- `iriq --corpus c.db --propose-recognizers --activate-above 0.9` — auto-activate every proposal with confidence ≥ 0.9 and reinfer
+
+### Cross-host shape learning
+
+A route shape that recurs across multiple hosts is independent evidence
+of a semantic pattern — two unrelated hosts inventing the same
+`/users/{integer}` structure by accident is unlikely. `corpus.cross_host_shapes`
+exposes this directly:
+
+```ruby
+corpus.cross_host_shapes(min_hosts: 2)
+# => [
+#   #<CrossHostShape shape="/users/{user_id}" hosts=#<Set:{"api.github.com","api.gitlab.com"}> observation_count=14203>,
+#   ...
+# ]
+```
+
+The same signal feeds back into proposal `confidence`: each additional
+host beyond the first adds `0.05` to the score (capped at 1.0), so a
+prefix proposed on 5 hosts is meaningfully stronger than the same
+coverage seen on 1 host.
+
+CLI: `iriq --corpus c.db --cross-host-shapes [--min-hosts N]`.
+
 ## Extracting IRIs from text
 
 `Iriq::Extractor` is what powers pipe-mode in the CLI. Picks up explicit-
@@ -397,6 +474,14 @@ Flags:
 | `--corpus PATH`     | Load/create a corpus at PATH (`.json` or `.db`/`.sqlite`/`.sqlite3`) |
 | `--host MODE`       | Host-keying for clustering: `full` (default), `reg` strips subdomains, `none` ignores host |
 | `--stats`           | Print rolling aggregates                                |
+| `--reinfer`         | Drop the materialized views and replay the source-IRI log through the current classifier + reducers (rebuilds counts/clusters/positions from scratch) |
+| `--propose-recognizers` | Scan observed values for shape patterns that recur enough to suggest a new Recognizer. Combine with `--json` for structured output |
+| `--cross-host-shapes`   | List route shapes that recur across multiple hosts |
+| `--min-observations N`  | Proposal threshold; default 20                    |
+| `--min-coverage F`      | Proposal threshold; default 0.7                   |
+| `--min-hosts N`         | Threshold for both proposals and cross-host shapes; default 1 / 2 respectively |
+| `--activate-above F`    | With `--propose-recognizers`, auto-activate every proposal whose confidence is ≥ F |
+| `completion bash\|zsh`  | Print shell completion script (Homebrew installs this automatically) |
 | `-V, --version`     | Print version                                           |
 
 A positional argument that doesn't parse as an IRI but IS an existing

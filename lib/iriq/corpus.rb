@@ -179,11 +179,13 @@ module Iriq
       recognizer
     end
 
-    # Convenience: activate every proposal whose coverage clears the
-    # given threshold. Returns the activated Recognizers.
-    def activate_proposals_above(coverage_threshold, **propose_opts)
+    # Convenience: activate every proposal whose confidence clears the
+    # given threshold. Returns the activated Recognizers. Confidence
+    # incorporates both per-position coverage AND cross-host
+    # corroboration — see RecognizerProposal#compute_confidence.
+    def activate_proposals_above(confidence_threshold, **propose_opts)
       proposals = propose_recognizers(**propose_opts)
-      proposals.select { |p| p.coverage >= coverage_threshold }.map { |p| activate_proposal(p) }
+      proposals.select { |p| p.confidence >= confidence_threshold }.map { |p| activate_proposal(p) }
     end
 
     # Number of activated recognizers persisted with this corpus.

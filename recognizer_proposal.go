@@ -17,9 +17,27 @@ type RecognizerProposal struct {
 	Positions         []Position // every Position where the proposal matched
 	Hosts             []string   // distinct hosts the proposal was seen at (sorted)
 	Coverage          float64    // matching sampled observations / total sampled
+	// Confidence integrates Coverage + cross-host corroboration. Single-host
+	// proposals have Confidence == Coverage; each additional host adds
+	// CrossHostBoostPerHost (default 0.05), capped at 1.0.
+	Confidence        float64
 	ObservationCount  int        // total matching observations
 	SampleValues      []string   // up to 5 examples
 	Strategy          string     // strategy that emitted this proposal
+}
+
+// CrossHostBoostPerHost is the per-host confidence boost beyond the first.
+// A pattern seen on 10+ hosts caps out the boost; single-host patterns
+// get no boost (their coverage IS their confidence).
+const CrossHostBoostPerHost = 0.05
+
+// computeConfidence applies the cross-host boost formula.
+func computeConfidence(coverage float64, hostCount int) float64 {
+	score := coverage + CrossHostBoostPerHost*float64(hostCount-1)
+	if score > 1.0 {
+		return 1.0
+	}
+	return score
 }
 
 // ProposalStrategy is the interface for pluggable proposal-detection
@@ -153,11 +171,19 @@ func (PrefixUnderscoreIdStrategy) Propose(s Storage, opts ProposalOptions) []Rec
 			Positions:        acc.positionsOrdered,
 			Hosts:            hostList,
 			Coverage:         coverage,
+			Confidence:       computeConfidence(coverage, len(hostList)),
 			ObservationCount: acc.matchingCount,
 			SampleValues:     samples,
 			Strategy:         PrefixUnderscoreIdStrategy{}.Name(),
 		})
 	}
+	// Stable rank: confidence desc, then prefix asc.
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Confidence != out[j].Confidence {
+			return out[i].Confidence > out[j].Confidence
+		}
+		return out[i].Prefix < out[j].Prefix
+	})
 	return out
 }
 
