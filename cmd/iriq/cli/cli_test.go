@@ -72,6 +72,57 @@ func TestUnknownOption(t *testing.T) {
 	}
 }
 
+// errorCode parses the structured stderr envelope and returns its code.
+func errorCode(t *testing.T, stderr string) string {
+	t.Helper()
+	var env struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(stderr), &env); err != nil {
+		t.Fatalf("stderr is not a JSON error envelope: %q (%v)", stderr, err)
+	}
+	return env.Error.Code
+}
+
+func TestJSONErrorEnvelope(t *testing.T) {
+	cases := []struct {
+		name string
+		code int
+		want string
+		argv []string
+	}{
+		{"parse", 2, "parse_error", []string{"--json", "just-some-token"}},
+		{"option", 1, "option_error", []string{"--json", "--frobnicate"}},
+		{"missing", 1, "missing_argument", []string{"--propose-recognizers", "--json"}},
+		{"shell", 1, "unknown_shell", []string{"completion", "fish", "--json"}},
+		{"bundled-J", 2, "parse_error", []string{"-nJ", "just-some-token"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := runCLI(t, "", tc.argv...)
+			if r.code != tc.code {
+				t.Errorf("code = %d, want %d", r.code, tc.code)
+			}
+			if r.stdout != "" {
+				t.Errorf("stdout should be empty, got %q", r.stdout)
+			}
+			if got := errorCode(t, r.stderr); got != tc.want {
+				t.Errorf("error code = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPlainErrorWithoutJSON(t *testing.T) {
+	r := runCLI(t, "", "just-some-token")
+	if !strings.HasPrefix(r.stderr, "iriq: parse error:") {
+		t.Errorf("stderr = %q", r.stderr)
+	}
+}
+
 func TestDefaultParseAndNormalize(t *testing.T) {
 	r := runCLI(t, "", "foo.com/users/123")
 	if r.code != 0 {

@@ -103,26 +103,26 @@ const (
 )
 
 type options struct {
-	help       bool
-	version    bool
-	json         bool
-	ndjson       bool
-	hints        bool
-	sections     []section
-	corpus       string
-	stats        bool
-	reinfer      bool
-	propose      bool
+	help               bool
+	version            bool
+	json               bool
+	ndjson             bool
+	hints              bool
+	sections           []section
+	corpus             string
+	stats              bool
+	reinfer            bool
+	propose            bool
 	proposeMinObs      int
 	proposeMinCoverage float64
 	// --min-hosts is generic: it applies to both --propose-recognizers
 	// (proposal threshold) and --cross-host-shapes (cross-host
 	// recurrence threshold).
-	minHosts           int
-	activateAbove      float64 // 0 means disabled
-	crossHostShapes    bool
-	schemeLess   bool
-	hostStrategy iriq.HostStrategy
+	minHosts        int
+	activateAbove   float64 // 0 means disabled
+	crossHostShapes bool
+	schemeLess      bool
+	hostStrategy    iriq.HostStrategy
 }
 
 func defaultOptions() *options {
@@ -133,8 +133,7 @@ func defaultOptions() *options {
 func Run(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 	args, opts, err := parseOptions(argv)
 	if err != nil {
-		fmt.Fprintf(stderr, "iriq: %s\n", err)
-		return 1
+		return emitError(stderr, argvWantsJSON(argv), "option_error", err.Error(), "", 1)
 	}
 	if opts.help {
 		fmt.Fprint(stdout, usage)
@@ -149,7 +148,7 @@ func Run(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 	// `iriq completion <shell>` short-circuits — no corpus, no IRI input,
 	// just emit the embedded script.
 	if len(args) > 0 && args[0] == "completion" {
-		return cmdCompletion(args[1:], stdout, stderr)
+		return cmdCompletion(args[1:], stdout, stderr, opts.json)
 	}
 
 	explicitCluster := false
@@ -185,7 +184,7 @@ func Run(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 	var code int
 	switch {
 	case opts.reinfer:
-		code = cmdReinfer(stdout, stderr, corpus)
+		code = cmdReinfer(stdout, stderr, corpus, opts)
 	case opts.propose:
 		code = cmdPropose(stdout, stderr, corpus, opts)
 	case opts.crossHostShapes:
@@ -405,13 +404,12 @@ func parseOptions(argv []string) ([]string, *options, error) {
 
 func cmdSummary(stdout, stderr io.Writer, args []string, opts *options, corpus *iriq.Corpus) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "iriq: missing argument <input>")
-		return 1
+		return emitError(stderr, opts.json, "missing_argument", "missing argument <input>", "", 1)
 	}
 	iri, err := iriq.Parse(args[0])
 	if err != nil {
-		fmt.Fprintf(stderr, "iriq: parse error: %s\n", parseMsg(err))
-		return 2
+		msg := parseMsg(err)
+		return emitError(stderr, opts.json, "parse_error", msg, "iriq: parse error: "+msg, 2)
 	}
 	if corpus != nil {
 		_, _ = corpus.Observe(iri)
@@ -499,8 +497,7 @@ func formatFloatRubyStyle(f float64) string {
 // JSON array under --json.
 func cmdPropose(stdout, stderr io.Writer, corpus *iriq.Corpus, opts *options) int {
 	if corpus == nil {
-		fmt.Fprintln(stderr, "iriq: missing argument <--corpus>")
-		return 1
+		return emitError(stderr, opts.json, "missing_argument", "missing argument <--corpus>", "", 1)
 	}
 
 	popts := iriq.ProposalOptions{
@@ -605,8 +602,7 @@ func cmdPropose(stdout, stderr io.Writer, corpus *iriq.Corpus, opts *options) in
 // in the corpus. One line per shape in human mode, JSON array under --json.
 func cmdCrossHostShapes(stdout, stderr io.Writer, corpus *iriq.Corpus, opts *options) int {
 	if corpus == nil {
-		fmt.Fprintln(stderr, "iriq: missing argument <--corpus>")
-		return 1
+		return emitError(stderr, opts.json, "missing_argument", "missing argument <--corpus>", "", 1)
 	}
 
 	min := opts.minHosts
@@ -658,10 +654,9 @@ func cmdCrossHostShapes(stdout, stderr io.Writer, corpus *iriq.Corpus, opts *opt
 // cmdReinfer drops the materialized views in the corpus and replays the
 // source-IRI log through the current classifier + reducers. Prints a short
 // before/after summary.
-func cmdReinfer(stdout, stderr io.Writer, corpus *iriq.Corpus) int {
+func cmdReinfer(stdout, stderr io.Writer, corpus *iriq.Corpus, opts *options) int {
 	if corpus == nil {
-		fmt.Fprintln(stderr, "iriq: missing argument <--corpus>")
-		return 1
+		return emitError(stderr, opts.json, "missing_argument", "missing argument <--corpus>", "", 1)
 	}
 	n := corpus.ObservedIRICount()
 	before := corpus.Size()
@@ -684,8 +679,7 @@ func cmdReinfer(stdout, stderr io.Writer, corpus *iriq.Corpus) int {
 
 func cmdStats(stdout, stderr io.Writer, corpus *iriq.Corpus, opts *options) int {
 	if corpus == nil {
-		fmt.Fprintln(stderr, "iriq: missing argument <--corpus>")
-		return 1
+		return emitError(stderr, opts.json, "missing_argument", "missing argument <--corpus>", "", 1)
 	}
 	emitStats(stdout, corpus, opts)
 	return 0
@@ -1258,6 +1252,52 @@ func mapFromPairs(pairs []kv) map[string]int {
 		out[p.key] = p.value
 	}
 	return out
+}
+
+// errorEnvelope is the structured shape emitted on the error path under
+// --json. Field order (error → code, message) and the lack of HTML escaping
+// (via writeJSON) match Ruby's JSON.generate output byte-for-byte.
+type errorEnvelope struct {
+	Error struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// emitError writes an error to stderr and returns its exit code. Under JSON
+// mode it emits an errorEnvelope so agents and pipelines get parseable output
+// on the failure path; otherwise the plain "iriq: <human>" line (human
+// defaults to "iriq: <message>"). Mirrors emit_error in lib/iriq/cli.rb.
+func emitError(w io.Writer, jsonMode bool, code, message, human string, exitCode int) int {
+	if jsonMode {
+		var env errorEnvelope
+		env.Error.Code = code
+		env.Error.Message = message
+		writeJSON(w, env)
+	} else {
+		if human == "" {
+			human = "iriq: " + message
+		}
+		fmt.Fprintln(w, human)
+	}
+	return exitCode
+}
+
+// argvWantsJSON detects whether JSON output was requested by scanning raw
+// argv — used before option parsing completes (or when it fails) so errors
+// can still honor --json. Handles bundled short flags like -nj. Mirrors
+// json_requested? in lib/iriq/cli.rb.
+func argvWantsJSON(argv []string) bool {
+	for _, a := range argv {
+		if a == "--json" || a == "--ndjson" {
+			return true
+		}
+		if strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") &&
+			(strings.ContainsRune(a, 'j') || strings.ContainsRune(a, 'J')) {
+			return true
+		}
+	}
+	return false
 }
 
 func writeJSON(stdout io.Writer, v interface{}) {

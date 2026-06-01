@@ -64,6 +64,11 @@ run_pair "normalize -n"      "" -n "https://foo.com/users/123"
 run_pair "normalize -nN"     "" -n -N "https://foo.com/users/123"
 run_pair "parse -p json"     "" -p --json "https://foo.com/users/123/orders/456"
 run_pair "summary unicode"   "" "https://例え.テスト/こんにちは"
+# JSON error envelope: structured errors on the failure path must match
+# byte-for-byte across runtimes (run_pair folds stderr into the diff via 2>&1).
+run_pair "json error parse"  "" --json "just-some-token"
+run_pair "json error shell"  "" completion fish --json
+run_pair "json error missing-corpus" "" --propose-recognizers --json
 run_pair "normalize date path"   "" -n "https://foo.com/events/20240115/details"
 run_pair "normalize date param"  "" -n "https://foo.com/events?since=2024/01/15&page=5"
 run_pair "normalize network params" "" -n "https://foo.com/admin?ip=192.168.1.1&email=alice@example.com&redirect=https://other.com/x"

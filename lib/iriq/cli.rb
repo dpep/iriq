@@ -92,7 +92,11 @@ module Iriq
 
     # Returns an integer exit code.
     def run(argv)
+      # Pre-scan so an error during option parsing can still honor --json.
+      # Re-set authoritatively from opts once parsing succeeds.
+      @json = json_requested?(argv)
       args, opts = parse_options(argv)
+      @json = opts[:json]
 
       return print_usage(stdout, 0) if opts[:help]
       return print_version          if opts[:version]
@@ -137,11 +141,9 @@ module Iriq
       corpus.save(opts[:corpus]) if corpus && opts[:corpus]
       code
     rescue Iriq::ParseError => e
-      stderr.puts "iriq: parse error: #{e.message}"
-      2
+      emit_error("parse_error", e.message, 2, human: "iriq: parse error: #{e.message}")
     rescue OptionParser::ParseError => e
-      stderr.puts "iriq: #{e.message}"
-      1
+      emit_error("option_error", e.message, 1)
     end
 
     def parseable_iri?(input)
@@ -438,8 +440,7 @@ module Iriq
       shell = args.first || default_shell
       path  = COMPLETION_FILES[shell]
       unless path
-        stderr.puts "iriq: unknown shell #{shell.inspect} (try bash or zsh)"
-        return 1
+        return emit_error("unknown_shell", "unknown shell #{shell.inspect} (try bash or zsh)", 1)
       end
       stdout.write(File.read(path))
       0
@@ -478,8 +479,30 @@ module Iriq
     end
 
     def missing(name)
-      stderr.puts "iriq: missing argument <#{name}>"
-      1
+      emit_error("missing_argument", "missing argument <#{name}>", 1)
+    end
+
+    # Detect whether JSON output was requested by scanning raw argv. Used
+    # before option parsing completes (or when it fails) so errors can still
+    # honor --json. Handles bundled short flags like -nj.
+    def json_requested?(argv)
+      argv.any? do |a|
+        a == "--json" || a == "--ndjson" ||
+          (a.start_with?("-") && !a.start_with?("--") && a.match?(/[jJ]/))
+      end
+    end
+
+    # Emit an error to stderr and return its exit code. Under --json/--ndjson
+    # the error is a structured envelope ({"error":{"code","message"}}) so
+    # agents and pipelines get parseable output on the failure path; otherwise
+    # the plain "iriq: <human>" line (human defaults to "iriq: <message>").
+    def emit_error(code, message, exit_code, human: nil)
+      if @json
+        stderr.puts JSON.generate(error: { code: code, message: message })
+      else
+        stderr.puts(human || "iriq: #{message}")
+      end
+      exit_code
     end
 
     def read_input(path)
