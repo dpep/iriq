@@ -94,12 +94,29 @@ script/cli_parity.sh     # CLI parity (13+ scenarios)
 
 ## Releases
 
-- One version tag covers both runtimes — bump `lib/iriq/version.rb` (and
-  optionally a matching constant on the Go side if we add one), tag `vX.Y.Z`,
-  push.
-- `gem push iriq-X.Y.Z.gem` to publish to RubyGems.
-- Update `Formula/iriq.rb` in the homebrew-tools tap to the new version.
-- Go consumers pick up the tag automatically via `go get @vX.Y.Z`.
+Versioning is single-stream: one `vX.Y.Z` covers both runtimes. Bump the two
+version constants **together** — the `--version` Ruby ↔ Go parity check fails
+if they drift:
+
+1. `lib/iriq/version.rb` (`VERSION`) and `version.go` (`Version`) — same string.
+2. `Gemfile.lock` — re-resolve so the pinned `iriq (X.Y.Z)` matches
+   (`bundle install`, or it regenerates on the next `bundle exec`). Commit it.
+3. Tag `vX.Y.Z` and push. Go consumers pick it up via `go get @vX.Y.Z`.
+4. `gem push iriq-X.Y.Z.gem` to publish to RubyGems.
+
+### Keep Homebrew in sync — bump on EVERY version change
+
+The tap (`~/code/lib/homebrew-tools`) ships **two** formulas that both build the
+`iriq` binary from `branch: "main"`:
+
+- `Formula/iriq.rb` — default build (JSON corpus only).
+- `Formula/iriq-sqlite.rb` — same binary built with `-tags sqlite`.
+
+Each pins a static `version "X.Y.Z"` label. Because the build tracks `main`
+rather than a tagged tarball, `brew upgrade` only rebuilds when that label
+changes. So on every bump here, update the `version` string in **both**
+formulas to match `version.rb`, then commit + push the tap. Leaving them stale
+means brew users never get the new code even though it's already on `main`.
 
 ## Corpus storage backends
 
