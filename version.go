@@ -1,3 +1,3 @@
 package iriq
 
-const Version = "0.28.0"
+const Version = "0.29.0"
