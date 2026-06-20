@@ -3,10 +3,30 @@ Iriq
 ![Gem](https://img.shields.io/gem/dt/iriq?style=plastic)
 [![codecov](https://codecov.io/gh/dpep/iriq/branch/main/graph/badge.svg)](https://codecov.io/gh/dpep/iriq)
 
-**Making sense of messy IRI/URL data.** Iriq pulls IRIs out of free text,
-parses them, normalizes them into canonical shape-aware forms, classifies
-their path and query components, and clusters similar identifiers so you
-can answer questions like:
+**Iriq finds the *shape* of an IRI** — the structural template you get when you
+erase the parts that vary and keep the parts that don't. `…/users/123` and
+`…/users/999` are the same shape: `/users/{user_id}`. Feed iriq a pile of messy
+URLs — a log file, a column of links, free-text prose — and it collapses them
+into a small set of stable, deterministic route templates. Fifty thousand
+distinct URLs become twelve shapes.
+
+Everything iriq does — parsing, normalizing, classifying path and query
+components, clustering, learning new patterns — exists to derive, render, or
+group by that shape. The name is *IRI Query*: iriq queries an IRI for its
+structure.
+
+And it gets sharper the more you feed it. Point a *corpus* at a stream and
+classifications improve as data flows in — high-churn slots get promoted to
+placeholders, and whole types emerge that you can't see in any single URL (a
+position that's always 100–599 is an HTTP status; one bounded to a dozen values
+is an enum).
+
+```sh
+$ iriq -n https://foo.com/users/123
+https://foo.com/users/{user_id}
+```
+
+It answers questions like:
 
 - "What routes does this service actually expose?" (cluster a log file)
 - "Which params are stable identifiers vs. churning IDs vs. enums?"
@@ -63,6 +83,21 @@ $ iriq -n --corpus c.db https://foo.com/users/zoe/profile
 https://foo.com/users/{user}/profile          # mechanical would keep "zoe"
 ```
 
+### Two ways to normalize
+
+Pick by the question you're asking:
+
+- **`--canonical`** — clean up *this* URL, keeping the specifics.
+  `HTTP://Foo.com:80/pull/42` → `http://foo.com/pull/42` (scheme/host
+  lowercased, default port dropped; path and query left alone). Handy, but
+  table stakes — plenty of libraries do it.
+- **`--normalize`** *(the default)* — find the URL's *shape*, erasing the
+  specifics into placeholders. `…/pull/42` → `…/pull/{id}`. This is the part
+  you came to iriq for.
+
+Same input, two questions: "what's the clean form of *this* URL?" vs "what
+*kind* of URL is this?" The second is iriq's reason to exist.
+
 ## Install
 
 The CLI ships three ways:
@@ -85,11 +120,20 @@ git clone https://github.com/dpep/iriq && cd iriq
 go build -tags sqlite -o $GOBIN/iriq ./cmd/iriq
 ```
 
-The slim build supports `.json` corpus files; SQLite corpora (`.db` /
-`.sqlite` / `.sqlite3`) require the SQLite-enabled build. `iriq --help`
-reports which build you're on (look for the `Build:` line). The Ruby gem
-loads `sqlite3` lazily when a `.db` path is opened — install it via
-`gem install sqlite3` if you need SQLite corpora.
+Two builds. The **slim** build (the default everywhere) reads and writes JSON
+corpora; **SQLite** corpora need the SQLite-enabled build. `iriq --help` prints
+a `Build:` line so you can tell which you're on.
+
+| You installed via | Build | Corpus formats |
+| --- | --- | --- |
+| `brew install dpep/tools/iriq` | slim | `.json` |
+| `brew install dpep/tools/iriq-sqlite` | SQLite | `.json` + `.db`/`.sqlite`/`.sqlite3` |
+| `go install …/cmd/iriq@latest` | slim | `.json` |
+| `go build -tags sqlite …` | SQLite | `.json` + `.db`/`.sqlite`/`.sqlite3` |
+| `gem install iriq` | slim | `.json` |
+| `gem install iriq` + `gem install sqlite3` | SQLite | `.json` + `.db`/`.sqlite`/`.sqlite3` (lazy-loaded) |
+
+The Go SQLite build uses pure-Go `modernc.org/sqlite` — no cgo.
 
 For library use:
 
@@ -136,10 +180,11 @@ norm, _ := iriq.Normalize("https://foo.com/users/123")
 // "https://foo.com/users/{user_id}"
 ```
 
-The Ruby gem is the reference implementation; Go mirrors its API and is
-kept in sync via JSON fixtures (`spec/fixtures/`) plus a CLI parity
-harness (`script/cli_parity.sh`), both checked in CI. See
-[CLAUDE.md](CLAUDE.md) for the dev workflow.
+These are two independent implementations of one spec — not a Go library
+with a Ruby binding, nor a gem with a Go FFI. Ruby is the reference; Go
+mirrors it, kept in lockstep by golden-JSON fixtures (`spec/fixtures/`) and a
+CLI parity harness (`script/cli_parity.sh`), both gating CI. One version
+stream covers both. See [CLAUDE.md](CLAUDE.md) for the dev workflow.
 
 Pass `hints: false` to `Iriq.normalize` (or `PathShape`) for mechanical
 placeholders (`{integer}` instead of `{user_id}`).
@@ -185,9 +230,6 @@ Iriq::Inflector.reset_adapter!
 - `:literal` — plain word (`users`, `orders`, `Profile`, `こんにちは`)
 - `:integer` — pure digits below the timestamp range
 - `:float` — decimal with digits on both sides (`3.14`, `-2.5`, `1.0`)
-- `:number` — corpus-only umbrella when ints and floats coexist at one position
-- `:year` — corpus-only: integer position whose observed range falls in 1900..2100
-- `:http_status` — corpus-only: integer position whose range falls in 100..599
 - `:boolean` — `true` / `false` (any case)
 - `:version` — semver-ish with `v` prefix (`v1`, `v2.0.1`, `v1.2.3-beta`)
 - `:locale` — BCP 47-ish (`en-US`, `fr_CA`, `zh-Hant`, bare `en`/`fr`/`ja`)
@@ -208,12 +250,27 @@ Iriq::Inflector.reset_adapter!
 - `:coordinate` — `lat,lng` pair with plausible-range validation
 - `:country` — ISO 3166-1 alpha-2 codes (`US`, `JP`, `GB`)
 - `:base64` — standard base64 blobs with disambiguating `+`/`/`/`=`
-- `:enum` — corpus-only umbrella for bounded value sets
 - `:opaque_id` — short alphanumeric mix that doesn't fit elsewhere
 
 Heuristics are deterministic and ordered — the first matching rule wins.
 The classifier path is gated by cheap `String#include?` / `IndexByte`
 guards so most segments skip most regex tests.
+
+#### Types only the corpus can see
+
+Four types never come from a single URL — they emerge from the *distribution*
+of values a position has held across many observations:
+
+| Type | Emerges when a position… |
+| --- | --- |
+| `:number` | holds both integers and floats |
+| `:year` | holds integers that all land in 1900–2100 |
+| `:http_status` | holds integers that all land in 100–599 |
+| `:enum` | holds a small, bounded set of distinct values |
+
+Mechanically, `200` is just an integer. Across ten thousand URLs where that
+slot is always 100–599, it's an HTTP status. That's the corpus earning its
+keep.
 
 ## Clustering
 
@@ -322,7 +379,16 @@ corpus.reinfer   # rebuilds host_counts, position_stats, clusters from log
 
 CLI: `iriq --corpus c.db --reinfer`.
 
-### Learning new types (proposals + activation)
+## Learning new types
+
+Iriq doesn't just classify against a fixed list — it watches the stream and
+*proposes new recognizers* for patterns it keeps seeing. Notice `ghp_…` or
+`cus_…` recurring at a slug position and iriq will suggest a recognizer for it,
+with evidence: coverage, host count, confidence. Proposals are never
+auto-applied — you activate the ones you trust, and they persist with the
+corpus. Human-in-the-loop by design.
+
+### Proposals + activation
 
 When a literal shape recurs enough, the corpus can propose a new
 `Recognizer` for it. Today the only built-in strategy is
@@ -419,6 +485,15 @@ Known limitations (intentional):
 ```ruby
 Iriq::Corpus.new(max_values_per_position: 200)
 ```
+
+## How it works
+
+Under the shape sits one idea: **Position + Evidence**. A *Position* is a slot
+in a host's structure — a typed path prefix, or a query-param name. *Evidence*
+is everything the corpus has observed about that slot: which values, how often,
+across how many hosts. Strings are observations; types are inferences drawn
+from the pile. Shape is the surface you see; Position + Evidence is the engine
+underneath. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full model.
 
 ## Object model
 
