@@ -19,7 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/dpep/iriq"
+	"github.com/dpep/iriq/go"
 )
 
 // cmdCompletion prints a shell-completion script to stdout. With no

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dpep/iriq"
+	"github.com/dpep/iriq/go"
 )
 
 // stringReader satisfies emptyReporter so the CLI's pipedStdin check works

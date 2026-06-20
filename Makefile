@@ -17,8 +17,12 @@
 # Ruby gem build/install is handled by Bundler/RubyGems; see CLAUDE.md.
 
 GO          ?= go
+GO_DIR      := go
 BIN_DIR     := bin
 BIN         := $(BIN_DIR)/iriq
+# Absolute output path: builds run inside $(GO_DIR) via `go -C`, so a
+# relative -o would land under go/. Keep the binary at the repo-root bin/.
+ABS_BIN     := $(CURDIR)/$(BIN)
 PKG         := ./cmd/iriq
 
 # Release flags strip the symbol table (-s), debug info (-w), and bake
@@ -50,31 +54,31 @@ help:
 
 build:
 	@mkdir -p $(BIN_DIR)
-	$(GO) build -o $(BIN) $(PKG)
+	$(GO) -C $(GO_DIR) build -o $(ABS_BIN) $(PKG)
 	@echo "built $(BIN) (slim, debug)"
 
 build-sqlite:
 	@mkdir -p $(BIN_DIR)
-	$(GO) build -tags sqlite -o $(BIN) $(PKG)
+	$(GO) -C $(GO_DIR) build -tags sqlite -o $(ABS_BIN) $(PKG)
 	@echo "built $(BIN) (sqlite, debug)"
 
 release:
 	@mkdir -p $(BIN_DIR)
-	$(GO) build $(RELEASE_FLAGS) -o $(BIN) $(PKG)
+	$(GO) -C $(GO_DIR) build $(RELEASE_FLAGS) -o $(ABS_BIN) $(PKG)
 	@echo "built $(BIN) (slim, stripped)"
 
 release-sqlite:
 	@mkdir -p $(BIN_DIR)
-	$(GO) build -tags sqlite $(RELEASE_FLAGS) -o $(BIN) $(PKG)
+	$(GO) -C $(GO_DIR) build -tags sqlite $(RELEASE_FLAGS) -o $(ABS_BIN) $(PKG)
 	@echo "built $(BIN) (sqlite, stripped)"
 
 install:
-	$(GO) install $(PKG)
+	$(GO) -C $(GO_DIR) install $(PKG)
 	@echo "installed $(INSTALLED)"
 
 test:
-	$(GO) test ./...
-	$(GO) test -tags sqlite ./...
+	$(GO) -C $(GO_DIR) test ./...
+	$(GO) -C $(GO_DIR) test -tags sqlite ./...
 
 clean:
 	rm -rf $(BIN_DIR)

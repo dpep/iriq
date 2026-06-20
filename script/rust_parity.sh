@@ -15,7 +15,9 @@ RUST_BIN="${IRIQ_RUST_BIN:-$REPO_ROOT/rust/target/release/iriq}"
 if [[ ! -x "$GO_BIN" ]]; then
   echo "Building Go binary..."
   mkdir -p "$(dirname "$GO_BIN")"
-  (cd "$REPO_ROOT" && go build -o "$GO_BIN" ./cmd/iriq)
+  # -tags sqlite: the Rust binary always links SQLite, and the parity
+  # scenarios include .db corpora, so the Go side must match.
+  (cd "$REPO_ROOT/go" && go build -tags sqlite -o "$GO_BIN" ./cmd/iriq)
 fi
 if [[ ! -x "$RUST_BIN" ]]; then
   echo "Building Rust binary (release)..."

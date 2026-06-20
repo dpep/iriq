@@ -10,6 +10,11 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    # The Go module lives in go/ (Ruby at the root, Rust in rust/).
+    defaults:
+      run:
+        working-directory: go
+
     strategy:
       fail-fast: false
       matrix:
@@ -81,6 +86,7 @@ jobs:
           fi
 
       - name: Go fixture tests
+        working-directory: go
         run: go test -count=1 -run Fixture -v ./...
 
       - name: CLI parity

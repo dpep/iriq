@@ -1,0 +1,52 @@
+#compdef iriq
+# Zsh completion for the `iriq` CLI.
+#
+# Install (pick one):
+#   - Persist via Homebrew: brew install dpep/tools/iriq drops this file
+#     into Homebrew's zsh site-functions dir automatically.
+#   - Try in the current shell:
+#       source <(iriq completion zsh)
+#   - Or copy this file into a directory listed in $fpath and run
+#     `compinit` (typically run by your zshrc).
+
+_iriq() {
+    local context state state_descr line
+    typeset -A opt_args
+
+    _arguments -C \
+        '(-h --help)'{-h,--help}'[show usage]' \
+        '(-V --version)'{-V,--version}'[print version]' \
+        '(-p --parse)'{-p,--parse}'[parsed fields section]' \
+        '(-n --normalize)'{-n,--normalize}'[normalized section]' \
+        '(-c --canonical)'{-c,--canonical}'[canonical form section]' \
+        '(-e --explain)'{-e,--explain}'[annotated trace section]' \
+        '(-j --json)'{-j,--json}'[JSON output]' \
+        '(-J --ndjson)'{-J,--ndjson}'[newline-delimited JSON]' \
+        '(-N --no-hints)'{-N,--no-hints}'[use {type} placeholders, not {hint}]' \
+        '--hints[enable hint placeholders]' \
+        '--no-scheme-less[skip schemeless URL extraction]' \
+        '--scheme-less[enable schemeless URL extraction]' \
+        '--corpus[load/create a JSON or SQLite corpus]:corpus path:_files -g "*.(json|db|sqlite|sqlite3)"' \
+        '--host[host-keying strategy for clustering]:strategy:(full registrable reg none)' \
+        '--stats[print rolling aggregates]' \
+        '--reinfer[replay the source-IRI log]' \
+        '--propose-recognizers[propose new Recognizers from observed shapes]' \
+        '--cross-host-shapes[list route shapes seen across multiple hosts]' \
+        '--activate-above[auto-activate proposals at or above this confidence]:F:' \
+        '--min-observations[proposal threshold]:N:' \
+        '--min-coverage[proposal threshold]:F:' \
+        '--min-hosts[threshold for proposals and cross-host shapes]:N:' \
+        '1:command or file:->first' \
+        '*:file:_files' \
+        && return 0
+
+    case $state in
+        first)
+            _alternative \
+                'commands:command:(cluster completion)' \
+                'files:file:_files'
+            ;;
+    esac
+}
+
+_iriq "$@"

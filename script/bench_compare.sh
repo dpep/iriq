@@ -21,7 +21,7 @@ export LC_ALL="${LC_ALL:-C.UTF-8}"
 if [[ ! -x "$GO_BIN" ]]; then
   echo "Building Go binary..." >&2
   mkdir -p "$(dirname "$GO_BIN")"
-  (cd "$REPO_ROOT" && go build -o "$GO_BIN" ./cmd/iriq)
+  (cd "$REPO_ROOT/go" && go build -o "$GO_BIN" ./cmd/iriq)
 fi
 
 # Generate a fixed input file: 2000 synthetic URLs from the spec generator.

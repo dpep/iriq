@@ -1,5 +1,11 @@
 package iriq
 
+// go/completions/ is the Go binary's own copy of the shell-completion
+// scripts: go:embed cannot reach files outside the package directory, so
+// it can't share the repo-root completions/ that the Ruby gem ships. The
+// Rust CLI likewise carries its own copy. Keep the three in sync when a
+// flag changes (same discipline as the cross-runtime fixtures).
+
 import _ "embed"
 
 // CompletionBash is the bash completion script for the iriq CLI,

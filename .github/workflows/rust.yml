@@ -82,7 +82,8 @@ jobs:
           workspaces: rust
 
       - name: build Go binary (with sqlite)
-        run: go build -tags sqlite -o bin/iriq ./cmd/iriq
+        working-directory: go
+        run: go build -tags sqlite -o ../bin/iriq ./cmd/iriq
 
       - name: build Rust binary (release, with sqlite)
         working-directory: rust

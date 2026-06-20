@@ -11,14 +11,14 @@ import (
 )
 
 // fixturesDir locates spec/fixtures/ from this Go test file. The Go package
-// lives at the repo root, so the fixtures dir is a direct sibling.
+// lives in go/ off the repo root, so the fixtures dir is one level up.
 func fixturesDir(t *testing.T) string {
 	t.Helper()
 	_, here, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("runtime.Caller failed")
 	}
-	return filepath.Join(filepath.Dir(here), "spec", "fixtures")
+	return filepath.Join(filepath.Dir(here), "..", "spec", "fixtures")
 }
 
 func loadFixture(t *testing.T, name string, v interface{}) {

@@ -103,41 +103,39 @@ Same input, two questions: "what's the clean form of *this* URL?" vs "what
 The CLI ships four ways:
 
 ```sh
-# Homebrew (recommended) — slim build, JSON corpora only
+# Homebrew (recommended)
 brew install dpep/tools/iriq
 
-# Homebrew with the SQLite corpus backend
-brew install dpep/tools/iriq-sqlite
+# Rust from crates.io — fastest of the three
+cargo install iriq-cli
+# (or from a source checkout): cd iriq/rust && cargo install --path iriq-cli
 
 # RubyGems — installs the CLI shim and the library
 gem install iriq
 
 # Go — slim build, JSON corpora only
-go install github.com/dpep/iriq/cmd/iriq@latest
+go install github.com/dpep/iriq/go/cmd/iriq@latest
 
 # Go with SQLite corpora — needs source checkout + build flag
-git clone https://github.com/dpep/iriq && cd iriq
+git clone https://github.com/dpep/iriq && cd iriq/go
 go build -tags sqlite -o $GOBIN/iriq ./cmd/iriq
-
-# Rust — SQLite bundled by default, fastest of the three
-cargo install iriq-cli
-# (or from a source checkout): cd iriq/rust && cargo install --path iriq-cli
 ```
 
-Three implementations of the same library, kept byte-identical by a CLI
-parity harness in CI. The **slim** build (the default for Ruby + Go) reads
-and writes JSON corpora; **SQLite** corpora need the SQLite-enabled build.
-`iriq --help` prints a `Build:` line so you can tell which you're on.
+Three implementations of the same library, kept byte-identical by CLI parity
+harnesses in CI. Homebrew and crates.io ship the Rust build, which reads and
+writes every corpus format. For Ruby and Go, the **slim** build handles JSON
+corpora while **SQLite** corpora (`.db`/`.sqlite`/`.sqlite3`) need the
+SQLite-enabled build; `iriq --help` prints a `Build:` line so you can tell
+which you're on.
 
 | You installed via | Build | Corpus formats |
 | --- | --- | --- |
-| `brew install dpep/tools/iriq` | slim | `.json` |
-| `brew install dpep/tools/iriq-sqlite` | SQLite | `.json` + `.db`/`.sqlite`/`.sqlite3` |
-| `go install …/cmd/iriq@latest` | slim | `.json` |
+| `brew install dpep/tools/iriq` | Rust | `.json` + `.db`/`.sqlite`/`.sqlite3` |
+| `cargo install iriq-cli` | Rust | `.json` + `.db`/`.sqlite`/`.sqlite3` |
+| `go install …/go/cmd/iriq@latest` | slim | `.json` |
 | `go build -tags sqlite …` | SQLite | `.json` + `.db`/`.sqlite`/`.sqlite3` |
 | `gem install iriq` | slim | `.json` |
 | `gem install iriq` + `gem install sqlite3` | SQLite | `.json` + `.db`/`.sqlite`/`.sqlite3` (lazy-loaded) |
-| `cargo install iriq-cli` | SQLite (bundled) | `.json` + `.db`/`.sqlite`/`.sqlite3` |
 
 The Go SQLite build uses pure-Go `modernc.org/sqlite` (no cgo); the Rust
 build statically links the C SQLite via `rusqlite` (bundled). Same on-disk
@@ -152,7 +150,7 @@ gem "iriq"
 ```
 
 ```go
-import "github.com/dpep/iriq"
+import "github.com/dpep/iriq/go"
 ```
 
 ```toml

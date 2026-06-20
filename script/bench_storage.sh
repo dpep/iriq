@@ -13,7 +13,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GO_BIN="${IRIQ_GO_BIN:-$REPO_ROOT/bin/iriq}"
 
 if [[ ! -x "$GO_BIN" ]]; then
-  (cd "$REPO_ROOT" && go build -tags sqlite -o "$GO_BIN" ./cmd/iriq)
+  (cd "$REPO_ROOT/go" && go build -tags sqlite -o "$GO_BIN" ./cmd/iriq)
 fi
 
 # Seed input: 1000 URLs from the generator.

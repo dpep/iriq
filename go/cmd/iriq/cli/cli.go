@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dpep/iriq"
+	"github.com/dpep/iriq/go"
 	"golang.org/x/term"
 )
 

@@ -13,7 +13,7 @@ GO_BIN="${IRIQ_GO_BIN:-$REPO_ROOT/bin/iriq}"
 RUST_BIN="${IRIQ_RUST_BIN:-$REPO_ROOT/rust/target/release/iriq}"
 
 if [[ ! -x "$GO_BIN" ]]; then
-  (cd "$REPO_ROOT" && go build -o "$GO_BIN" ./cmd/iriq)
+  (cd "$REPO_ROOT/go" && go build -o "$GO_BIN" ./cmd/iriq)
 fi
 if [[ ! -x "$RUST_BIN" ]]; then
   (cd "$REPO_ROOT/rust" && cargo build --release --bin iriq 2>&1 | tail -3)
