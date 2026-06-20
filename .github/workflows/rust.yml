@@ -35,23 +35,34 @@ jobs:
         with:
           workspaces: rust
 
+      # Tests run first so a lint nit never hides a real failure. Each
+      # step gets `if: always()` so the whole matrix runs even when an
+      # earlier step failed — you see every result at once instead of
+      # one-at-a-time.
+
       - name: build (default features)
         run: cargo build --workspace
-
-      - name: clippy (default features)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        if: always()
 
       - name: test (default features)
         run: cargo test --workspace
+        if: always()
 
       - name: build (sqlite)
         run: cargo build --workspace --features iriq/sqlite
-
-      - name: clippy (sqlite)
-        run: cargo clippy --workspace --all-targets --features iriq/sqlite -- -D warnings
+        if: always()
 
       - name: test (sqlite)
         run: cargo test --workspace --features iriq/sqlite
+        if: always()
+
+      - name: clippy (default features)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+        if: always()
+
+      - name: clippy (sqlite)
+        run: cargo clippy --workspace --all-targets --features iriq/sqlite -- -D warnings
+        if: always()
 
   parity:
     name: Rust ↔ Go parity
