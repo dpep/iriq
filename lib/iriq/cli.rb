@@ -18,6 +18,8 @@ module Iriq
     LARGE_BATCH_THRESHOLD = 10
 
     USAGE = <<~TXT
+      iriq — find a URL's shape: the route template behind it (e.g. /users/{id}).
+
       Usage: iriq [options] <input>
              iriq [options] < text
              iriq cluster [options] [file]
@@ -26,8 +28,8 @@ module Iriq
       text via stdin.
 
       Sections (combine freely):
-        -n, --normalize       Shape-normalized form
-        -c, --canonical       Canonical form (no shape normalization)
+        -n, --normalize       Shape — variable parts become placeholders
+        -c, --canonical       Clean form — tidy scheme/host, keep the values
         -p, --parse           Parsed fields
         -e, --explain         Annotated trace — per-segment notes about why
                               each placeholder / canonical value was chosen

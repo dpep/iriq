@@ -21,7 +21,9 @@ const (
 	topNStats           = 10
 )
 
-const usage = `Usage: iriq [options] <input>
+const usage = `iriq — find a URL's shape: the route template behind it (e.g. /users/{id}).
+
+Usage: iriq [options] <input>
        iriq [options] < text
        iriq cluster [options] [file]
 
@@ -29,8 +31,8 @@ const usage = `Usage: iriq [options] <input>
 text via stdin.
 
 Sections (combine freely):
-  -n, --normalize       Shape-normalized form
-  -c, --canonical       Canonical form (no shape normalization)
+  -n, --normalize       Shape — variable parts become placeholders
+  -c, --canonical       Clean form — tidy scheme/host, keep the values
   -p, --parse           Parsed fields
   -e, --explain         Annotated trace — per-segment notes about why
                         each placeholder / canonical value was chosen
