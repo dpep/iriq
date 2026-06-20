@@ -57,8 +57,9 @@ make uninstall                  # remove from $GOBIN
 make clean                      # remove ./bin/
 make test                       # go test ./...
 
-# Both via Homebrew
-brew install dpep/tools/iriq    # uses the Ruby gem under the hood
+# Via Homebrew (builds the Go binary from main; see Releases below)
+brew install dpep/tools/iriq         # go build ./cmd/iriq (JSON corpus only)
+brew install dpep/tools/iriq-sqlite  # same binary, built with -tags sqlite
 ```
 
 ## Keeping Ruby and Go in sync
