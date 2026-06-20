@@ -122,6 +122,25 @@ describe Iriq::CLI do
       expect(out).to include("# normalize")
     end
 
+    it "prints only the canonical section with -c, no shape normalization" do
+      expect(run("-c", "HTTP://Foo.COM/users/123")).to eq(0)
+      expect(stdout.string.strip).to eq("http://foo.com/users/123")
+    end
+
+    it "returns just the canonical string under -c --json" do
+      expect(run("-c", "--json", "foo.com/users/123")).to eq(0)
+      expect(JSON.parse(stdout.string)).to eq("https://foo.com/users/123")
+    end
+
+    it "combines -cn into separate canonical and normalize sections" do
+      expect(run("-cn", "foo.com/users/123")).to eq(0)
+      out = stdout.string
+      expect(out).to include("# canonical")
+      expect(out).to include("https://foo.com/users/123")
+      expect(out).to include("# normalize")
+      expect(out).to include("https://foo.com/users/{user_id}")
+    end
+
     it "with --json and a single section, returns just that section's payload" do
       expect(run("-n", "--json", "foo.com/users/123")).to eq(0)
       expect(JSON.parse(stdout.string)).to eq("https://foo.com/users/{user_id}")
@@ -234,6 +253,24 @@ describe Iriq::CLI do
         expect(JSON.parse(stdout.string)).to eq([
           "https://foo.com/users/{user_id}",
           "https://foo.com/users/{user_id}",
+        ])
+      end
+
+      it "-c prints one canonical URL per extracted IRI" do
+        stdin.string = "see https://foo.com/users/1 and (https://foo.com/users/2)"
+        expect(run("-c")).to eq(0)
+        expect(stdout.string.lines.map(&:chomp)).to eq([
+          "https://foo.com/users/1",
+          "https://foo.com/users/2",
+        ])
+      end
+
+      it "-c --json emits a flat array of canonical strings" do
+        stdin.string = "see https://foo.com/users/1 and https://foo.com/users/2"
+        expect(run("-c", "--json")).to eq(0)
+        expect(JSON.parse(stdout.string)).to eq([
+          "https://foo.com/users/1",
+          "https://foo.com/users/2",
         ])
       end
 

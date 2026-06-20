@@ -62,6 +62,9 @@ run_pair "summary schemeless" "" "foo.com/users/456"
 run_pair "summary URN"       "" "urn:isbn:0451450523"
 run_pair "normalize -n"      "" -n "https://foo.com/users/123"
 run_pair "normalize -nN"     "" -n -N "https://foo.com/users/123"
+run_pair "canonical -c"      "" -c "foo.com/users/123"
+run_pair "canonical -c json" "" -c --json "HTTP://Foo.COM:80/Users/123#frag"
+run_pair "canonical+normalize -cn" "" -cn "https://foo.com/users/123"
 run_pair "parse -p json"     "" -p --json "https://foo.com/users/123/orders/456"
 run_pair "summary unicode"   "" "https://例え.テスト/こんにちは"
 # JSON error envelope: structured errors on the failure path must match
@@ -102,6 +105,10 @@ run_pair "pipe duplicates" \
   $'https://foo.com\nhttps://foo.com\nhttps://bar.com\n'
 run_pair "pipe -n normalize" \
   "see https://foo.com/users/1 and (https://foo.com/users/2)" -n
+run_pair "pipe -c canonical" \
+  "see https://foo.com/users/1 and (https://foo.com/users/2)" -c
+run_pair "pipe -c --ndjson" \
+  "see https://foo.com/users/1 and https://foo.com/users/2" -c --ndjson
 run_pair "pipe -n --json" \
   "see https://foo.com/users/1 and https://foo.com/users/2" -n --json
 run_pair "pipe -n --ndjson" \

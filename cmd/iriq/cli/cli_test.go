@@ -173,6 +173,35 @@ func TestNoHints(t *testing.T) {
 	}
 }
 
+func TestCanonicalSection(t *testing.T) {
+	// -c returns the canonical IRI with no shape normalization: scheme/host
+	// are canonicalized (case, default port) but path values are preserved.
+	r := runCLI(t, "", "-c", "HTTP://Foo.COM:80/users/123")
+	if strings.TrimSpace(r.stdout) != "http://foo.com/users/123" {
+		t.Errorf("got %q", r.stdout)
+	}
+}
+
+func TestCanonicalJSONSingleSection(t *testing.T) {
+	r := runCLI(t, "", "-c", "--json", "foo.com/users/123")
+	var v interface{}
+	if err := json.Unmarshal([]byte(r.stdout), &v); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if v != "https://foo.com/users/123" {
+		t.Errorf("got %v", v)
+	}
+}
+
+func TestPipeCanonical(t *testing.T) {
+	r := runCLI(t, "see https://foo.com/users/1 and (https://foo.com/users/2)", "-c")
+	lines := strings.Split(strings.TrimSpace(r.stdout), "\n")
+	want := []string{"https://foo.com/users/1", "https://foo.com/users/2"}
+	if len(lines) != len(want) || lines[0] != want[0] || lines[1] != want[1] {
+		t.Errorf("got %v", lines)
+	}
+}
+
 func TestPipeURLList(t *testing.T) {
 	stdin := "https://foo.com/users/1\nhttps://foo.com/users/2\nhttps://foo.com/posts/abc-123/edit\n"
 	r := runCLI(t, stdin)
