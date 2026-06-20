@@ -102,6 +102,122 @@ run_pair "pipe url-list --ndjson" \
 run_pair "pipe cluster auto" \
   $'https://foo.com/users/1\nhttps://foo.com/users/2\nhttps://foo.com/users/3\nhttps://foo.com/users/4\nhttps://foo.com/users/5\nhttps://foo.com/users/6\nhttps://foo.com/users/7\nhttps://foo.com/users/8\nhttps://foo.com/users/9\nhttps://foo.com/users/10\n'
 
+# ── Corpus scenarios ───────────────────────────────────────────────────
+corpus_dir="$(mktemp -d)"
+trap "rm -rf '$corpus_dir'" EXIT
+corpus_stream=$'https://foo.com/users/1\nhttps://foo.com/users/2\nhttps://foo.com/users/3\nhttps://bar.com/x\n'
+
+corpus_pair() {
+  local label="$1" ext="$2"
+  local go_path="$corpus_dir/go$ext"
+  local rust_path="$corpus_dir/rust$ext"
+  echo -n "$corpus_stream" | "$GO_BIN" --corpus "$go_path" >/dev/null
+  echo -n "$corpus_stream" | "$RUST_BIN" --corpus "$rust_path" >/dev/null
+  local g r
+  g=$( "$GO_BIN" --corpus "$go_path" --stats --json < /dev/null )
+  r=$( "$RUST_BIN" --corpus "$rust_path" --stats --json < /dev/null )
+  if [[ "$g" == "$r" ]]; then
+    pass=$((pass+1))
+  else
+    fail=$((fail+1))
+    echo
+    echo "MISMATCH: corpus $label"
+    diff <(echo "$g") <(echo "$r") | sed 's/^/    /'
+  fi
+}
+
+corpus_pair "JSON storage"   ".json"
+corpus_pair "SQLite storage" ".db"
+
+# --reinfer parity
+reinfer_pair() {
+  local label="$1" ext="$2"
+  local go_path="$corpus_dir/go-reinfer$ext"
+  local rust_path="$corpus_dir/rust-reinfer$ext"
+  echo -n "$corpus_stream" | "$GO_BIN" --corpus "$go_path" >/dev/null
+  echo -n "$corpus_stream" | "$RUST_BIN" --corpus "$rust_path" >/dev/null
+  local g r
+  g=$( "$GO_BIN" --corpus "$go_path" --reinfer < /dev/null )
+  r=$( "$RUST_BIN" --corpus "$rust_path" --reinfer < /dev/null )
+  if [[ "$g" == "$r" ]]; then
+    pass=$((pass+1))
+  else
+    fail=$((fail+1))
+    echo
+    echo "MISMATCH: reinfer $label"
+    diff <(echo "$g") <(echo "$r") | sed 's/^/    /'
+  fi
+}
+
+reinfer_pair "JSON"   ".json"
+reinfer_pair "SQLite" ".db"
+
+# --propose-recognizers parity
+propose_pair() {
+  local label="$1" ext="$2"
+  local stream=""
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do
+    stream+=$'https://foo.com/users/ghp_token'$i$'\n'
+    stream+=$'https://bar.com/users/ghp_other'$i$'\n'
+  done
+  local gp="$corpus_dir/go-propose$ext"
+  local rp="$corpus_dir/rust-propose$ext"
+  echo -n "$stream" | "$GO_BIN" --corpus "$gp" >/dev/null
+  echo -n "$stream" | "$RUST_BIN" --corpus "$rp" >/dev/null
+  for mode in "" "--json"; do
+    local g r
+    g=$( "$GO_BIN"   --corpus "$gp" --propose-recognizers $mode < /dev/null )
+    r=$( "$RUST_BIN" --corpus "$rp" --propose-recognizers $mode < /dev/null )
+    if [[ "$g" == "$r" ]]; then
+      pass=$((pass+1))
+    else
+      fail=$((fail+1))
+      echo
+      echo "MISMATCH: propose $label $mode"
+      diff <(echo "$g") <(echo "$r") | sed 's/^/    /'
+    fi
+  done
+  for mode in "" "--json"; do
+    local g r
+    g=$( "$GO_BIN"   --corpus "$gp" --cross-host-shapes $mode < /dev/null )
+    r=$( "$RUST_BIN" --corpus "$rp" --cross-host-shapes $mode < /dev/null )
+    if [[ "$g" == "$r" ]]; then
+      pass=$((pass+1))
+    else
+      fail=$((fail+1))
+      echo
+      echo "MISMATCH: cross-host $label $mode"
+      diff <(echo "$g") <(echo "$r") | sed 's/^/    /'
+    fi
+  done
+}
+
+propose_pair "JSON"   ".json"
+propose_pair "SQLite" ".db"
+
+# --host=reg parity
+host_reg_pair() {
+  local label="$1"
+  local stream=$'https://api.foo.com/users/1\nhttps://app.foo.com/users/2\nhttps://blog.example.co.uk/posts/3\nhttps://news.example.co.uk/posts/4\n'
+  local gp="$corpus_dir/go-host.json"
+  local rp="$corpus_dir/rust-host.json"
+  rm -f "$gp" "$rp"
+  echo -n "$stream" | "$GO_BIN" --corpus "$gp" --host=reg >/dev/null
+  echo -n "$stream" | "$RUST_BIN" --corpus "$rp" --host=reg >/dev/null
+  local g r
+  g=$( "$GO_BIN"   --corpus "$gp" --stats --json < /dev/null )
+  r=$( "$RUST_BIN" --corpus "$rp" --stats --json < /dev/null )
+  if [[ "$g" == "$r" ]]; then
+    pass=$((pass+1))
+  else
+    fail=$((fail+1))
+    echo
+    echo "MISMATCH: $label"
+    diff <(echo "$g") <(echo "$r") | sed 's/^/    /'
+  fi
+}
+host_reg_pair "--host=reg"
+
 echo
 echo "Passed: $pass"
 echo "Failed: $fail"

@@ -15,8 +15,20 @@ pub mod normalizer;
 pub mod extractor;
 pub mod explanation;
 pub mod trace;
+pub mod position;
 pub mod position_stats;
 pub mod cluster;
+pub mod clusterer;
+pub mod event;
+pub mod observation;
+pub mod storage;
+pub mod storage_memory;
+pub mod storage_json;
+#[cfg(feature = "sqlite")]
+pub mod storage_sqlite;
+pub mod synthesized_recognizer;
+pub mod recognizer_proposal;
+pub mod cross_host_shape;
 pub mod corpus;
 
 pub use errors::ParseError;
@@ -39,5 +51,15 @@ pub use inflector::singularize;
 pub use extractor::Extractor;
 pub use explanation::{explain, explain_identifier};
 pub use trace::{trace, trace_identifier, TraceResult, TraceRow};
+pub use position::{Position, PositionScope};
+pub use position_stats::{PositionStats, DEFAULT_MAX_VALUES_PER_POSITION};
+pub use cluster::{Cluster, ParamSummary, SegmentPositionStat};
+pub use clusterer::{cluster_key_for, cluster_key_for_host, ClusterKey, Clusterer, ExplainEntry};
+pub use corpus::{Classification, Corpus, CorpusEntry, HostStrategy};
+pub use storage::{open_storage, Storage};
+pub use cross_host_shape::CrossHostShape;
+pub use recognizer_proposal::{ProposalOptions, RecognizerProposal};
+pub use synthesized_recognizer::SynthesizedRecognizer;
 
 pub const VERSION: &str = "0.29.1";
+pub const HAS_SQLITE: bool = cfg!(feature = "sqlite");

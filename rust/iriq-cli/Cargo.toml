@@ -8,5 +8,5 @@ name = "iriq"
 path = "src/main.rs"
 
 [dependencies]
-iriq = { path = "../iriq" }
+iriq = { path = "../iriq", features = ["sqlite"] }
 serde_json = { version = "1", features = ["preserve_order"] }

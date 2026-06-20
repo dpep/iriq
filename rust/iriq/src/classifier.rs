@@ -217,7 +217,7 @@ static CURRENCY_CODES: Lazy<HashSet<&'static str>> = Lazy::new(|| {
     .collect()
 });
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FileKind {
     Image,
     Document,
@@ -416,6 +416,42 @@ pub trait Recognizer: Send + Sync {
     fn try_classify(&self, segment: &str) -> Option<Verdict>;
 }
 
+pub fn segment_type_from_str(s: &str) -> Option<SegmentType> {
+    use SegmentType::*;
+    Some(match s {
+        "literal" => Literal,
+        "integer" => Integer,
+        "float" => Float,
+        "number" => Number,
+        "uuid" => Uuid,
+        "date" => Date,
+        "timestamp" => Timestamp,
+        "hash" => Hash,
+        "slug" => Slug,
+        "ipv4" => Ipv4,
+        "ipv6" => Ipv6,
+        "url" => Url,
+        "email" => Email,
+        "boolean" => Boolean,
+        "version" => Version,
+        "locale" => Locale,
+        "currency" => Currency,
+        "phone" => Phone,
+        "jwt" => Jwt,
+        "mime" => Mime,
+        "file" => File,
+        "color" => Color,
+        "coordinate" => Coordinate,
+        "country" => Country,
+        "base64" => Base64,
+        "year" => Year,
+        "http_status" => HttpStatus,
+        "enum" => Enum,
+        "opaque_id" => OpaqueId,
+        _ => return None,
+    })
+}
+
 fn ensemble(segment: &str, recognizers: &[std::sync::Arc<dyn Recognizer>]) -> Option<Verdict> {
     let mut best: Option<Verdict> = None;
     let mut best_score = -1.0;
@@ -561,6 +597,16 @@ impl SegmentClassifier {
 
     pub fn variable(&self, t: SegmentType) -> bool {
         t != SegmentType::Literal
+    }
+
+    pub fn register_recognizer(&self, r: std::sync::Arc<dyn Recognizer>) {
+        let mut st = self.state.lock().unwrap();
+        st.recognizers.push(r);
+        st.cache.clear();
+    }
+
+    pub fn recognizer_count(&self) -> usize {
+        self.state.lock().unwrap().recognizers.len()
     }
 }
 

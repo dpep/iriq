@@ -1,11 +1,12 @@
-// Rust port of the iriq CLI. Phase 1 scope: -n/-c/-p/-e and -j/-J,
-// pipe-mode URL list, cluster auto-switch, --no-hints, --no-scheme-less.
-// Skips: --corpus persistence, --stats, --reinfer, --propose-recognizers,
-// --cross-host-shapes, completion. Those land in phase 2.
+// Rust port of the iriq CLI. Phase 2 scope: corpus persistence (JSON +
+// SQLite), --stats, --reinfer, --propose-recognizers, --cross-host-shapes,
+// --activate-above, --host, completion. Phase 1 (-n/-c/-p/-e, -j/-J,
+// pipe-mode URL list, cluster auto-switch) also covered here.
 
 use iriq::{
-    classifier::DEFAULT_CLASSIFIER, normalize_identifier, parse, trace_identifier, Extractor,
-    Identifier, ParseError, TraceResult,
+    classifier::DEFAULT_CLASSIFIER, cross_host_shape::cross_host_shapes, normalize_identifier,
+    parse, trace_identifier, Cluster, Corpus, Extractor, HostStrategy, Identifier, ParseError,
+    ProposalOptions, RecognizerProposal, TraceResult,
 };
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -13,6 +14,8 @@ use std::io::{self, Read, Write};
 use std::process::ExitCode;
 
 const LARGE_BATCH_THRESHOLD: usize = 10;
+const TOP_N_STATS: usize = 10;
+
 const USAGE: &str = r#"iriq — find a URL's shape: the route template behind it (e.g. /users/{id}).
 
 Usage: iriq [options] <input>
@@ -26,6 +29,22 @@ Sections (combine freely):
   -e, --explain         Annotated trace — per-segment notes about why
                         each placeholder / canonical value was chosen
 
+Corpus + stats:
+      --corpus PATH     Load/create a JSON / SQLite corpus; observe + save.
+                        .db/.sqlite/.sqlite3 → SQLite (incremental UPSERTs).
+      --host MODE       Host-keying strategy: full (default), reg / registrable
+                        strips subdomains, none ignores host entirely.
+      --stats           Print rolling aggregates
+      --reinfer         Replay the source-IRI log through current classifier
+                        + reducers; rebuilds materialized views.
+      --propose-recognizers
+                        Scan observed values for shape patterns that recur
+                        enough to suggest a new Recognizer.
+      --cross-host-shapes
+                        List route shapes that recur across multiple hosts.
+      --activate-above F With --propose-recognizers, promote every proposal
+                        at or above CONFIDENCE F into a live Recognizer.
+
 Other:
   -h, --help            Show this message
   -j, --json            Emit JSON instead of human-readable output
@@ -36,6 +55,7 @@ Other:
 
 Subcommands:
   cluster [file]        Force cluster view (default for >=10 IRIs anyway)
+  completion <shell>    Print shell completion script (bash | zsh | fish)
 "#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,12 +86,23 @@ struct Opts {
     hints: bool,
     sections: Vec<Section>,
     scheme_less: bool,
+    corpus: String,
+    stats: bool,
+    reinfer: bool,
+    propose: bool,
+    cross_host_shapes: bool,
+    activate_above: f64,
+    propose_min_obs: usize,
+    propose_min_coverage: f64,
+    min_hosts: usize,
+    host_strategy: HostStrategy,
 }
 
 fn default_opts() -> Opts {
     Opts {
         hints: true,
         scheme_less: true,
+        host_strategy: HostStrategy::Full,
         ..Opts::default()
     }
 }
@@ -98,7 +129,7 @@ fn run<R: Read, W: Write, E: Write>(
     };
     if opts.help {
         let _ = write!(stdout, "{}", USAGE);
-        let _ = writeln!(stdout, "\nBuild: rust port (json corpus only)");
+        let _ = writeln!(stdout, "\nBuild: rust port (json{})", if iriq::HAS_SQLITE { " + sqlite" } else { "" });
         return 0;
     }
     if opts.version {
@@ -106,7 +137,11 @@ fn run<R: Read, W: Write, E: Write>(
         return 0;
     }
 
-    // Detect explicit `cluster` subcommand
+    // `completion <shell>` short-circuits.
+    if args.first().map(|s| s.as_str()) == Some("completion") {
+        return cmd_completion(&mut stdout, &mut stderr, &args[1..], opts.json);
+    }
+
     let mut args = args;
     let mut explicit_cluster = false;
     if args.first().map(|s| s.as_str()) == Some("cluster") {
@@ -114,7 +149,6 @@ fn run<R: Read, W: Write, E: Write>(
         args.remove(0);
     }
 
-    // Auto file-detect on positional argument
     let positional_is_file = match args.first() {
         Some(arg) => {
             if let Ok(meta) = std::fs::metadata(arg) {
@@ -126,38 +160,60 @@ fn run<R: Read, W: Write, E: Write>(
         None => false,
     };
 
-    let piped = !atty_isatty_stdin_fallback();
+    let piped = !atty_isatty_stdin();
     let batch_mode = explicit_cluster || positional_is_file || (args.is_empty() && piped);
 
-    if args.is_empty() && !batch_mode {
+    if args.is_empty() && !batch_mode && !opts.reinfer && !opts.propose && !opts.cross_host_shapes {
         let _ = write!(stdout, "{}", USAGE);
         return 0;
     }
 
-    if batch_mode {
-        cmd_batch(&mut stdin, &mut stdout, &mut stderr, &args, &opts, explicit_cluster)
-    } else {
-        cmd_summary(&mut stdout, &mut stderr, &args, &opts)
+    let mut corpus: Option<Corpus> = None;
+    if !opts.corpus.is_empty() {
+        match Corpus::open(&opts.corpus) {
+            Ok(mut c) => {
+                c.set_host_strategy(opts.host_strategy);
+                corpus = Some(c);
+            }
+            Err(e) => {
+                let _ = writeln!(stderr, "iriq: {}", e);
+                return 1;
+            }
+        }
     }
+
+    let code = if opts.reinfer {
+        cmd_reinfer(&mut stdout, &mut stderr, corpus.as_mut(), &opts)
+    } else if opts.propose {
+        cmd_propose(&mut stdout, &mut stderr, corpus.as_mut(), &opts)
+    } else if opts.cross_host_shapes {
+        cmd_cross_host_shapes(&mut stdout, &mut stderr, corpus.as_ref(), &opts)
+    } else if batch_mode {
+        cmd_batch(&mut stdin, &mut stdout, &mut stderr, &args, &opts, corpus.as_mut(), explicit_cluster)
+    } else if opts.stats {
+        cmd_stats(&mut stdout, &mut stderr, corpus.as_ref(), &opts)
+    } else {
+        cmd_summary(&mut stdout, &mut stderr, &args, &opts, corpus.as_mut())
+    };
+
+    if let Some(mut c) = corpus {
+        if !opts.corpus.is_empty() {
+            if let Err(e) = c.save(&opts.corpus) {
+                let _ = writeln!(stderr, "iriq: {}", e);
+                return 1;
+            }
+        }
+        let _ = c.close();
+    }
+    code
 }
 
-fn atty_isatty_stdin_fallback() -> bool {
-    // Without the `atty` crate, fall back to treating stdin as piped when
-    // we're not running in a terminal. We use a tiny FFI-free approximation:
-    // when STDIN is redirected, Linux exposes /proc/self/fd/0 as a non-tty
-    // file. Easiest: query metadata.
+fn atty_isatty_stdin() -> bool {
     use std::os::fd::AsRawFd;
-    let fd = io::stdin().as_raw_fd();
-    unsafe { libc_isatty(fd) != 0 }
-}
-
-extern "C" {
-    fn isatty(fd: i32) -> i32;
-}
-
-#[allow(non_snake_case)]
-fn libc_isatty(fd: i32) -> i32 {
-    unsafe { isatty(fd) }
+    extern "C" {
+        fn isatty(fd: i32) -> i32;
+    }
+    unsafe { isatty(io::stdin().as_raw_fd()) != 0 }
 }
 
 fn parseable_iri(s: &str) -> bool {
@@ -165,8 +221,7 @@ fn parseable_iri(s: &str) -> bool {
 }
 
 fn argv_wants_json(argv: &[String]) -> bool {
-    argv.iter()
-        .any(|a| a == "-j" || a == "--json" || a == "-J" || a == "--ndjson")
+    argv.iter().any(|a| a == "-j" || a == "--json" || a == "-J" || a == "--ndjson")
 }
 
 fn parse_options(argv: &[String]) -> Result<(Vec<String>, Opts), String> {
@@ -175,6 +230,32 @@ fn parse_options(argv: &[String]) -> Result<(Vec<String>, Opts), String> {
     let mut i = 0;
     while i < argv.len() {
         let a = &argv[i];
+        // Handle --flag=value form.
+        if let Some(eq) = a.find('=') {
+            if a.starts_with("--") {
+                let (name, val) = (&a[..eq], &a[eq + 1..]);
+                match name {
+                    "--corpus" => opts.corpus = val.to_string(),
+                    "--host" => opts.host_strategy = parse_host_strategy(val)?,
+                    "--activate-above" => {
+                        opts.activate_above = val.parse().map_err(|e: std::num::ParseFloatError| e.to_string())?
+                    }
+                    "--min-hosts" => {
+                        opts.min_hosts = val.parse().map_err(|e: std::num::ParseIntError| e.to_string())?
+                    }
+                    "--min-observations" => {
+                        opts.propose_min_obs = val.parse().map_err(|e: std::num::ParseIntError| e.to_string())?
+                    }
+                    "--min-coverage" => {
+                        opts.propose_min_coverage = val.parse().map_err(|e: std::num::ParseFloatError| e.to_string())?
+                    }
+                    _ => return Err(format!("invalid option: {}", a)),
+                }
+                i += 1;
+                continue;
+            }
+        }
+
         match a.as_str() {
             "--" => {
                 args.extend_from_slice(&argv[i + 1..]);
@@ -195,11 +276,56 @@ fn parse_options(argv: &[String]) -> Result<(Vec<String>, Opts), String> {
             "-n" | "--normalize" => opts.sections.push(Section::Normalize),
             "-c" | "--canonical" => opts.sections.push(Section::Canonical),
             "-e" | "--explain" => opts.sections.push(Section::Explain),
+            "--corpus" => {
+                i += 1;
+                opts.corpus = argv.get(i).cloned().ok_or("--corpus requires a value")?;
+            }
+            "--stats" => opts.stats = true,
+            "--reinfer" => opts.reinfer = true,
+            "--propose-recognizers" => opts.propose = true,
+            "--cross-host-shapes" => opts.cross_host_shapes = true,
+            "--activate-above" => {
+                i += 1;
+                opts.activate_above = argv
+                    .get(i)
+                    .ok_or("--activate-above requires a value")?
+                    .parse()
+                    .map_err(|e: std::num::ParseFloatError| e.to_string())?;
+            }
+            "--host" => {
+                i += 1;
+                opts.host_strategy = parse_host_strategy(
+                    argv.get(i).ok_or("--host requires a value")?.as_str(),
+                )?;
+            }
+            "--min-hosts" => {
+                i += 1;
+                opts.min_hosts = argv
+                    .get(i)
+                    .ok_or("--min-hosts requires a value")?
+                    .parse()
+                    .map_err(|e: std::num::ParseIntError| e.to_string())?;
+            }
+            "--min-observations" => {
+                i += 1;
+                opts.propose_min_obs = argv
+                    .get(i)
+                    .ok_or("--min-observations requires a value")?
+                    .parse()
+                    .map_err(|e: std::num::ParseIntError| e.to_string())?;
+            }
+            "--min-coverage" => {
+                i += 1;
+                opts.propose_min_coverage = argv
+                    .get(i)
+                    .ok_or("--min-coverage requires a value")?
+                    .parse()
+                    .map_err(|e: std::num::ParseFloatError| e.to_string())?;
+            }
             s if s.starts_with("--") => {
                 return Err(format!("invalid option: {}", s));
             }
             s if s.starts_with('-') && s.len() > 1 => {
-                // Combined short flags like -pn or -nN
                 for ch in s[1..].chars() {
                     match ch {
                         'p' => opts.sections.push(Section::Parse),
@@ -225,13 +351,23 @@ fn parse_options(argv: &[String]) -> Result<(Vec<String>, Opts), String> {
     Ok((args, opts))
 }
 
-// ── Summary: single IRI input ───────────────────────────────────────────────
+fn parse_host_strategy(v: &str) -> Result<HostStrategy, String> {
+    match v.to_lowercase().as_str() {
+        "full" => Ok(HostStrategy::Full),
+        "registrable" | "reg" => Ok(HostStrategy::Registrable),
+        "none" => Ok(HostStrategy::None),
+        _ => Err(format!("--host: expected full|registrable|reg|none, got {:?}", v)),
+    }
+}
+
+// ── Summary mode ────────────────────────────────────────────────────────────
 
 fn cmd_summary<W: Write, E: Write>(
     stdout: &mut W,
     stderr: &mut E,
     args: &[String],
     opts: &Opts,
+    corpus: Option<&mut Corpus>,
 ) -> u8 {
     if args.is_empty() {
         return emit_error(stderr, opts.json, "missing_argument", "missing argument <input>", "", 1);
@@ -249,6 +385,15 @@ fn cmd_summary<W: Write, E: Write>(
             );
         }
     };
+    if let Some(c) = corpus.as_ref() {
+        // Observe via the borrowed corpus. SAFETY-equivalent of Go's
+        // corpus.Observe(iri) — Rust borrow rules require we do a single
+        // mutable pass.
+        let _ = c;
+    }
+    if let Some(c) = corpus {
+        c.observe_iri(&iri);
+    }
 
     let sections = if opts.sections.is_empty() {
         vec![Section::Parse, Section::Normalize]
@@ -261,9 +406,12 @@ fn cmd_summary<W: Write, E: Write>(
             let payload = section_payload(&iri, sections[0], opts);
             write_json(stdout, &payload);
         } else {
+            // Multi-section JSON: fixed key order parse / canonical / normalize / explain.
             let mut payload = serde_json::Map::new();
-            for s in &sections {
-                payload.insert(s.name().to_string(), section_payload(&iri, *s, opts));
+            for s in ["parse", "canonical", "normalize", "explain"] {
+                if let Some(sec) = sections.iter().find(|sec| sec.name() == s) {
+                    payload.insert(s.to_string(), section_payload(&iri, *sec, opts));
+                }
             }
             write_json(stdout, &Value::Object(payload));
         }
@@ -278,10 +426,8 @@ fn section_payload(iri: &Identifier, sec: Section, opts: &Opts) -> Value {
     match sec {
         Section::Parse => identifier_json(iri),
         Section::Canonical => Value::String(iri.canonical()),
-        Section::Normalize => {
-            Value::String(normalize_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints))
-        }
-        Section::Explain => trace_json(&trace_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints)),
+        Section::Normalize => Value::String(normalize_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints)),
+        Section::Explain => serde_json::to_value(trace_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints)).unwrap(),
     }
 }
 
@@ -321,10 +467,6 @@ fn identifier_json(iri: &Identifier) -> Value {
     Value::Object(o)
 }
 
-fn trace_json(tr: &TraceResult) -> Value {
-    serde_json::to_value(tr).unwrap()
-}
-
 // ── Human renderers ─────────────────────────────────────────────────────────
 
 fn emit_sections_human<W: Write>(
@@ -347,11 +489,7 @@ fn emit_sections_human<W: Write>(
                 let _ = writeln!(stdout, "{}", iri.canonical());
             }
             Section::Normalize => {
-                let _ = writeln!(
-                    stdout,
-                    "{}",
-                    normalize_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints)
-                );
+                let _ = writeln!(stdout, "{}", normalize_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints));
             }
             Section::Explain => {
                 emit_explain_human(stdout, &trace_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints));
@@ -468,6 +606,7 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
     stderr: &mut E,
     args: &[String],
     opts: &Opts,
+    corpus: Option<&mut Corpus>,
     explicit_cluster: bool,
 ) -> u8 {
     let text = match read_text(stdin, args) {
@@ -480,12 +619,31 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
     let extractor = Extractor { scheme_less: opts.scheme_less };
     let iris = extractor.extract(&text);
 
+    // Feed observations into the corpus when present.
+    let mut owned_corpus = if corpus.is_none() {
+        Some(Corpus::new())
+    } else {
+        None
+    };
+    let working: &mut Corpus = match (corpus, &mut owned_corpus) {
+        (Some(c), _) => c,
+        (None, Some(c)) => c,
+        _ => unreachable!(),
+    };
+    for iri in &iris {
+        working.observe_iri(iri);
+    }
+
     if !opts.sections.is_empty() {
         emit_per_iri_sections(stdout, &iris, opts);
         return 0;
     }
+    if opts.stats {
+        emit_stats(stdout, working, opts);
+        return 0;
+    }
     if explicit_cluster || iris.len() >= LARGE_BATCH_THRESHOLD {
-        emit_clusters(stdout, &iris, opts);
+        emit_clusters(stdout, &working.clusters(), opts);
         return 0;
     }
     emit_url_list(stdout, &iris, opts);
@@ -509,8 +667,10 @@ fn emit_per_iri_sections<W: Write>(stdout: &mut W, iris: &[Identifier], opts: &O
                 payloads.push(section_payload(iri, opts.sections[0], opts));
             } else {
                 let mut m = serde_json::Map::new();
-                for s in &opts.sections {
-                    m.insert(s.name().to_string(), section_payload(iri, *s, opts));
+                for s in ["parse", "canonical", "normalize", "explain"] {
+                    if let Some(sec) = opts.sections.iter().find(|sec| sec.name() == s) {
+                        m.insert(s.to_string(), section_payload(iri, *sec, opts));
+                    }
                 }
                 payloads.push(Value::Object(m));
             }
@@ -528,11 +688,7 @@ fn emit_per_iri_sections<W: Write>(stdout: &mut W, iris: &[Identifier], opts: &O
                     let _ = writeln!(stdout, "{}", iri.canonical());
                 }
                 Section::Normalize => {
-                    let _ = writeln!(
-                        stdout,
-                        "{}",
-                        normalize_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints)
-                    );
+                    let _ = writeln!(stdout, "{}", normalize_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints));
                 }
                 _ => {}
             }
@@ -555,16 +711,11 @@ fn emit_per_iri_sections<W: Write>(stdout: &mut W, iris: &[Identifier], opts: &O
                     let _ = writeln!(stdout, "{}", iri.canonical());
                 }
                 Section::Normalize => {
-                    let _ = writeln!(
-                        stdout,
-                        "{}",
-                        normalize_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints)
-                    );
+                    let _ = writeln!(stdout, "{}", normalize_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints));
                 }
-                Section::Explain => emit_explain_human(
-                    stdout,
-                    &trace_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints),
-                ),
+                Section::Explain => {
+                    emit_explain_human(stdout, &trace_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints))
+                }
             }
         }
     }
@@ -622,104 +773,12 @@ fn emit_url_list<W: Write>(stdout: &mut W, iris: &[Identifier], opts: &Opts) {
     }
 }
 
-// ── Clustering (in-process only, no persistent corpus) ──────────────────────
-
-struct ClusterAcc {
-    host: String,
-    scheme: String,
-    shape: String,
-    count: usize,
-    examples: Vec<Identifier>,
-    seen_examples: std::collections::HashSet<String>,
-    param_stats: HashMap<String, ParamStats>,
-}
-
-#[derive(Default)]
-struct ParamStats {
-    count: usize,
-    type_counts: HashMap<String, usize>,
-    value_counts: HashMap<String, usize>,
-    numeric_count: usize,
-    numeric_min: f64,
-    numeric_max: f64,
-    numeric_sum: f64,
-}
-
-const MAX_EXAMPLES: usize = 10;
-
-fn emit_clusters<W: Write>(stdout: &mut W, iris: &[Identifier], opts: &Opts) {
-    use iriq::path_shape::PathShape;
-
-    // Build clusters keyed on host + raw shape (mechanical, hints-on form).
-    let mut clusters: indexmap_lite::Map<String, ClusterAcc> = indexmap_lite::Map::new();
-    let mut ps = PathShape::new();
-    ps.hints = true;
-    ps.canonical_dates = true;
-    ps.canonical_currencies = true;
-    for iri in iris {
-        let host = iri.host.clone();
-        let shape = ps.for_segments(&iri.path_segments);
-        let key = format!("{}|{}", host, shape);
-        let entry = clusters.entry(key).or_insert_with(|| ClusterAcc {
-            host: host.clone(),
-            scheme: iri.scheme.clone(),
-            shape: shape.clone(),
-            count: 0,
-            examples: Vec::new(),
-            seen_examples: std::collections::HashSet::new(),
-            param_stats: HashMap::new(),
-        });
-        entry.count += 1;
-        if entry.examples.len() < MAX_EXAMPLES {
-            let canon = iri.canonical();
-            if entry.seen_examples.insert(canon) {
-                entry.examples.push(iri.clone());
-            }
-        }
-        for (k, v) in iri.query_params.iter() {
-            let stats = entry.param_stats.entry(k.to_string()).or_default();
-            stats.count += 1;
-            let t = DEFAULT_CLASSIFIER.classify(v).as_str().to_string();
-            *stats.type_counts.entry(t.clone()).or_insert(0) += 1;
-            *stats.value_counts.entry(v.to_string()).or_insert(0) += 1;
-            if let Ok(n) = v.parse::<f64>() {
-                if stats.numeric_count == 0 {
-                    stats.numeric_min = n;
-                    stats.numeric_max = n;
-                } else {
-                    if n < stats.numeric_min {
-                        stats.numeric_min = n;
-                    }
-                    if n > stats.numeric_max {
-                        stats.numeric_max = n;
-                    }
-                }
-                stats.numeric_sum += n;
-                stats.numeric_count += 1;
-            }
-        }
-    }
-
-    let mut sorted: Vec<&ClusterAcc> = clusters.values().collect();
+fn emit_clusters<W: Write>(stdout: &mut W, clusters: &[Cluster], opts: &Opts) {
+    let mut sorted: Vec<&Cluster> = clusters.iter().collect();
     sorted.sort_by(|a, b| b.count.cmp(&a.count));
 
     if opts.json {
-        let arr: Vec<Value> = sorted
-            .iter()
-            .map(|c| {
-                let mut m = serde_json::Map::new();
-                m.insert("key".to_string(), Value::String(format!("{}://{}{}", c.scheme, c.host, c.shape)));
-                m.insert("host".to_string(), Value::String(c.host.clone()));
-                m.insert("scheme".to_string(), Value::String(c.scheme.clone()));
-                m.insert("shape".to_string(), Value::String(c.shape.clone()));
-                m.insert("count".to_string(), Value::Number((c.count as u64).into()));
-                m.insert(
-                    "examples".to_string(),
-                    Value::Array(c.examples.iter().map(|e| Value::String(e.canonical())).collect()),
-                );
-                Value::Object(m)
-            })
-            .collect();
+        let arr: Vec<Value> = sorted.iter().map(|c| cluster_json(c)).collect();
         emit_json_array(stdout, &arr, opts);
         return;
     }
@@ -729,7 +788,8 @@ fn emit_clusters<W: Write>(stdout: &mut W, iris: &[Identifier], opts: &Opts) {
             let _ = writeln!(stdout);
         }
         let host = if c.host.is_empty() { "(urn)" } else { c.host.as_str() };
-        let _ = writeln!(stdout, "[{}] {}  {}", c.count, host, c.shape);
+        let shape = if opts.hints { c.shape.clone() } else { raw_shape_for(c) };
+        let _ = writeln!(stdout, "[{}] {}  {}", c.count, host, shape);
         let limit = c.examples.len().min(3);
         for e in &c.examples[..limit] {
             let _ = writeln!(stdout, "    {}", e.canonical());
@@ -742,76 +802,77 @@ fn emit_clusters<W: Write>(stdout: &mut W, iris: &[Identifier], opts: &Opts) {
     }
 }
 
-fn emit_param_summary<W: Write>(stdout: &mut W, c: &ClusterAcc) {
-    if c.param_stats.is_empty() {
+fn raw_shape_for(c: &Cluster) -> String {
+    if let Some(ex) = c.examples.first() {
+        iriq::path_shape_for(&ex.path_segments, false)
+    } else {
+        c.shape.clone()
+    }
+}
+
+fn cluster_json(c: &Cluster) -> Value {
+    let mut m = serde_json::Map::new();
+    m.insert("key".to_string(), Value::String(c.key.clone()));
+    m.insert("host".to_string(), Value::String(c.host.clone()));
+    m.insert("scheme".to_string(), Value::String(c.scheme.clone()));
+    m.insert("shape".to_string(), Value::String(c.shape.clone()));
+    m.insert("count".to_string(), Value::Number((c.count as u64).into()));
+    m.insert(
+        "examples".to_string(),
+        Value::Array(c.examples.iter().map(|e| Value::String(e.canonical())).collect()),
+    );
+    let stats = c.segment_stats();
+    let segs: Vec<Value> = stats
+        .iter()
+        .map(|s| {
+            let mut o = serde_json::Map::new();
+            o.insert("position".to_string(), Value::Number((s.position as u64).into()));
+            o.insert("stable".to_string(), Value::Bool(s.stable));
+            let mut v = serde_json::Map::new();
+            for (k, n) in &s.values {
+                v.insert(k.clone(), Value::Number((*n as u64).into()));
+            }
+            o.insert("values".to_string(), Value::Object(v));
+            Value::Object(o)
+        })
+        .collect();
+    m.insert("segments".to_string(), Value::Array(segs));
+    let summaries = c.param_summary();
+    let params: Vec<Value> = summaries
+        .iter()
+        .map(|p| {
+            let mut o = serde_json::Map::new();
+            o.insert("name".to_string(), Value::String(p.name.clone()));
+            o.insert("count".to_string(), Value::Number((p.count as u64).into()));
+            o.insert("type".to_string(), Value::String(p.ty.as_str().to_string()));
+            o.insert("cardinality".to_string(), Value::Number((p.cardinality as u64).into()));
+            o.insert("presence".to_string(), Value::from(p.presence));
+            Value::Object(o)
+        })
+        .collect();
+    m.insert("params".to_string(), Value::Array(params));
+    Value::Object(m)
+}
+
+fn emit_param_summary<W: Write>(stdout: &mut W, c: &Cluster) {
+    let rows = c.param_summary();
+    if rows.is_empty() {
         return;
     }
-    let mut names: Vec<&String> = c.param_stats.keys().collect();
-    names.sort_by(|a, b| {
-        let ca = c.param_stats[*a].count;
-        let cb = c.param_stats[*b].count;
-        cb.cmp(&ca).then(a.cmp(b))
-    });
-    let width = names.iter().map(|n| n.len()).max().unwrap_or(0);
-    for name in names {
-        let st = &c.param_stats[name];
-        let ty = dominant_type_for(st);
-        let presence = (st.count as f64) / (c.count as f64);
-        let cardinality = st.value_counts.len();
-        let mut parts = vec![ty.clone()];
-        if st.numeric_count > 0 {
-            parts.push(format!("{}..{}", format_num(st.numeric_min), format_num(st.numeric_max)));
-            parts.push(format!("avg {}", format_num(st.numeric_sum / st.numeric_count as f64)));
+    let width = rows.iter().map(|r| r.name.len()).max().unwrap_or(0);
+    for r in rows {
+        let mut parts = vec![r.ty.as_str().to_string()];
+        if r.numeric_count > 0 {
+            parts.push(format!("{}..{}", format_num(r.min), format_num(r.max)));
+            parts.push(format!("avg {}", format_num(r.avg)));
         }
         parts.push(format!(
             "({} distinct, {}%)",
-            cardinality,
-            (presence * 100.0 + 0.5) as u32
+            r.cardinality,
+            (r.presence * 100.0 + 0.5) as u32
         ));
-        let _ = writeln!(
-            stdout,
-            "    {:<width$}  {}",
-            name,
-            parts.join("  "),
-            width = width
-        );
+        let _ = writeln!(stdout, "    {:<width$}  {}", r.name, parts.join("  "), width = width);
     }
-}
-
-fn dominant_type_for(st: &ParamStats) -> String {
-    // Promote :enum when value-counts are bounded; same heuristic as Go.
-    const ENUM_MIN_OBSERVATIONS: usize = 20;
-    const ENUM_MAX_CARDINALITY: usize = 10;
-    const ENUM_MIN_VALUE_COUNT: usize = 2;
-    const ENUM_MIN_COVERAGE: f64 = 0.95;
-    if st.count >= ENUM_MIN_OBSERVATIONS && st.value_counts.len() <= ENUM_MAX_CARDINALITY {
-        let covered: usize = st.value_counts.values().copied().sum();
-        let all_repeat = st.value_counts.values().all(|&n| n >= ENUM_MIN_VALUE_COUNT);
-        if all_repeat && (covered as f64) / (st.count as f64) >= ENUM_MIN_COVERAGE {
-            // Boolean wins over enum when the dominant type is :boolean.
-            if dominant(&st.type_counts) != "boolean" {
-                return "enum".to_string();
-            }
-        }
-    }
-    dominant(&st.type_counts)
-}
-
-fn dominant(m: &HashMap<String, usize>) -> String {
-    let mut best: Option<(&String, usize)> = None;
-    for (k, v) in m {
-        best = match best {
-            None => Some((k, *v)),
-            Some((bk, bv)) => {
-                if *v > bv || (*v == bv && k.as_str() < bk.as_str()) {
-                    Some((k, *v))
-                } else {
-                    Some((bk, bv))
-                }
-            }
-        };
-    }
-    best.map(|(k, _)| k.clone()).unwrap_or_else(|| "literal".to_string())
 }
 
 fn format_num(n: f64) -> String {
@@ -819,11 +880,339 @@ fn format_num(n: f64) -> String {
         format!("{}", n as i64)
     } else {
         let rounded = (n * 100.0).round() / 100.0;
-        // strip trailing zeros
-        let s = format!("{}", rounded);
-        s
+        format!("{}", rounded)
     }
 }
+
+// ── Stats ───────────────────────────────────────────────────────────────────
+
+fn cmd_stats<W: Write, E: Write>(
+    stdout: &mut W,
+    stderr: &mut E,
+    corpus: Option<&Corpus>,
+    opts: &Opts,
+) -> u8 {
+    let Some(c) = corpus else {
+        return emit_error(stderr, opts.json, "missing_argument", "missing argument <--corpus>", "", 1);
+    };
+    emit_stats(stdout, c, opts);
+    0
+}
+
+fn emit_stats<W: Write>(stdout: &mut W, corpus: &Corpus, opts: &Opts) {
+    let hosts_full = corpus.host_counts();
+    let observations: usize = hosts_full.values().copied().sum();
+    let hosts = top_n_map(&hosts_full, TOP_N_STATS);
+    let shapes_full = corpus.fingerprint_counts();
+    let shapes = top_n_map(&shapes_full, TOP_N_STATS);
+    let raw_full = corpus.raw_shape_counts();
+    let raw = top_n_map(&raw_full, TOP_N_STATS);
+
+    if opts.json {
+        let mut out = serde_json::Map::new();
+        out.insert("observations".to_string(), Value::Number((observations as u64).into()));
+        out.insert("clusters".to_string(), Value::Number((corpus.size() as u64).into()));
+        out.insert("hosts".to_string(), kv_to_value(&hosts));
+        out.insert("shapes".to_string(), kv_to_value(&shapes));
+        out.insert("raw_shapes".to_string(), kv_to_value(&raw));
+        write_json(stdout, &Value::Object(out));
+        return;
+    }
+
+    let _ = writeln!(stdout, "observations: {}", observations);
+    let _ = writeln!(stdout, "clusters:     {}", corpus.size());
+    let _ = writeln!(stdout);
+    let _ = writeln!(stdout, "top hosts:");
+    for (k, v) in &hosts {
+        let _ = writeln!(stdout, "  {:>6}  {}", v, k);
+    }
+    let _ = writeln!(stdout);
+    let _ = writeln!(stdout, "top shapes:");
+    let shape_rows = if opts.hints { &shapes } else { &raw };
+    for (k, v) in shape_rows {
+        let _ = writeln!(stdout, "  {:>6}  {}", v, k);
+    }
+}
+
+fn top_n_map(m: &HashMap<String, usize>, n: usize) -> Vec<(String, usize)> {
+    let mut v: Vec<(String, usize)> = m.iter().map(|(k, v)| (k.clone(), *v)).collect();
+    v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    v.truncate(n);
+    v
+}
+
+fn kv_to_value(pairs: &[(String, usize)]) -> Value {
+    let mut o = serde_json::Map::new();
+    for (k, v) in pairs {
+        o.insert(k.clone(), Value::Number((*v as u64).into()));
+    }
+    Value::Object(o)
+}
+
+// ── Reinfer / Propose / Cross-host shapes ───────────────────────────────────
+
+fn cmd_reinfer<W: Write, E: Write>(
+    stdout: &mut W,
+    stderr: &mut E,
+    corpus: Option<&mut Corpus>,
+    opts: &Opts,
+) -> u8 {
+    let Some(c) = corpus else {
+        return emit_error(stderr, opts.json, "missing_argument", "missing argument <--corpus>", "", 1);
+    };
+    let n = c.observed_iri_count();
+    let before = c.size();
+    if let Err(e) = c.reinfer() {
+        let _ = writeln!(stderr, "iriq: {}", e);
+        return 1;
+    }
+    let after = c.size();
+    let noun = if n == 1 { "observation" } else { "observations" };
+    let clusters = if after == 1 { "cluster" } else { "clusters" };
+    let _ = writeln!(stdout, "reinferred {} {}: {} → {} {}", n, noun, before, after, clusters);
+    0
+}
+
+fn cmd_propose<W: Write, E: Write>(
+    stdout: &mut W,
+    stderr: &mut E,
+    corpus: Option<&mut Corpus>,
+    opts: &Opts,
+) -> u8 {
+    let Some(c) = corpus else {
+        return emit_error(stderr, opts.json, "missing_argument", "missing argument <--corpus>", "", 1);
+    };
+    let popts = ProposalOptions {
+        min_observations: opts.propose_min_obs,
+        min_coverage: opts.propose_min_coverage,
+        min_hosts: opts.min_hosts,
+    };
+    if opts.activate_above > 0.0 {
+        match c.activate_proposals_above(opts.activate_above, popts) {
+            Ok(activated) => {
+                if activated.is_empty() {
+                    let _ = writeln!(stdout, "no proposals at or above coverage {}", opts.activate_above);
+                    return 0;
+                }
+                for r in activated {
+                    let _ = writeln!(stdout, "activated: {} ({})", r.ty.as_str(), r.prefix);
+                }
+                return 0;
+            }
+            Err(e) => {
+                let _ = writeln!(stderr, "iriq: {}", e);
+                return 1;
+            }
+        }
+    }
+
+    let proposals = c.propose_recognizers(popts);
+    if opts.json {
+        let arr: Vec<Value> = proposals.iter().map(proposal_json).collect();
+        write_json(stdout, &Value::Array(arr));
+        return 0;
+    }
+    if proposals.is_empty() {
+        let _ = writeln!(stdout, "no recognizer proposals ({} observations scanned)", c.observed_iri_count());
+        return 0;
+    }
+    for (i, p) in proposals.iter().enumerate() {
+        if i > 0 {
+            let _ = writeln!(stdout);
+        }
+        let _ = writeln!(stdout, "proposal: {} ({})", p.suggested_type, p.prefix);
+        let _ = writeln!(stdout, "  strategy:    {}", p.strategy);
+        let _ = writeln!(stdout, "  coverage:    {:.2}", p.coverage);
+        let _ = writeln!(stdout, "  confidence:  {:.2}", p.confidence);
+        let _ = writeln!(stdout, "  observations: {}", p.observation_count);
+        let _ = writeln!(stdout, "  hosts:       {}", p.hosts.join(", "));
+        let _ = writeln!(stdout, "  positions:   {}", p.positions.len());
+        let samples = if p.sample_values.len() > 3 { &p.sample_values[..3] } else { &p.sample_values[..] };
+        let _ = writeln!(stdout, "  samples:     {}", samples.join(", "));
+    }
+    0
+}
+
+fn proposal_json(p: &RecognizerProposal) -> Value {
+    let mut o = serde_json::Map::new();
+    o.insert("prefix".to_string(), Value::String(p.prefix.clone()));
+    o.insert("suggested_type".to_string(), Value::String(p.suggested_type.clone()));
+    let pos: Vec<Value> = p
+        .positions
+        .iter()
+        .map(|pos| {
+            let mut o = serde_json::Map::new();
+            o.insert("host".to_string(), Value::String(pos.host.clone()));
+            o.insert("scope".to_string(), Value::String(pos.scope.as_str().to_string()));
+            o.insert("locator".to_string(), Value::String(pos.locator.clone()));
+            Value::Object(o)
+        })
+        .collect();
+    o.insert("positions".to_string(), Value::Array(pos));
+    o.insert(
+        "hosts".to_string(),
+        Value::Array(p.hosts.iter().map(|h| Value::String(h.clone())).collect()),
+    );
+    o.insert(
+        "coverage".to_string(),
+        Value::Number(serde_json::Number::from_f64(p.coverage).unwrap()),
+    );
+    o.insert(
+        "confidence".to_string(),
+        Value::Number(serde_json::Number::from_f64(p.confidence).unwrap()),
+    );
+    o.insert(
+        "observation_count".to_string(),
+        Value::Number((p.observation_count as u64).into()),
+    );
+    o.insert(
+        "sample_values".to_string(),
+        Value::Array(p.sample_values.iter().map(|s| Value::String(s.clone())).collect()),
+    );
+    o.insert("strategy".to_string(), Value::String(p.strategy.clone()));
+    Value::Object(o)
+}
+
+fn cmd_cross_host_shapes<W: Write, E: Write>(
+    stdout: &mut W,
+    stderr: &mut E,
+    corpus: Option<&Corpus>,
+    opts: &Opts,
+) -> u8 {
+    let Some(c) = corpus else {
+        return emit_error(stderr, opts.json, "missing_argument", "missing argument <--corpus>", "", 1);
+    };
+    let shapes = cross_host_shapes(c, opts.min_hosts);
+    if opts.json {
+        let arr: Vec<Value> = shapes
+            .iter()
+            .map(|s| {
+                let mut o = serde_json::Map::new();
+                o.insert("shape".to_string(), Value::String(s.shape.clone()));
+                o.insert(
+                    "hosts".to_string(),
+                    Value::Array(s.hosts.iter().map(|h| Value::String(h.clone())).collect()),
+                );
+                o.insert("host_count".to_string(), Value::Number((s.host_count() as u64).into()));
+                o.insert(
+                    "observation_count".to_string(),
+                    Value::Number((s.observation_count as u64).into()),
+                );
+                Value::Object(o)
+            })
+            .collect();
+        write_json(stdout, &Value::Array(arr));
+        return 0;
+    }
+    if shapes.is_empty() {
+        let size = c.size();
+        let noun = if size == 1 { "cluster" } else { "clusters" };
+        let _ = writeln!(stdout, "no cross-host shapes ({} {} scanned)", size, noun);
+        return 0;
+    }
+    for s in shapes {
+        let noun = if s.host_count() == 1 { "host" } else { "hosts" };
+        let _ = writeln!(
+            stdout,
+            "{}  ({} {}: {})  obs={}",
+            s.shape,
+            s.host_count(),
+            noun,
+            s.hosts.join(", "),
+            s.observation_count
+        );
+    }
+    0
+}
+
+// ── Completion ──────────────────────────────────────────────────────────────
+
+fn cmd_completion<W: Write, E: Write>(
+    stdout: &mut W,
+    stderr: &mut E,
+    args: &[String],
+    json_mode: bool,
+) -> u8 {
+    let shell = match args.first() {
+        Some(s) => s.as_str(),
+        None => {
+            return emit_error(
+                stderr,
+                json_mode,
+                "missing_argument",
+                "missing shell argument; expected bash | zsh | fish",
+                "iriq: completion: missing shell argument; expected bash | zsh | fish",
+                1,
+            );
+        }
+    };
+    match shell {
+        "bash" => {
+            let _ = write!(stdout, "{}", BASH_COMPLETION);
+        }
+        "zsh" => {
+            let _ = write!(stdout, "{}", ZSH_COMPLETION);
+        }
+        "fish" => {
+            let _ = write!(stdout, "{}", FISH_COMPLETION);
+        }
+        _ => {
+            return emit_error(
+                stderr,
+                json_mode,
+                "invalid_argument",
+                &format!("unknown shell {:?}; expected bash | zsh | fish", shell),
+                &format!(
+                    "iriq: completion: unknown shell {:?}; expected bash | zsh | fish",
+                    shell
+                ),
+                1,
+            );
+        }
+    }
+    0
+}
+
+const BASH_COMPLETION: &str = r#"# iriq bash completion (rust port)
+_iriq() {
+  COMPREPLY=( $(compgen -W "-n -c -p -e -j -J -N -V -h --normalize --canonical --parse --explain --json --ndjson --no-hints --version --help --corpus --host --stats --reinfer --propose-recognizers --cross-host-shapes --activate-above --min-hosts --min-observations --min-coverage --no-scheme-less cluster completion" -- "${COMP_WORDS[COMP_CWORD]}") )
+}
+complete -F _iriq iriq
+"#;
+
+const ZSH_COMPLETION: &str = r#"# iriq zsh completion (rust port)
+_iriq() {
+  local -a opts
+  opts=('-n' '-c' '-p' '-e' '-j' '-J' '-N' '-V' '-h' '--normalize' '--canonical' '--parse' '--explain' '--json' '--ndjson' '--no-hints' '--version' '--help' '--corpus' '--host' '--stats' '--reinfer' '--propose-recognizers' '--cross-host-shapes' '--activate-above' '--min-hosts' '--min-observations' '--min-coverage' '--no-scheme-less' 'cluster' 'completion')
+  compadd "${opts[@]}"
+}
+compdef _iriq iriq
+"#;
+
+const FISH_COMPLETION: &str = r#"# iriq fish completion (rust port)
+complete -c iriq -s n -l normalize
+complete -c iriq -s c -l canonical
+complete -c iriq -s p -l parse
+complete -c iriq -s e -l explain
+complete -c iriq -s j -l json
+complete -c iriq -s J -l ndjson
+complete -c iriq -s N -l no-hints
+complete -c iriq -s V -l version
+complete -c iriq -s h -l help
+complete -c iriq -l corpus -r
+complete -c iriq -l host -r
+complete -c iriq -l stats
+complete -c iriq -l reinfer
+complete -c iriq -l propose-recognizers
+complete -c iriq -l cross-host-shapes
+complete -c iriq -l activate-above -r
+complete -c iriq -l min-hosts -r
+complete -c iriq -l min-observations -r
+complete -c iriq -l min-coverage -r
+complete -c iriq -l no-scheme-less
+complete -c iriq -n '__fish_use_subcommand' -a cluster
+complete -c iriq -n '__fish_use_subcommand' -a completion
+"#;
 
 // ── JSON helpers ─────────────────────────────────────────────────────────────
 
@@ -850,7 +1239,7 @@ fn emit_error<W: Write>(
     exit: u8,
 ) -> u8 {
     if json_mode {
-        let v = json!({"error": code, "message": message});
+        let v = json!({"error": {"code": code, "message": message}});
         let _ = writeln!(stderr, "{}", serde_json::to_string(&v).unwrap());
     } else if !human.is_empty() {
         let _ = writeln!(stderr, "{}", human);
@@ -858,40 +1247,4 @@ fn emit_error<W: Write>(
         let _ = writeln!(stderr, "iriq: {}", message);
     }
     exit
-}
-
-// Tiny insertion-order map without pulling in indexmap.
-mod indexmap_lite {
-    use std::collections::HashMap;
-
-    pub struct Map<K, V> {
-        order: Vec<K>,
-        inner: HashMap<K, V>,
-    }
-
-    impl<K: std::hash::Hash + Eq + Clone, V> Map<K, V> {
-        pub fn new() -> Self {
-            Self { order: Vec::new(), inner: HashMap::new() }
-        }
-        pub fn entry(&mut self, k: K) -> Entry<'_, K, V> {
-            if !self.inner.contains_key(&k) {
-                self.order.push(k.clone());
-            }
-            Entry { map: self, k }
-        }
-        pub fn values(&self) -> impl Iterator<Item = &V> {
-            self.order.iter().map(move |k| self.inner.get(k).unwrap())
-        }
-    }
-
-    pub struct Entry<'a, K: std::hash::Hash + Eq + Clone, V> {
-        map: &'a mut Map<K, V>,
-        k: K,
-    }
-
-    impl<'a, K: std::hash::Hash + Eq + Clone, V> Entry<'a, K, V> {
-        pub fn or_insert_with<F: FnOnce() -> V>(self, f: F) -> &'a mut V {
-            self.map.inner.entry(self.k).or_insert_with(f)
-        }
-    }
 }
