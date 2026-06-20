@@ -39,13 +39,16 @@ jobs:
         run: cargo build --workspace
 
       - name: clippy (default features)
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: test (default features)
         run: cargo test --workspace
 
       - name: build (sqlite)
         run: cargo build --workspace --features iriq/sqlite
+
+      - name: clippy (sqlite)
+        run: cargo clippy --workspace --all-targets --features iriq/sqlite -- -D warnings
 
       - name: test (sqlite)
         run: cargo test --workspace --features iriq/sqlite

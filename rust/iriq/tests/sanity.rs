@@ -1,4 +1,4 @@
-use iriq::{normalize, normalize_identifier_with_evidence, parse, NullEvidence};
+use iriq::{normalize, parse};
 
 #[test]
 fn basic_normalize() {
