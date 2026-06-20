@@ -27,6 +27,7 @@ module Iriq
 
       Sections (combine freely):
         -n, --normalize       Shape-normalized form
+        -c, --canonical       Canonical form (no shape normalization)
         -p, --parse           Parsed fields
         -e, --explain         Annotated trace — per-segment notes about why
                               each placeholder / canonical value was chosen
@@ -181,6 +182,7 @@ module Iriq
       parser = OptionParser.new do |o|
         o.on("-p", "--parse")        { opts[:sections] << :parse }
         o.on("-n", "--normalize")    { opts[:sections] << :normalize }
+        o.on("-c", "--canonical")    { opts[:sections] << :canonical }
         o.on("-e", "--explain")      { opts[:sections] << :explain }
         o.on("-j", "--json")         { opts[:json]    = true }
         o.on("-J", "--ndjson")       { opts[:json]    = true; opts[:ndjson] = true }
@@ -250,6 +252,7 @@ module Iriq
 
       data = {}
       data[:parse]     = identifier_hash(iri) if sections.include?(:parse)
+      data[:canonical] = iri.canonical         if sections.include?(:canonical)
       if sections.include?(:normalize)
         data[:normalize] = corpus ? corpus.normalize(iri) : Normalizer.normalize_identifier(iri, hints: opts[:hints])
       end
@@ -298,9 +301,10 @@ module Iriq
       if opts[:json]
         out = sections.size == 1 ? payloads.map(&:values).flatten(1) : payloads
         emit_json(out, opts)
-      elsif sections == [:normalize]
+      elsif sections == [:normalize] || sections == [:canonical]
         # Most common case — keep it tight: one URL per line, no headers.
-        payloads.each { |p| stdout.puts p[:normalize] }
+        key = sections.first
+        payloads.each { |p| stdout.puts p[key] }
       else
         payloads.each_with_index do |p, i|
           stdout.puts if i > 0
@@ -309,6 +313,7 @@ module Iriq
             stdout.puts if j > 0  # blank line between sections within one IRI
             case sec
             when :parse     then emit_parse_human(p[:parse])
+            when :canonical then stdout.puts p[:canonical]
             when :normalize then stdout.puts p[:normalize]
             end
           end
@@ -319,6 +324,7 @@ module Iriq
     def section_payload(iri, sections, opts)
       data = {}
       data[:parse]     = identifier_hash(iri)                                       if sections.include?(:parse)
+      data[:canonical] = iri.canonical                                              if sections.include?(:canonical)
       data[:normalize] = Normalizer.normalize_identifier(iri, hints: opts[:hints])  if sections.include?(:normalize)
       data
     end
@@ -559,6 +565,7 @@ module Iriq
         stdout.puts "# #{sec}" if multi
         case sec
         when :parse     then emit_parse_human(data[:parse])
+        when :canonical then stdout.puts data[:canonical]
         when :normalize then stdout.puts data[:normalize]
         when :explain   then emit_explain_human(data[:explain])
         end

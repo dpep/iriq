@@ -42,7 +42,7 @@ _iriq() {
 
     # If the current token starts with `-`, complete flags.
     if [[ "$cur" == -* ]]; then
-        local flags="-h --help -V --version -p --parse -n --normalize -e --explain
+        local flags="-h --help -V --version -p --parse -n --normalize -c --canonical -e --explain
                      -j --json -J --ndjson -N --no-hints --hints --no-scheme-less
                      --scheme-less --corpus --host --stats --reinfer
                      --propose-recognizers --activate-above --cross-host-shapes

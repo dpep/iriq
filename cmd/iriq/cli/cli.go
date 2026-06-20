@@ -29,6 +29,7 @@ text via stdin.
 
 Sections (combine freely):
   -n, --normalize       Shape-normalized form
+  -c, --canonical       Canonical form (no shape normalization)
   -p, --parse           Parsed fields
   -e, --explain         Annotated trace — per-segment notes about why
                         each placeholder / canonical value was chosen
@@ -100,6 +101,7 @@ const (
 	sectionParse section = iota
 	sectionNormalize
 	sectionExplain
+	sectionCanonical
 )
 
 type options struct {
@@ -341,6 +343,8 @@ func parseOptions(argv []string) ([]string, *options, error) {
 			opts.sections = append(opts.sections, sectionParse)
 		case a == "-n" || a == "--normalize":
 			opts.sections = append(opts.sections, sectionNormalize)
+		case a == "-c" || a == "--canonical":
+			opts.sections = append(opts.sections, sectionCanonical)
 		case a == "-e" || a == "--explain":
 			opts.sections = append(opts.sections, sectionExplain)
 		case a == "--corpus":
@@ -377,6 +381,8 @@ func parseOptions(argv []string) ([]string, *options, error) {
 					opts.sections = append(opts.sections, sectionParse)
 				case 'n':
 					opts.sections = append(opts.sections, sectionNormalize)
+				case 'c':
+					opts.sections = append(opts.sections, sectionCanonical)
 				case 'e':
 					opts.sections = append(opts.sections, sectionExplain)
 				case 'j':
@@ -424,6 +430,8 @@ func cmdSummary(stdout, stderr io.Writer, args []string, opts *options, corpus *
 		switch s {
 		case sectionParse:
 			data["parse"] = identifierMap(iri)
+		case sectionCanonical:
+			data["canonical"] = iri.Canonical()
 		case sectionNormalize:
 			if corpus != nil {
 				data["normalize"] = corpus.NormalizeIdentifier(iri)
@@ -789,6 +797,8 @@ func emitSections(stdout io.Writer, data map[string]interface{}, sections []sect
 		switch s {
 		case sectionParse:
 			emitParseHuman(stdout, data["parse"].(*identifierJSON).ParseHuman())
+		case sectionCanonical:
+			fmt.Fprintln(stdout, data["canonical"])
 		case sectionNormalize:
 			fmt.Fprintln(stdout, data["normalize"])
 		case sectionExplain:
@@ -801,6 +811,8 @@ func sectionName(s section) string {
 	switch s {
 	case sectionParse:
 		return "parse"
+	case sectionCanonical:
+		return "canonical"
 	case sectionExplain:
 		return "explain"
 	}
@@ -915,6 +927,8 @@ func emitPerIRISections(stdout io.Writer, iris []*iriq.Identifier, opts *options
 			switch s {
 			case sectionParse:
 				p["parse"] = identifierMap(iri)
+			case sectionCanonical:
+				p["canonical"] = iri.Canonical()
 			case sectionNormalize:
 				p["normalize"] = iriq.NormalizeIdentifier(iri, nil, opts.hints)
 			}
@@ -933,6 +947,8 @@ func emitPerIRISections(stdout io.Writer, iris []*iriq.Identifier, opts *options
 					switch s {
 					case sectionParse:
 						flat = append(flat, p["parse"])
+					case sectionCanonical:
+						flat = append(flat, p["canonical"])
 					case sectionNormalize:
 						flat = append(flat, p["normalize"])
 					}
@@ -945,9 +961,12 @@ func emitPerIRISections(stdout io.Writer, iris []*iriq.Identifier, opts *options
 		return
 	}
 
-	if len(opts.sections) == 1 && opts.sections[0] == sectionNormalize {
+	if len(opts.sections) == 1 &&
+		(opts.sections[0] == sectionNormalize || opts.sections[0] == sectionCanonical) {
+		// Most common case — keep it tight: one URL per line, no headers.
+		key := sectionName(opts.sections[0])
 		for _, p := range payloads {
-			fmt.Fprintln(stdout, p["normalize"])
+			fmt.Fprintln(stdout, p[key])
 		}
 		return
 	}
@@ -964,6 +983,8 @@ func emitPerIRISections(stdout io.Writer, iris []*iriq.Identifier, opts *options
 			switch s {
 			case sectionParse:
 				emitParseHuman(stdout, p["parse"].(*identifierJSON).ParseHuman())
+			case sectionCanonical:
+				fmt.Fprintln(stdout, p["canonical"])
 			case sectionNormalize:
 				fmt.Fprintln(stdout, p["normalize"])
 			}

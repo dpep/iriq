@@ -18,6 +18,7 @@ _iriq() {
         '(-V --version)'{-V,--version}'[print version]' \
         '(-p --parse)'{-p,--parse}'[parsed fields section]' \
         '(-n --normalize)'{-n,--normalize}'[normalized section]' \
+        '(-c --canonical)'{-c,--canonical}'[canonical form section]' \
         '(-e --explain)'{-e,--explain}'[annotated trace section]' \
         '(-j --json)'{-j,--json}'[JSON output]' \
         '(-J --ndjson)'{-J,--ndjson}'[newline-delimited JSON]' \
