@@ -1,0 +1,78 @@
+name: Rust
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    types: [ opened, edited, synchronize ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        rust-version: [ "stable" ]
+
+    name: Rust ${{ matrix.rust-version }}
+
+    defaults:
+      run:
+        working-directory: rust
+
+    steps:
+      - name: clone ${{ github.repository }}
+        uses: actions/checkout@v6
+
+      - name: setup Rust ${{ matrix.rust-version }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.rust-version }}
+
+      - name: cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: build (default features)
+        run: cargo build --workspace
+
+      - name: clippy (default features)
+        run: cargo clippy --workspace -- -D warnings
+
+      - name: test (default features)
+        run: cargo test --workspace
+
+      - name: build (sqlite)
+        run: cargo build --workspace --features iriq/sqlite
+
+      - name: test (sqlite)
+        run: cargo test --workspace --features iriq/sqlite
+
+  parity:
+    name: Rust ↔ Go parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.23"
+          cache: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: build Go binary (with sqlite)
+        run: go build -tags sqlite -o bin/iriq ./cmd/iriq
+
+      - name: build Rust binary (release, with sqlite)
+        working-directory: rust
+        run: cargo build --release --bin iriq
+
+      - name: CLI parity
+        run: script/rust_parity.sh
