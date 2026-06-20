@@ -45,6 +45,15 @@ pub trait Storage: Send + Sync {
     fn each_activated_recognizer(&self, f: &mut dyn FnMut(&serde_json::Value));
     fn activated_recognizer_count(&self) -> usize;
 
+    /// Wraps a closure in a single backend transaction. SQLite turns
+    /// O(observations) fsyncs into one; Memory + JSON are no-ops.
+    fn batch_begin(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+    fn batch_commit(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
     }

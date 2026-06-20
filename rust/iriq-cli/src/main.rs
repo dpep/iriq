@@ -630,9 +630,11 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
         (None, Some(c)) => c,
         _ => unreachable!(),
     };
-    for iri in &iris {
-        working.observe_iri(iri);
-    }
+    let _ = working.batch(|c| {
+        for iri in &iris {
+            c.observe_iri(iri);
+        }
+    });
 
     if !opts.sections.is_empty() {
         emit_per_iri_sections(stdout, &iris, opts);

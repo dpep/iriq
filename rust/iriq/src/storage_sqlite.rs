@@ -578,6 +578,17 @@ impl Storage for SqliteStorage {
         n as usize
     }
 
+    fn batch_begin(&mut self) -> std::io::Result<()> {
+        let c = self.conn.lock().unwrap();
+        c.execute_batch("BEGIN IMMEDIATE").map_err(rs_err)?;
+        Ok(())
+    }
+    fn batch_commit(&mut self) -> std::io::Result<()> {
+        let c = self.conn.lock().unwrap();
+        c.execute_batch("COMMIT").map_err(rs_err)?;
+        Ok(())
+    }
+
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
     }

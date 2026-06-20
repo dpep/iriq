@@ -324,6 +324,13 @@ impl Corpus {
         self.storage.close()
     }
 
+    /// Wrap many observations in a single backend transaction.
+    pub fn batch<F: FnOnce(&mut Corpus)>(&mut self, fn_: F) -> std::io::Result<()> {
+        self.storage.batch_begin()?;
+        fn_(self);
+        self.storage.batch_commit()
+    }
+
     pub fn params_for(&self, input: &str) -> Vec<ParamSummary> {
         let Ok(iri) = parse(input) else { return Vec::new(); };
         let cluster = self.cluster_for_iri(&iri);
