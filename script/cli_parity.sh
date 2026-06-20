@@ -66,6 +66,13 @@ run_pair "canonical -c"      "" -c "foo.com/users/123"
 run_pair "canonical -c json" "" -c --json "HTTP://Foo.COM:80/Users/123#frag"
 run_pair "canonical+normalize -cn" "" -cn "https://foo.com/users/123"
 run_pair "parse -p json"     "" -p --json "https://foo.com/users/123/orders/456"
+# Multi-section JSON: object key order must match across runtimes. Ruby
+# emits a fixed insertion order (parse, canonical, normalize); Go pins the
+# same via orderedSections (its map would otherwise alphabetize keys). The
+# & in the query also exercises the no-HTML-escape path.
+run_pair "multi-section -pn json"  "" -pn --json "foo.com/users/1?a=1&b=2"
+run_pair "multi-section -pc json"  "" -pc --json "foo.com/users/1?a=1&b=2"
+run_pair "multi-section -pcn json" "" -pcn --json "foo.com/users/1?x=2&y=3"
 run_pair "summary unicode"   "" "https://例え.テスト/こんにちは"
 # JSON error envelope: structured errors on the failure path must match
 # byte-for-byte across runtimes (run_pair folds stderr into the diff via 2>&1).
@@ -111,6 +118,12 @@ run_pair "pipe -c --ndjson" \
   "see https://foo.com/users/1 and https://foo.com/users/2" -c --ndjson
 run_pair "pipe -n --json" \
   "see https://foo.com/users/1 and https://foo.com/users/2" -n --json
+# Multi-section JSON in pipe mode: per-IRI object key order must also match
+# (parse before canonical), not just the single-input path above.
+run_pair "pipe -pc --json" \
+  "see https://foo.com/users/1 and https://foo.com/users/2" -pc --json
+run_pair "pipe -pc --ndjson" \
+  "see https://foo.com/users/1 and https://foo.com/users/2" -pc --ndjson
 run_pair "pipe -n --ndjson" \
   "see https://foo.com/users/1 and https://foo.com/users/2" -n --ndjson
 run_pair "pipe -n -J (short ndjson)" \

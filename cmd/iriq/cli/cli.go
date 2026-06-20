@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -444,11 +445,13 @@ func cmdSummary(stdout, stderr io.Writer, args []string, opts *options, corpus *
 	}
 
 	if opts.json {
-		var payload interface{} = data
+		var payload interface{}
 		if len(sections) == 1 {
-			for _, v := range data {
-				payload = v
-			}
+			payload = data[sectionName(sections[0])]
+		} else {
+			// Multi-section: pin key order to Ruby's fixed cmd_summary
+			// insertion order so JSON parity holds (see orderedSections).
+			payload = orderedSections(data)
 		}
 		writeJSON(stdout, payload)
 	} else {
@@ -919,7 +922,8 @@ func inspectStringMap(m map[string]string) string {
 }
 
 func emitPerIRISections(stdout io.Writer, iris []*iriq.Identifier, opts *options) {
-	type payload map[string]interface{}
+	// orderedSections keeps multi-section JSON in Ruby's fixed key order.
+	type payload = orderedSections
 	payloads := make([]payload, len(iris))
 	for i, iri := range iris {
 		p := payload{}
@@ -1209,6 +1213,61 @@ func emitStats(stdout io.Writer, corpus *iriq.Corpus, opts *options) {
 type kv struct {
 	key   string
 	value int
+}
+
+// sectionJSONOrder is the fixed key order for multi-section JSON output.
+// Mirrors the Hash insertion order in cmd_summary / section_payload
+// (lib/iriq/cli.rb), so Ruby↔Go JSON parity holds byte-for-byte. Go's
+// map[string]any marshals keys alphabetically, which would otherwise
+// diverge (e.g. {parse,normalize} vs {normalize,parse}). Sections absent
+// from the data bag are skipped.
+var sectionJSONOrder = []string{"parse", "canonical", "normalize", "explain"}
+
+// orderedSections marshals a section bag as a JSON object in
+// sectionJSONOrder. Values are encoded with HTML escaping disabled to
+// match writeJSON and Ruby's JSON.generate (URLs carry & which must stay
+// literal).
+type orderedSections map[string]interface{}
+
+func (o orderedSections) MarshalJSON() ([]byte, error) {
+	var b bytes.Buffer
+	b.WriteByte('{')
+	first := true
+	for _, k := range sectionJSONOrder {
+		v, ok := o[k]
+		if !ok {
+			continue
+		}
+		if !first {
+			b.WriteByte(',')
+		}
+		first = false
+		kb, err := json.Marshal(k)
+		if err != nil {
+			return nil, err
+		}
+		b.Write(kb)
+		b.WriteByte(':')
+		vb, err := marshalNoHTMLEscape(v)
+		if err != nil {
+			return nil, err
+		}
+		b.Write(vb)
+	}
+	b.WriteByte('}')
+	return b.Bytes(), nil
+}
+
+// marshalNoHTMLEscape marshals v with HTML escaping disabled so &, <, >
+// stay literal — matching writeJSON and Ruby's JSON.generate.
+func marshalNoHTMLEscape(v interface{}) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimRight(buf.Bytes(), "\n"), nil
 }
 
 // statsJSON pins JSON field order for --stats --json to match the Ruby

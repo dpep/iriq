@@ -166,6 +166,25 @@ func TestJSONMultiSection(t *testing.T) {
 	}
 }
 
+// TestMultiSectionJSONKeyOrder guards Ruby↔Go parity: multi-section JSON keys
+// must emit in the fixed order parse, canonical, normalize — independent of
+// the flag order — rather than Go's default alphabetical map ordering.
+func TestMultiSectionJSONKeyOrder(t *testing.T) {
+	for _, flags := range []string{"-pcn", "-ncp", "-pnc"} {
+		r := runCLI(t, "", flags, "--json", "foo.com/users/1?a=1&b=2")
+		pi := strings.Index(r.stdout, `"parse"`)
+		ci := strings.Index(r.stdout, `"canonical":`)
+		ni := strings.Index(r.stdout, `"normalize":`)
+		if pi < 0 || ci < 0 || ni < 0 || !(pi < ci && ci < ni) {
+			t.Errorf("%s: keys not in parse<canonical<normalize order: %s", flags, r.stdout)
+		}
+		// & must stay literal (no HTML escaping), matching Ruby's JSON.generate.
+		if strings.Contains(r.stdout, "\\u0026") {
+			t.Errorf("%s: ampersand was HTML-escaped: %s", flags, r.stdout)
+		}
+	}
+}
+
 func TestNoHints(t *testing.T) {
 	r := runCLI(t, "", "-n", "--no-hints", "foo.com/users/123")
 	if strings.TrimSpace(r.stdout) != "https://foo.com/users/{integer}" {

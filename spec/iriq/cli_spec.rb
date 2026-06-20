@@ -151,6 +151,16 @@ describe Iriq::CLI do
       data = JSON.parse(stdout.string)
       expect(data.keys).to contain_exactly("parse", "normalize")
     end
+
+    it "orders multi-section JSON keys consistently regardless of flag order" do
+      # Fixed emission order (parse, canonical, normalize) — not the order the
+      # flags were typed — so the Go port can pin the same order for parity.
+      expect(run("-nc", "--json", "foo.com/users/123")).to eq(0)
+      expect(JSON.parse(stdout.string).keys).to eq(%w[canonical normalize])
+      stdout.truncate(stdout.rewind)
+      expect(run("-pcn", "--json", "foo.com/users/123")).to eq(0)
+      expect(JSON.parse(stdout.string).keys).to eq(%w[parse canonical normalize])
+    end
   end
 
   describe "--no-hints" do
