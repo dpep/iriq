@@ -778,7 +778,7 @@ fn emit_url_list<W: Write>(stdout: &mut W, iris: &[Identifier], opts: &Opts) {
 
 fn emit_clusters<W: Write>(stdout: &mut W, clusters: &[Cluster], opts: &Opts) {
     let mut sorted: Vec<&Cluster> = clusters.iter().collect();
-    sorted.sort_by(|a, b| b.count.cmp(&a.count));
+    sorted.sort_by_key(|c| std::cmp::Reverse(c.count));
 
     if opts.json {
         let arr: Vec<Value> = sorted.iter().map(|c| cluster_json(c)).collect();
