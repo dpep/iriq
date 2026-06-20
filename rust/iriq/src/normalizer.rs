@@ -69,7 +69,7 @@ pub fn normalize_identifier_with_evidence(
         s.push_str(&iri.port.to_string());
     }
     s.push_str(&ev.render_path(iri, c, hints));
-    if iri.query_params.len() > 0 {
+    if !iri.query_params.is_empty() {
         s.push('?');
         s.push_str(&ev.render_query(iri, c));
     }

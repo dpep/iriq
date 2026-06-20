@@ -30,6 +30,23 @@ pub trait Storage: Send + Sync {
     fn path_length_counts(&self) -> HashMap<usize, usize>;
     fn raw_shape_counts(&self) -> HashMap<String, usize>;
     fn fingerprint_counts(&self) -> HashMap<String, usize>;
+    /// Visit each (host, count) without materializing a HashMap. Default
+    /// falls back to a full materialization for backends that can't stream.
+    fn for_each_host(&self, f: &mut dyn FnMut(&str, usize)) {
+        for (k, v) in self.host_counts() {
+            f(&k, v);
+        }
+    }
+    fn for_each_raw_shape(&self, f: &mut dyn FnMut(&str, usize)) {
+        for (k, v) in self.raw_shape_counts() {
+            f(&k, v);
+        }
+    }
+    fn for_each_fingerprint(&self, f: &mut dyn FnMut(&str, usize)) {
+        for (k, v) in self.fingerprint_counts() {
+            f(&k, v);
+        }
+    }
     fn position_stats_for(&self, pos: &Position) -> Option<PositionStats>;
     fn each_position_stats(&self, f: &mut dyn FnMut(&Position, &PositionStats));
     fn clusters(&self) -> Vec<Cluster>;

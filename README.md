@@ -100,7 +100,7 @@ Same input, two questions: "what's the clean form of *this* URL?" vs "what
 
 ## Install
 
-The CLI ships three ways:
+The CLI ships four ways:
 
 ```sh
 # Homebrew (recommended) — slim build, JSON corpora only
@@ -118,11 +118,16 @@ go install github.com/dpep/iriq/cmd/iriq@latest
 # Go with SQLite corpora — needs source checkout + build flag
 git clone https://github.com/dpep/iriq && cd iriq
 go build -tags sqlite -o $GOBIN/iriq ./cmd/iriq
+
+# Rust — SQLite bundled by default, fastest of the three
+cargo install iriq-cli
+# (or from a source checkout): cd iriq/rust && cargo install --path iriq-cli
 ```
 
-Two builds. The **slim** build (the default everywhere) reads and writes JSON
-corpora; **SQLite** corpora need the SQLite-enabled build. `iriq --help` prints
-a `Build:` line so you can tell which you're on.
+Three implementations of the same library, kept byte-identical by a CLI
+parity harness in CI. The **slim** build (the default for Ruby + Go) reads
+and writes JSON corpora; **SQLite** corpora need the SQLite-enabled build.
+`iriq --help` prints a `Build:` line so you can tell which you're on.
 
 | You installed via | Build | Corpus formats |
 | --- | --- | --- |
@@ -132,8 +137,12 @@ a `Build:` line so you can tell which you're on.
 | `go build -tags sqlite …` | SQLite | `.json` + `.db`/`.sqlite`/`.sqlite3` |
 | `gem install iriq` | slim | `.json` |
 | `gem install iriq` + `gem install sqlite3` | SQLite | `.json` + `.db`/`.sqlite`/`.sqlite3` (lazy-loaded) |
+| `cargo install iriq-cli` | SQLite (bundled) | `.json` + `.db`/`.sqlite`/`.sqlite3` |
 
-The Go SQLite build uses pure-Go `modernc.org/sqlite` — no cgo.
+The Go SQLite build uses pure-Go `modernc.org/sqlite` (no cgo); the Rust
+build statically links the C SQLite via `rusqlite` (bundled). Same on-disk
+schema across all runtimes — a `.db` written by any binary opens in any
+other.
 
 For library use:
 
@@ -144,6 +153,14 @@ gem "iriq"
 
 ```go
 import "github.com/dpep/iriq"
+```
+
+```toml
+# Cargo.toml
+[dependencies]
+iriq = "0.29"
+# or, for SQLite corpus support:
+iriq = { version = "0.29", features = ["sqlite"] }
 ```
 
 ## Library quick start
@@ -178,6 +195,25 @@ iri.Canonical()    // "https://foo.com/users/123"
 
 norm, _ := iriq.Normalize("https://foo.com/users/123")
 // "https://foo.com/users/{user_id}"
+```
+
+```rust
+// Rust (same surface)
+use iriq::{parse, normalize, Extractor, Corpus};
+
+let iri = parse("https://foo.com/users/123")?;
+assert_eq!(iri.host, "foo.com");
+assert_eq!(iri.path_segments, vec!["users", "123"]);
+assert_eq!(iri.canonical(), "https://foo.com/users/123");
+
+assert_eq!(normalize("https://foo.com/users/123")?,
+           "https://foo.com/users/{user_id}");
+
+// Streaming clustering against a persistent SQLite corpus.
+let mut corpus = Corpus::open("c.db")?;
+corpus.observe("https://foo.com/users/1")?;
+corpus.save("c.db")?;
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 These are two independent implementations of one spec — not a Go library
@@ -570,21 +606,26 @@ Exit codes: `0` success, `1` usage error, `2` parse error.
 ## Performance
 
 Measured on the deterministic `IriGenerator` fixture (single thread,
-Ruby 3.3.6 / Go 1.23 on the same machine):
+Ruby 3.3.6 / Go 1.23 / Rust 1.94 on the same Linux container):
 
-| Operation                | Ruby          | Go CLI (2k URLs)     |
-| ------------------------ | ------------- | -------------------- |
-| `parse`                  | ~131k URLs/s  |                      |
-| `normalize`              | ~63k URLs/s   |                      |
-| `explain`                | ~94k URLs/s   |                      |
-| `extract` (prose)        | ~4.7 MB/s     |                      |
-| `Corpus#observe`         | ~33k URLs/s   |                      |
-| Corpus save+load (10k)   | ~470 ms       |                      |
-| CLI wall-clock           | 373 ms        | 33 ms                |
+| Operation                | Ruby          | Go CLI       | Rust CLI     |
+| ------------------------ | ------------- | ------------ | ------------ |
+| `parse`                  | ~131k URLs/s  |              |              |
+| `normalize`              | ~63k URLs/s   |              |              |
+| `explain`                | ~94k URLs/s   |              |              |
+| `extract` (prose)        | ~4.7 MB/s     |              |              |
+| `Corpus#observe`         | ~33k URLs/s   |              |              |
+| CLI wall-clock (2k URLs, `-n`)        | 373 ms | 43 ms  | **34 ms**    |
+| CLI wall-clock (2k URLs, JSON corpus) | —      | 39 ms  | **29 ms**    |
+| CLI wall-clock (2k URLs, SQLite)      | —      | 1240 ms | **120 ms**  |
+| Release binary size (slim/sqlite)     | —      | 4 MB / 10 MB | **4.4 MB** (sqlite bundled) |
 
-Go is ~10× faster than Ruby on extraction-heavy CLI workloads. The
-classifier short-circuits regex matches with cheap composition checks so
-common segments (literals, integers) avoid most of the regex chain.
+Rust pulls 1.2–10× ahead of Go depending on the backend; the SQLite win
+is the largest because Rust binds bundled C SQLite via `rusqlite`
+(cached prepared statements + `BEGIN IMMEDIATE` batching) while Go uses
+pure-Go `modernc.org/sqlite`. Each runtime's CLI short-circuits regex
+matches with cheap composition checks so common segments avoid most of
+the regex chain.
 Linear scaling holds through 100k observations; per-observation retained
 memory amortizes to ~100 bytes at that scale. Memoization caches are
 bounded by `CACHE_MAX = 10_000` (cleared when full).

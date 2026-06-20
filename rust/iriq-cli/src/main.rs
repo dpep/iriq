@@ -213,6 +213,7 @@ fn atty_isatty_stdin() -> bool {
     extern "C" {
         fn isatty(fd: i32) -> i32;
     }
+    // SAFETY: isatty is FFI; we pass a valid fd we got via AsRawFd.
     unsafe { isatty(io::stdin().as_raw_fd()) != 0 }
 }
 
@@ -450,7 +451,7 @@ fn identifier_json(iri: &Identifier) -> Value {
             Value::Array(iri.path_segments.iter().map(|s| Value::String(s.clone())).collect()),
         );
     }
-    if iri.query_params.len() > 0 {
+    if !iri.query_params.is_empty() {
         let mut qp = serde_json::Map::new();
         for (k, v) in iri.query_params.iter() {
             qp.insert(k.to_string(), Value::String(v.to_string()));
@@ -513,7 +514,7 @@ fn emit_parse_human<W: Write>(stdout: &mut W, iri: &Identifier) {
     if !iri.path_segments.is_empty() {
         let _ = writeln!(stdout, "path_segments: {}", inspect_strings(&iri.path_segments));
     }
-    if iri.query_params.len() > 0 {
+    if !iri.query_params.is_empty() {
         let mut keys = iri.query_params.keys();
         keys.sort();
         let m: HashMap<String, String> = keys

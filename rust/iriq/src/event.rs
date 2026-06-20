@@ -14,7 +14,7 @@ pub enum Event {
         host: String,
         scheme: String,
         shape: String,
-        iri: Identifier,
+        iri: Box<Identifier>,
     },
 }
 

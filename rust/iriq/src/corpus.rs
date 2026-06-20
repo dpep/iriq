@@ -1,5 +1,5 @@
 use crate::classifier::{
-    canonical_date, segment_type_from_str, SegmentClassifier, SegmentType, DEFAULT_CLASSIFIER,
+    canonical_date, segment_type_from_str, SegmentClassifier, SegmentType,
 };
 use crate::cluster::{placeholder_for, Cluster};
 use crate::clusterer::cluster_key_for_host;
@@ -11,7 +11,6 @@ use crate::normalizer::{
     normalize_identifier_with_evidence, NormalizationEvidence,
 };
 use crate::parser::parse;
-use crate::path_shape::PathShape;
 use crate::position::Position;
 use crate::position_stats::{PositionStats, DEFAULT_MAX_VALUES_PER_POSITION};
 use crate::recognizer_proposal::{propose_recognizers, ProposalOptions, RecognizerProposal};
@@ -259,7 +258,7 @@ impl Corpus {
             host: k.host,
             scheme: k.scheme,
             shape: k.shape,
-            iri: iri.clone(),
+            iri: Box::new(iri.clone()),
         });
         events
     }

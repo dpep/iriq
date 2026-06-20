@@ -518,8 +518,8 @@ impl Recognizer for IntegerRecognizer {
             return None;
         }
         if let Ok(n) = segment.parse::<i64>() {
-            if (n >= TS_MILLIS_MIN && n <= TS_MILLIS_MAX)
-                || (n >= TS_SECONDS_MIN && n <= TS_SECONDS_MAX)
+            if (TS_MILLIS_MIN..=TS_MILLIS_MAX).contains(&n)
+                || (TS_SECONDS_MIN..=TS_SECONDS_MAX).contains(&n)
             {
                 return Some(Verdict {
                     ty: SegmentType::Timestamp,
@@ -628,7 +628,7 @@ fn compute_classification(
         return SegmentType::Literal;
     }
     let first = bytes[0];
-    let digit0 = (b'0'..=b'9').contains(&first);
+    let digit0 = first.is_ascii_digit();
     let has_dash = bytes.contains(&b'-');
     let has_dot = bytes.contains(&b'.');
     let has_colon = bytes.contains(&b':');
@@ -740,8 +740,8 @@ fn classify_coordinate(segment: &str) -> SegmentType {
     if a.is_nan() || b.is_nan() {
         return SegmentType::OpaqueId;
     }
-    if (a >= -90.0 && a <= 90.0 && b >= -180.0 && b <= 180.0)
-        || (a >= -180.0 && a <= 180.0 && b >= -90.0 && b <= 90.0)
+    if ((-90.0..=90.0).contains(&a) && (-180.0..=180.0).contains(&b))
+        || ((-180.0..=180.0).contains(&a) && (-90.0..=90.0).contains(&b))
     {
         SegmentType::Coordinate
     } else {

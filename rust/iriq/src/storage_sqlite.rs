@@ -77,7 +77,7 @@ impl SqliteStorage {
 }
 
 fn rs_err<E: std::fmt::Display>(e: E) -> std::io::Error {
-    std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
+    std::io::Error::other(e.to_string())
 }
 
 impl Storage for SqliteStorage {
@@ -87,141 +87,187 @@ impl Storage for SqliteStorage {
 
     fn increment_host(&mut self, host: &str) {
         let c = self.conn.lock().unwrap();
-        let _ = c.execute(
-            "INSERT INTO host_counts (host, count) VALUES (?, 1) ON CONFLICT(host) DO UPDATE SET count = count + 1",
-            params![host],
-        );
+        let mut stmt = c
+            .prepare_cached(
+                "INSERT INTO host_counts (host, count) VALUES (?, 1) ON CONFLICT(host) DO UPDATE SET count = count + 1",
+            )
+            .unwrap();
+        let _ = stmt.execute(params![host]);
     }
     fn increment_path_length(&mut self, length: usize) {
         let c = self.conn.lock().unwrap();
-        let _ = c.execute(
-            "INSERT INTO path_length_counts (length, count) VALUES (?, 1) ON CONFLICT(length) DO UPDATE SET count = count + 1",
-            params![length as i64],
-        );
+        let mut stmt = c
+            .prepare_cached(
+                "INSERT INTO path_length_counts (length, count) VALUES (?, 1) ON CONFLICT(length) DO UPDATE SET count = count + 1",
+            )
+            .unwrap();
+        let _ = stmt.execute(params![length as i64]);
     }
     fn increment_raw_shape(&mut self, shape: &str) {
         let c = self.conn.lock().unwrap();
-        let _ = c.execute(
-            "INSERT INTO raw_shape_counts (shape, count) VALUES (?, 1) ON CONFLICT(shape) DO UPDATE SET count = count + 1",
-            params![shape],
-        );
+        let mut stmt = c
+            .prepare_cached(
+                "INSERT INTO raw_shape_counts (shape, count) VALUES (?, 1) ON CONFLICT(shape) DO UPDATE SET count = count + 1",
+            )
+            .unwrap();
+        let _ = stmt.execute(params![shape]);
     }
     fn increment_fingerprint(&mut self, shape: &str) {
         let c = self.conn.lock().unwrap();
-        let _ = c.execute(
-            "INSERT INTO fingerprint_counts (shape, count) VALUES (?, 1) ON CONFLICT(shape) DO UPDATE SET count = count + 1",
-            params![shape],
-        );
+        let mut stmt = c
+            .prepare_cached(
+                "INSERT INTO fingerprint_counts (shape, count) VALUES (?, 1) ON CONFLICT(shape) DO UPDATE SET count = count + 1",
+            )
+            .unwrap();
+        let _ = stmt.execute(params![shape]);
     }
 
     fn observe_position(&mut self, pos: &Position, value: &str, t: SegmentType) {
         let c = self.conn.lock().unwrap();
         let scope = pos.scope.as_str();
-        let _ = c.execute(
-            "INSERT INTO position_stats (host, scope, locator, total) VALUES (?, ?, ?, 1) \
-             ON CONFLICT(host, scope, locator) DO UPDATE SET total = total + 1",
-            params![pos.host, scope, pos.locator],
-        );
-        let _ = c.execute(
-            "INSERT INTO position_types (host, scope, locator, type, count) VALUES (?, ?, ?, ?, 1) \
-             ON CONFLICT(host, scope, locator, type) DO UPDATE SET count = count + 1",
-            params![pos.host, scope, pos.locator, t.as_str()],
-        );
-        let updated = c.execute(
-            "UPDATE position_values SET count = count + 1 WHERE host = ? AND scope = ? AND locator = ? AND value = ?",
-            params![pos.host, scope, pos.locator, value],
-        )
-        .unwrap_or(0);
-        if updated == 0 {
-            let card: i64 = c
-                .query_row(
-                    "SELECT COUNT(*) FROM position_values WHERE host = ? AND scope = ? AND locator = ?",
-                    params![pos.host, scope, pos.locator],
-                    |r| r.get(0),
+        {
+            let mut stmt = c
+                .prepare_cached(
+                    "INSERT INTO position_stats (host, scope, locator, total) VALUES (?, ?, ?, 1) \
+                     ON CONFLICT(host, scope, locator) DO UPDATE SET total = total + 1",
                 )
-                .unwrap_or(0);
+                .unwrap();
+            let _ = stmt.execute(params![pos.host, scope, pos.locator]);
+        }
+        {
+            let mut stmt = c
+                .prepare_cached(
+                    "INSERT INTO position_types (host, scope, locator, type, count) VALUES (?, ?, ?, ?, 1) \
+                     ON CONFLICT(host, scope, locator, type) DO UPDATE SET count = count + 1",
+                )
+                .unwrap();
+            let _ = stmt.execute(params![pos.host, scope, pos.locator, t.as_str()]);
+        }
+        let updated = {
+            let mut stmt = c
+                .prepare_cached(
+                    "UPDATE position_values SET count = count + 1 WHERE host = ? AND scope = ? AND locator = ? AND value = ?",
+                )
+                .unwrap();
+            stmt.execute(params![pos.host, scope, pos.locator, value]).unwrap_or(0)
+        };
+        if updated == 0 {
+            let card: i64 = {
+                let mut stmt = c
+                    .prepare_cached(
+                        "SELECT COUNT(*) FROM position_values WHERE host = ? AND scope = ? AND locator = ?",
+                    )
+                    .unwrap();
+                stmt.query_row(params![pos.host, scope, pos.locator], |r| r.get(0))
+                    .unwrap_or(0)
+            };
             if (card as usize) < self.max_values {
-                let _ = c.execute(
-                    "INSERT INTO position_values (host, scope, locator, value, count) VALUES (?, ?, ?, ?, 1)",
-                    params![pos.host, scope, pos.locator, value],
-                );
+                let mut stmt = c
+                    .prepare_cached(
+                        "INSERT INTO position_values (host, scope, locator, value, count) VALUES (?, ?, ?, ?, 1)",
+                    )
+                    .unwrap();
+                let _ = stmt.execute(params![pos.host, scope, pos.locator, value]);
             }
         }
     }
 
     fn add_to_cluster(&mut self, key: &str, host: &str, scheme: &str, shape: &str, iri: &Identifier) {
         let c = self.conn.lock().unwrap();
-        let _ = c.execute(
-            "INSERT INTO clusters (key, host, scheme, shape, count, ord) \
-             VALUES (?, ?, ?, ?, 1, (SELECT COALESCE(MAX(ord), 0) + 1 FROM clusters)) \
-             ON CONFLICT(key) DO UPDATE SET count = count + 1",
-            params![key, host, scheme, shape],
-        );
+        {
+            let mut stmt = c
+                .prepare_cached(
+                    "INSERT INTO clusters (key, host, scheme, shape, count, ord) \
+                     VALUES (?, ?, ?, ?, 1, (SELECT COALESCE(MAX(ord), 0) + 1 FROM clusters)) \
+                     ON CONFLICT(key) DO UPDATE SET count = count + 1",
+                )
+                .unwrap();
+            let _ = stmt.execute(params![key, host, scheme, shape]);
+        }
 
-        let examples_count: i64 = c
-            .query_row(
-                "SELECT COUNT(*) FROM cluster_examples WHERE cluster_key = ?",
-                params![key],
-                |r| r.get(0),
-            )
-            .unwrap_or(0);
+        let examples_count: i64 = {
+            let mut stmt = c
+                .prepare_cached("SELECT COUNT(*) FROM cluster_examples WHERE cluster_key = ?")
+                .unwrap();
+            stmt.query_row(params![key], |r| r.get(0)).unwrap_or(0)
+        };
         if (examples_count as usize) < MAX_CLUSTER_EXAMPLES {
             let canon = iri.canonical();
-            // Dedupe by canonical: only insert if not already present.
-            let exists: i64 = c
-                .query_row(
-                    "SELECT COUNT(*) FROM cluster_examples WHERE cluster_key = ? AND canonical = ?",
-                    params![key, canon],
-                    |r| r.get(0),
-                )
-                .unwrap_or(0);
+            let exists: i64 = {
+                let mut stmt = c
+                    .prepare_cached(
+                        "SELECT COUNT(*) FROM cluster_examples WHERE cluster_key = ? AND canonical = ?",
+                    )
+                    .unwrap();
+                stmt.query_row(params![key, canon], |r| r.get(0)).unwrap_or(0)
+            };
             if exists == 0 {
-                let _ = c.execute(
-                    "INSERT INTO cluster_examples (cluster_key, position, canonical) VALUES (?, ?, ?)",
-                    params![key, examples_count, canon],
-                );
+                let mut stmt = c
+                    .prepare_cached(
+                        "INSERT INTO cluster_examples (cluster_key, position, canonical) VALUES (?, ?, ?)",
+                    )
+                    .unwrap();
+                let _ = stmt.execute(params![key, examples_count, canon]);
             }
         }
 
-        for (i, seg) in iri.path_segments.iter().enumerate() {
-            let _ = c.execute(
-                "INSERT INTO cluster_segments (cluster_key, position, value, count) VALUES (?, ?, ?, 1) \
-                 ON CONFLICT(cluster_key, position, value) DO UPDATE SET count = count + 1",
-                params![key, i as i64, seg],
-            );
+        {
+            let mut stmt = c
+                .prepare_cached(
+                    "INSERT INTO cluster_segments (cluster_key, position, value, count) VALUES (?, ?, ?, 1) \
+                     ON CONFLICT(cluster_key, position, value) DO UPDATE SET count = count + 1",
+                )
+                .unwrap();
+            for (i, seg) in iri.path_segments.iter().enumerate() {
+                let _ = stmt.execute(params![key, i as i64, seg]);
+            }
         }
 
         let classifier = &DEFAULT_CLASSIFIER;
         for (name, v) in iri.query_params.iter() {
             let t = classifier.classify(v);
-            let _ = c.execute(
-                "INSERT INTO cluster_params (cluster_key, name, total) VALUES (?, ?, 1) \
-                 ON CONFLICT(cluster_key, name) DO UPDATE SET total = total + 1",
-                params![key, name],
-            );
-            let _ = c.execute(
-                "INSERT INTO cluster_param_types (cluster_key, name, type, count) VALUES (?, ?, ?, 1) \
-                 ON CONFLICT(cluster_key, name, type) DO UPDATE SET count = count + 1",
-                params![key, name, t.as_str()],
-            );
-            let updated = c.execute(
-                "UPDATE cluster_param_values SET count = count + 1 WHERE cluster_key = ? AND name = ? AND value = ?",
-                params![key, name, v],
-            )
-            .unwrap_or(0);
-            if updated == 0 {
-                let card: i64 = c
-                    .query_row(
-                        "SELECT COUNT(*) FROM cluster_param_values WHERE cluster_key = ? AND name = ?",
-                        params![key, name],
-                        |r| r.get(0),
+            {
+                let mut stmt = c
+                    .prepare_cached(
+                        "INSERT INTO cluster_params (cluster_key, name, total) VALUES (?, ?, 1) \
+                         ON CONFLICT(cluster_key, name) DO UPDATE SET total = total + 1",
                     )
-                    .unwrap_or(0);
+                    .unwrap();
+                let _ = stmt.execute(params![key, name]);
+            }
+            {
+                let mut stmt = c
+                    .prepare_cached(
+                        "INSERT INTO cluster_param_types (cluster_key, name, type, count) VALUES (?, ?, ?, 1) \
+                         ON CONFLICT(cluster_key, name, type) DO UPDATE SET count = count + 1",
+                    )
+                    .unwrap();
+                let _ = stmt.execute(params![key, name, t.as_str()]);
+            }
+            let updated = {
+                let mut stmt = c
+                    .prepare_cached(
+                        "UPDATE cluster_param_values SET count = count + 1 WHERE cluster_key = ? AND name = ? AND value = ?",
+                    )
+                    .unwrap();
+                stmt.execute(params![key, name, v]).unwrap_or(0)
+            };
+            if updated == 0 {
+                let card: i64 = {
+                    let mut stmt = c
+                        .prepare_cached(
+                            "SELECT COUNT(*) FROM cluster_param_values WHERE cluster_key = ? AND name = ?",
+                        )
+                        .unwrap();
+                    stmt.query_row(params![key, name], |r| r.get(0)).unwrap_or(0)
+                };
                 if (card as usize) < self.max_values {
-                    let _ = c.execute(
-                        "INSERT INTO cluster_param_values (cluster_key, name, value, count) VALUES (?, ?, ?, 1)",
-                        params![key, name, v],
-                    );
+                    let mut stmt = c
+                        .prepare_cached(
+                            "INSERT INTO cluster_param_values (cluster_key, name, value, count) VALUES (?, ?, ?, 1)",
+                        )
+                        .unwrap();
+                    let _ = stmt.execute(params![key, name, v]);
                 }
             }
         }
@@ -387,7 +433,7 @@ impl Storage for SqliteStorage {
             for canon in rows.flatten() {
                 if let Ok(iri) = parse(&canon) {
                     cluster.register_example_key(iri.canonical());
-                    cluster.examples.push(iri);
+                    cluster.examples.push(std::sync::Arc::new(iri));
                 }
             }
         }

@@ -217,7 +217,7 @@ fn cluster_to_value(c: &Cluster) -> Value {
     let seg: Vec<Value> = c
         .segment_counts
         .iter()
-        .map(|m| map_str_usize_to_value(m))
+        .map(map_str_usize_to_value)
         .collect();
     o.insert("segment_counts".to_string(), Value::Array(seg));
     let mut params = Map::new();
@@ -334,7 +334,7 @@ pub fn load_memory_from_json(m: &mut MemoryStorage, data: &[u8]) -> Result<(), S
                         if let Some(s) = e.as_str() {
                             if let Ok(iri) = parse(s) {
                                 cluster.register_example_key(iri.canonical());
-                                cluster.examples.push(iri);
+                                cluster.examples.push(std::sync::Arc::new(iri));
                             }
                         }
                     }

@@ -136,7 +136,7 @@ fn trim_candidate(candidate: &str) -> String {
         s = TRAILING_PUNCT_RE.replace(&s, "").into_owned();
         for close in [')', ']', '}'] {
             let open = bracket_pair(close).unwrap();
-            while !s.is_empty() && s.chars().last() == Some(close) {
+            while !s.is_empty() && s.ends_with(close) {
                 let close_count = s.chars().filter(|&c| c == close).count();
                 let open_count = s.chars().filter(|&c| c == open).count();
                 if close_count > open_count {

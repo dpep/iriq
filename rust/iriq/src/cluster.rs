@@ -5,6 +5,7 @@ use crate::hints::SegmentHint;
 use crate::identifier::Identifier;
 use crate::position_stats::{PositionStats, DEFAULT_MAX_VALUES_PER_POSITION};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 pub const MAX_CLUSTER_EXAMPLES: usize = 10;
 pub const DATE_CONFIDENCE_THRESHOLD: f64 = 0.8;
@@ -41,7 +42,7 @@ pub struct Cluster {
     pub host: String,
     pub scheme: String,
     pub shape: String,
-    pub examples: Vec<Identifier>,
+    pub examples: Vec<Arc<Identifier>>,
     pub count: usize,
     pub segment_counts: Vec<HashMap<String, usize>>,
     pub param_stats: HashMap<String, PositionStats>,
@@ -75,7 +76,7 @@ impl Cluster {
         if self.examples.len() < MAX_CLUSTER_EXAMPLES {
             let canon = iri.canonical();
             if self.example_keys.insert(canon) {
-                self.examples.push(iri.clone());
+                self.examples.push(Arc::new(iri.clone()));
             }
         }
         for (i, seg) in iri.path_segments.iter().enumerate() {
@@ -320,7 +321,7 @@ pub fn is_year_position(t: SegmentType, stats: &PositionStats) -> bool {
         return false;
     }
     let card = stats.cardinality();
-    if card < YEAR_MIN_DISTINCT || card > YEAR_MAX_DISTINCT {
+    if !(YEAR_MIN_DISTINCT..=YEAR_MAX_DISTINCT).contains(&card) {
         return false;
     }
     if stats.total < YEAR_MIN_OBSERVATIONS {
@@ -337,7 +338,7 @@ pub fn is_http_status_position(t: SegmentType, stats: &PositionStats) -> bool {
         return false;
     }
     let card = stats.cardinality();
-    if card < HTTP_STATUS_MIN_DISTINCT || card > HTTP_STATUS_MAX_DISTINCT {
+    if !(HTTP_STATUS_MIN_DISTINCT..=HTTP_STATUS_MAX_DISTINCT).contains(&card) {
         return false;
     }
     if stats.total < HTTP_STATUS_MIN_OBSERVATIONS {

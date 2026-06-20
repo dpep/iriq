@@ -60,7 +60,7 @@ pub fn trace_identifier(iri: &Identifier, c: &SegmentClassifier, hints: bool) ->
         return out;
     }
     out.path = trace_path(&iri.path_segments, c, hints);
-    if iri.query_params.len() > 0 {
+    if !iri.query_params.is_empty() {
         out.query = trace_query(iri, c);
     }
     out
