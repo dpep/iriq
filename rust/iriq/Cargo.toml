@@ -1,0 +1,12 @@
+[package]
+name = "iriq"
+version = "0.29.1"
+edition = "2021"
+description = "IRI extraction, normalization, and clustering (Rust port)."
+
+[dependencies]
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "1"
+once_cell = "1"

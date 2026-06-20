@@ -1,0 +1,12 @@
+[package]
+name = "iriq-cli"
+version = "0.29.1"
+edition = "2021"
+
+[[bin]]
+name = "iriq"
+path = "src/main.rs"
+
+[dependencies]
+iriq = { path = "../iriq" }
+serde_json = { version = "1", features = ["preserve_order"] }
