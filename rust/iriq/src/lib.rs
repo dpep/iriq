@@ -36,5 +36,6 @@ pub use hints::{derive_hints, derive_hints_default, SegmentHint};
 pub use shape::{Shape, ShapeRenderOptions};
 pub use path_shape::{path_shape_for, PathShape};
 pub use inflector::singularize;
+pub use extractor::Extractor;
 
 pub const VERSION: &str = "0.29.1";
