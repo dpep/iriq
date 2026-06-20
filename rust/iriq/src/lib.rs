@@ -37,5 +37,7 @@ pub use shape::{Shape, ShapeRenderOptions};
 pub use path_shape::{path_shape_for, PathShape};
 pub use inflector::singularize;
 pub use extractor::Extractor;
+pub use explanation::{explain, explain_identifier};
+pub use trace::{trace, trace_identifier, TraceResult, TraceRow};
 
 pub const VERSION: &str = "0.29.1";
