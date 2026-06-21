@@ -385,15 +385,16 @@ fn cmd_summary<W: Write, E: Write>(
             );
         }
     };
-    if let Some(c) = corpus.as_ref() {
-        // Observe via the borrowed corpus. SAFETY-equivalent of Go's
-        // corpus.Observe(iri) — Rust borrow rules require we do a single
-        // mutable pass.
-        let _ = c;
-    }
-    if let Some(c) = corpus {
-        c.observe_iri(&iri);
-    }
+    // Observe the input, then keep an immutable handle so the Normalize
+    // section can use corpus-informed normalization — the whole point of
+    // passing --corpus.
+    let corpus: Option<&Corpus> = match corpus {
+        Some(c) => {
+            c.observe_iri(&iri);
+            Some(&*c)
+        }
+        None => None,
+    };
 
     let sections = if opts.sections.is_empty() {
         vec![Section::Parse, Section::Normalize]
@@ -403,14 +404,14 @@ fn cmd_summary<W: Write, E: Write>(
 
     if opts.json {
         if sections.len() == 1 {
-            let payload = section_payload(&iri, sections[0], opts);
+            let payload = section_payload(&iri, sections[0], opts, corpus);
             write_json(stdout, &payload);
         } else {
             // Multi-section JSON: fixed key order parse / canonical / normalize / explain.
             let mut payload = serde_json::Map::new();
             for s in ["parse", "canonical", "normalize", "explain"] {
                 if let Some(sec) = sections.iter().find(|sec| sec.name() == s) {
-                    payload.insert(s.to_string(), section_payload(&iri, *sec, opts));
+                    payload.insert(s.to_string(), section_payload(&iri, *sec, opts, corpus));
                 }
             }
             write_json(stdout, &Value::Object(payload));
@@ -418,15 +419,25 @@ fn cmd_summary<W: Write, E: Write>(
         return 0;
     }
 
-    emit_sections_human(stdout, &iri, &sections, opts);
+    emit_sections_human(stdout, &iri, &sections, opts, corpus);
     0
 }
 
-fn section_payload(iri: &Identifier, sec: Section, opts: &Opts) -> Value {
+// Corpus-informed when a corpus is loaded; mechanical otherwise. This is what
+// makes `iriq -n --corpus c.db` reflect observed distributions (e.g. a
+// high-cardinality literal slot collapsing to a placeholder).
+fn normalize_section(iri: &Identifier, opts: &Opts, corpus: Option<&Corpus>) -> String {
+    match corpus {
+        Some(c) => c.normalize_identifier(iri),
+        None => normalize_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints),
+    }
+}
+
+fn section_payload(iri: &Identifier, sec: Section, opts: &Opts, corpus: Option<&Corpus>) -> Value {
     match sec {
         Section::Parse => identifier_json(iri),
         Section::Canonical => Value::String(iri.canonical()),
-        Section::Normalize => Value::String(normalize_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints)),
+        Section::Normalize => Value::String(normalize_section(iri, opts, corpus)),
         Section::Explain => serde_json::to_value(trace_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints)).unwrap(),
     }
 }
@@ -474,6 +485,7 @@ fn emit_sections_human<W: Write>(
     iri: &Identifier,
     sections: &[Section],
     opts: &Opts,
+    corpus: Option<&Corpus>,
 ) {
     let multi = sections.len() > 1;
     for (i, sec) in sections.iter().enumerate() {
@@ -489,7 +501,7 @@ fn emit_sections_human<W: Write>(
                 let _ = writeln!(stdout, "{}", iri.canonical());
             }
             Section::Normalize => {
-                let _ = writeln!(stdout, "{}", normalize_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints));
+                let _ = writeln!(stdout, "{}", normalize_section(iri, opts, corpus));
             }
             Section::Explain => {
                 emit_explain_human(stdout, &trace_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints));
@@ -637,7 +649,11 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
     });
 
     if !opts.sections.is_empty() {
-        emit_per_iri_sections(stdout, &iris, opts);
+        // Corpus-informed only when the user actually passed --corpus; the
+        // throwaway in-memory corpus above is just for cluster/stats views.
+        let real_corpus: Option<&Corpus> =
+            if opts.corpus.is_empty() { None } else { Some(&*working) };
+        emit_per_iri_sections(stdout, &iris, opts, real_corpus);
         return 0;
     }
     if opts.stats {
@@ -661,17 +677,22 @@ fn read_text<R: Read>(stdin: &mut R, args: &[String]) -> std::io::Result<String>
     std::fs::read_to_string(&args[0])
 }
 
-fn emit_per_iri_sections<W: Write>(stdout: &mut W, iris: &[Identifier], opts: &Opts) {
+fn emit_per_iri_sections<W: Write>(
+    stdout: &mut W,
+    iris: &[Identifier],
+    opts: &Opts,
+    corpus: Option<&Corpus>,
+) {
     if opts.json {
         let mut payloads: Vec<Value> = Vec::with_capacity(iris.len());
         for iri in iris {
             if opts.sections.len() == 1 {
-                payloads.push(section_payload(iri, opts.sections[0], opts));
+                payloads.push(section_payload(iri, opts.sections[0], opts, corpus));
             } else {
                 let mut m = serde_json::Map::new();
                 for s in ["parse", "canonical", "normalize", "explain"] {
                     if let Some(sec) = opts.sections.iter().find(|sec| sec.name() == s) {
-                        m.insert(s.to_string(), section_payload(iri, *sec, opts));
+                        m.insert(s.to_string(), section_payload(iri, *sec, opts, corpus));
                     }
                 }
                 payloads.push(Value::Object(m));
@@ -690,7 +711,7 @@ fn emit_per_iri_sections<W: Write>(stdout: &mut W, iris: &[Identifier], opts: &O
                     let _ = writeln!(stdout, "{}", iri.canonical());
                 }
                 Section::Normalize => {
-                    let _ = writeln!(stdout, "{}", normalize_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints));
+                    let _ = writeln!(stdout, "{}", normalize_section(iri, opts, corpus));
                 }
                 _ => {}
             }
@@ -713,7 +734,7 @@ fn emit_per_iri_sections<W: Write>(stdout: &mut W, iris: &[Identifier], opts: &O
                     let _ = writeln!(stdout, "{}", iri.canonical());
                 }
                 Section::Normalize => {
-                    let _ = writeln!(stdout, "{}", normalize_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints));
+                    let _ = writeln!(stdout, "{}", normalize_section(iri, opts, corpus));
                 }
                 Section::Explain => {
                     emit_explain_human(stdout, &trace_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints))

@@ -105,4 +105,4 @@ pub use cross_host_shape::CrossHostShape;
 pub use recognizer_proposal::{ProposalOptions, RecognizerProposal};
 pub use synthesized_recognizer::SynthesizedRecognizer;
 
-pub const VERSION: &str = "0.30.0";
+pub const VERSION: &str = "0.30.1";
