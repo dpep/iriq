@@ -62,7 +62,10 @@ struct Accumulator {
     matches: Vec<String>,
 }
 
-pub fn propose_recognizers(storage: &dyn Storage, opts: ProposalOptions) -> Vec<RecognizerProposal> {
+pub fn propose_recognizers(
+    storage: &dyn Storage,
+    opts: ProposalOptions,
+) -> Vec<RecognizerProposal> {
     let opts = with_defaults(opts);
     let mut per_prefix: HashMap<String, Accumulator> = HashMap::new();
 

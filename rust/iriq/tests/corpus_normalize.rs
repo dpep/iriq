@@ -6,9 +6,9 @@
 use iriq::Corpus;
 
 const NAMES: [&str; 26] = [
-    "alice", "bob", "carol", "dave", "eve", "frank", "grace", "heidi", "ivan", "judy", "ken", "leo",
-    "mary", "ned", "olive", "peg", "quinn", "rose", "sam", "tom", "uma", "vic", "wade", "xena",
-    "yara", "zoe",
+    "alice", "bob", "carol", "dave", "eve", "frank", "grace", "heidi", "ivan", "judy", "ken",
+    "leo", "mary", "ned", "olive", "peg", "quinn", "rose", "sam", "tom", "uma", "vic", "wade",
+    "xena", "yara", "zoe",
 ];
 
 #[test]
@@ -16,7 +16,8 @@ fn promotes_high_cardinality_literal_midpath() {
     // The variable slot is mid-path, with a `profile` suffix after it.
     let mut c = Corpus::new();
     for n in NAMES {
-        c.observe(&format!("https://foo.com/users/{n}/profile")).unwrap();
+        c.observe(&format!("https://foo.com/users/{n}/profile"))
+            .unwrap();
     }
     assert_eq!(
         c.normalize("https://foo.com/users/zoe/profile").unwrap(),
@@ -31,18 +32,23 @@ fn promotes_high_cardinality_literal_endpath() {
     for n in NAMES {
         c.observe(&format!("https://foo.com/users/{n}")).unwrap();
     }
-    assert_eq!(c.normalize("https://foo.com/users/zoe").unwrap(), "https://foo.com/users/{user}");
+    assert_eq!(
+        c.normalize("https://foo.com/users/zoe").unwrap(),
+        "https://foo.com/users/{user}"
+    );
 }
 
 #[test]
 fn promotion_survives_save_and_reopen() {
-    let path = std::env::temp_dir().join(format!("iriq_promo_roundtrip_{}.json", std::process::id()));
+    let path =
+        std::env::temp_dir().join(format!("iriq_promo_roundtrip_{}.json", std::process::id()));
     let p = path.to_str().unwrap();
     let _ = std::fs::remove_file(&path);
     {
         let mut c = Corpus::open(p).unwrap();
         for n in NAMES {
-            c.observe(&format!("https://foo.com/users/{n}/profile")).unwrap();
+            c.observe(&format!("https://foo.com/users/{n}/profile"))
+                .unwrap();
         }
         c.save(p).unwrap();
     }
@@ -62,5 +68,8 @@ fn low_cardinality_literal_stays_literal() {
     for _ in 0..NAMES.len() {
         c.observe("https://foo.com/about/team").unwrap();
     }
-    assert_eq!(c.normalize("https://foo.com/about/team").unwrap(), "https://foo.com/about/team");
+    assert_eq!(
+        c.normalize("https://foo.com/about/team").unwrap(),
+        "https://foo.com/about/team"
+    );
 }

@@ -21,7 +21,9 @@ pub struct ShapeRenderOptions {
 impl Shape {
     pub fn from_segments(segments: &[String], classifier: Option<&SegmentClassifier>) -> Self {
         let c = classifier.unwrap_or(&DEFAULT_CLASSIFIER);
-        Shape { entries: derive_hints(segments, c) }
+        Shape {
+            entries: derive_hints(segments, c),
+        }
     }
 
     pub fn from_entries(entries: Vec<SegmentHint>) -> Self {

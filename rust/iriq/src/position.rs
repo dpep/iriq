@@ -26,9 +26,17 @@ pub struct Position {
 
 impl Position {
     pub fn path(host: impl Into<String>, prefix: impl Into<String>) -> Self {
-        Position { host: host.into(), scope: PositionScope::Path, locator: prefix.into() }
+        Position {
+            host: host.into(),
+            scope: PositionScope::Path,
+            locator: prefix.into(),
+        }
     }
     pub fn query(host: impl Into<String>, name: impl Into<String>) -> Self {
-        Position { host: host.into(), scope: PositionScope::Query, locator: name.into() }
+        Position {
+            host: host.into(),
+            scope: PositionScope::Query,
+            locator: name.into(),
+        }
     }
 }

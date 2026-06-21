@@ -18,8 +18,7 @@ fn fixtures_dir() -> PathBuf {
 
 fn load<T: for<'de> Deserialize<'de>>(name: &str) -> T {
     let path = fixtures_dir().join(name);
-    let data = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("read {:?}: {}", path, e));
+    let data = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {:?}: {}", path, e));
     serde_json::from_str(&data).unwrap_or_else(|e| panic!("decode {:?}: {}", path, e))
 }
 
@@ -55,23 +54,51 @@ fn fixture_parser() {
     let fx: ParserFx = load("parser.json");
     for c in &fx.cases {
         let iri = parse(&c.input).unwrap_or_else(|e| panic!("parse {:?}: {}", c.input, e));
-        assert_eq!(iri.original, c.identifier.original, "{:?} original", c.input);
+        assert_eq!(
+            iri.original, c.identifier.original,
+            "{:?} original",
+            c.input
+        );
         assert_eq!(iri.kind.as_str(), c.identifier.kind, "{:?} kind", c.input);
-        assert_eq!(opt(iri.scheme.as_str()), c.identifier.scheme, "{:?} scheme", c.input);
-        assert_eq!(opt(iri.host.as_str()), c.identifier.host, "{:?} host", c.input);
+        assert_eq!(
+            opt(iri.scheme.as_str()),
+            c.identifier.scheme,
+            "{:?} scheme",
+            c.input
+        );
+        assert_eq!(
+            opt(iri.host.as_str()),
+            c.identifier.host,
+            "{:?} host",
+            c.input
+        );
         let want_port = c.identifier.port;
         let got_port = if iri.port == 0 { None } else { Some(iri.port) };
         assert_eq!(got_port, want_port, "{:?} port", c.input);
-        assert_eq!(iri.path_segments, c.identifier.path_segments, "{:?} segments", c.input);
+        assert_eq!(
+            iri.path_segments, c.identifier.path_segments,
+            "{:?} segments",
+            c.input
+        );
         let got_qp: HashMap<String, String> = iri
             .query_params
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
         assert_eq!(got_qp, c.identifier.query_params, "{:?} query", c.input);
-        assert_eq!(opt(iri.fragment.as_str()), c.identifier.fragment, "{:?} frag", c.input);
+        assert_eq!(
+            opt(iri.fragment.as_str()),
+            c.identifier.fragment,
+            "{:?} frag",
+            c.input
+        );
         assert_eq!(opt(iri.nss.as_str()), c.identifier.nss, "{:?} nss", c.input);
-        assert_eq!(iri.canonical(), c.identifier.canonical, "{:?} canonical", c.input);
+        assert_eq!(
+            iri.canonical(),
+            c.identifier.canonical,
+            "{:?} canonical",
+            c.input
+        );
     }
 }
 
@@ -128,7 +155,11 @@ fn fixture_normalizer() {
     for case in &fx.cases {
         let iri = parse(&case.input).unwrap();
         let got = normalize_identifier(&iri, &c, case.hints);
-        assert_eq!(got, case.output, "normalize {:?} hints={}", case.input, case.hints);
+        assert_eq!(
+            got, case.output,
+            "normalize {:?} hints={}",
+            case.input, case.hints
+        );
     }
 }
 
@@ -151,7 +182,11 @@ fn fixture_path_shape() {
     let fx: PathShapeFx = load("pathshape.json");
     for case in &fx.cases {
         let got = path_shape_for(&case.segments, case.hints);
-        assert_eq!(got, case.shape, "pathshape {:?} hints={}", case.segments, case.hints);
+        assert_eq!(
+            got, case.shape,
+            "pathshape {:?} hints={}",
+            case.segments, case.hints
+        );
     }
 }
 
@@ -198,7 +233,11 @@ fn fixture_extractor() {
     let strict = Extractor { scheme_less: false };
     for case in &fx.cases {
         let got_sl = scheme_less.extract_strings(&case.text);
-        assert_eq!(got_sl, case.extracted, "extract scheme-less {:?}", case.text);
+        assert_eq!(
+            got_sl, case.extracted,
+            "extract scheme-less {:?}",
+            case.text
+        );
         let got_strict = strict.extract_strings(&case.text);
         assert_eq!(got_strict, case.strict, "extract strict {:?}", case.text);
     }

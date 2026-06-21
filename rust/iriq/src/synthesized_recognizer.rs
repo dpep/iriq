@@ -32,14 +32,24 @@ impl SynthesizedRecognizer {
             .get("specificity")
             .and_then(|v| v.as_f64())
             .unwrap_or(SPECIFICITY_PATTERN);
-        Some(SynthesizedRecognizer { prefix: prefix.to_string(), ty, specificity })
+        Some(SynthesizedRecognizer {
+            prefix: prefix.to_string(),
+            ty,
+            specificity,
+        })
     }
 
     pub fn dump(&self) -> Value {
         let mut m = Map::new();
         m.insert("prefix".to_string(), Value::String(self.prefix.clone()));
-        m.insert("type".to_string(), Value::String(self.ty.as_str().to_string()));
-        m.insert("specificity".to_string(), Value::Number(serde_json::Number::from_f64(self.specificity).unwrap()));
+        m.insert(
+            "type".to_string(),
+            Value::String(self.ty.as_str().to_string()),
+        );
+        m.insert(
+            "specificity".to_string(),
+            Value::Number(serde_json::Number::from_f64(self.specificity).unwrap()),
+        );
         Value::Object(m)
     }
 }
@@ -49,6 +59,10 @@ impl Recognizer for SynthesizedRecognizer {
         if !segment.starts_with(&self.prefix) {
             return None;
         }
-        Some(Verdict { ty: self.ty, confidence: 1.0, specificity: self.specificity })
+        Some(Verdict {
+            ty: self.ty,
+            confidence: 1.0,
+            specificity: self.specificity,
+        })
     }
 }

@@ -7,7 +7,8 @@ use std::collections::HashMap;
 
 static SCHEME_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^([a-zA-Z][a-zA-Z0-9+\-.]*):").unwrap());
 static HOSTISH_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^(?P<host>[^/?#\s:]+\.[^/?#\s:]+|localhost)(?::(?P<port>\d+))?(?P<rest>[/?#].*)?$").unwrap()
+    Regex::new(r"^(?P<host>[^/?#\s:]+\.[^/?#\s:]+|localhost)(?::(?P<port>\d+))?(?P<rest>[/?#].*)?$")
+        .unwrap()
 });
 static AUTH_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^(?P<host>[^/?#]+?)(?::(?P<port>\d+))?(?P<rest>[/?#].*)?$").unwrap());
@@ -78,13 +79,15 @@ fn parse_urn(original: &str, rest: &str) -> Result<Identifier, ParseError> {
     })
 }
 
-fn parse_authority_url(original: &str, scheme: &str, remainder: &str) -> Result<Identifier, ParseError> {
+fn parse_authority_url(
+    original: &str,
+    scheme: &str,
+    remainder: &str,
+) -> Result<Identifier, ParseError> {
     let caps = HOSTISH_RE
         .captures(remainder)
         .or_else(|| AUTH_RE.captures(remainder))
-        .ok_or_else(|| {
-            ParseError::new(format!("cannot parse authority from {:?}", original))
-        })?;
+        .ok_or_else(|| ParseError::new(format!("cannot parse authority from {:?}", original)))?;
     let host = caps.name("host").unwrap().as_str().to_ascii_lowercase();
     let mut port: u16 = 0;
     if let Some(p) = caps.name("port") {

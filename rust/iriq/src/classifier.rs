@@ -96,18 +96,14 @@ static ISO_TIME_RE: Lazy<Regex> = Lazy::new(|| {
 });
 static HASH_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[0-9a-fA-F]{32,}$").unwrap());
 static SLUG_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[a-z0-9]+(?:[-_][a-z0-9]+)+$").unwrap());
-static LITERAL_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^\p{L}[\p{L}\p{M}_]*$").unwrap());
+static LITERAL_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\p{L}[\p{L}\p{M}_]*$").unwrap());
 static OPAQUE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[A-Za-z0-9_\-.~]{4,}$").unwrap());
 static IPV6_FULL_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){7}$").unwrap());
-static IPV6_COMPRESSED_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^[0-9a-fA-F:]{2,}$").unwrap());
-static URL_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://\S+$").unwrap());
-static SCHEMELESS_URL_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^[a-zA-Z0-9\-]+(?:\.[a-zA-Z0-9\-]+)*\.[a-zA-Z]{2,}/\S*$").unwrap()
-});
+static IPV6_COMPRESSED_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[0-9a-fA-F:]{2,}$").unwrap());
+static URL_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://\S+$").unwrap());
+static SCHEMELESS_URL_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^[a-zA-Z0-9\-]+(?:\.[a-zA-Z0-9\-]+)*\.[a-zA-Z]{2,}/\S*$").unwrap());
 static EMAIL_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
         r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9](?:[A-Za-z0-9\-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9\-]*[A-Za-z0-9])?)+$",
@@ -122,9 +118,8 @@ static LOCALE_RE: Lazy<Regex> =
 static LOCALE_BARE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[a-z]{2}$").unwrap());
 static CURRENCY_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[A-Za-z]{3}$").unwrap());
 static PHONE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\+[ \-.()\d]{7,20}$").unwrap());
-static PHONE_NANP_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^\(?([2-9]\d{2})\)?[ \-.]?([2-9]\d{2})[ \-.]?(\d{4})$").unwrap()
-});
+static PHONE_NANP_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^\(?([2-9]\d{2})\)?[ \-.]?([2-9]\d{2})[ \-.]?(\d{4})$").unwrap());
 static FILE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^[A-Za-z0-9][A-Za-z0-9_\-.~]*\.([A-Za-z0-9]{1,8})$").unwrap());
 static COLOR_HEX_RE: Lazy<Regex> = Lazy::new(|| {
@@ -159,31 +154,20 @@ static FILE_EXT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\.([A-Za-z0-9]{1,8})
 
 static COUNTRY_CODES: Lazy<HashSet<&'static str>> = Lazy::new(|| {
     [
-        "AD","AE","AF","AG","AL","AM","AO","AR","AT","AU","AZ",
-        "BA","BB","BD","BE","BG","BH","BJ","BM","BN","BO","BR","BS","BT","BW","BY","BZ",
-        "CA","CD","CG","CH","CI","CL","CM","CN","CO","CR","CU","CY","CZ",
-        "DE","DJ","DK","DM","DO","DZ",
-        "EC","EE","EG","ER","ES","ET",
-        "FI","FJ","FK","FM","FO","FR",
-        "GA","GB","GE","GH","GI","GL","GM","GN","GR","GT","GU","GW","GY",
-        "HK","HN","HR","HT","HU",
-        "ID","IE","IL","IM","IN","IQ","IR","IS","IT",
-        "JM","JO","JP",
-        "KE","KG","KH","KM","KN","KP","KR","KW","KY","KZ",
-        "LA","LB","LC","LI","LK","LR","LS","LT","LU","LV","LY",
-        "MA","MC","MD","ME","MG","MK","ML","MM","MN","MO","MR","MT","MU","MV","MW","MX","MY","MZ",
-        "NA","NE","NG","NI","NL","NO","NP","NR","NU","NZ",
-        "OM",
-        "PA","PE","PF","PG","PH","PK","PL","PR","PT","PW","PY",
-        "QA",
-        "RE","RO","RS","RU","RW",
-        "SA","SB","SC","SD","SE","SG","SI","SK","SL","SM","SN","SO","SR","SS","ST","SV","SY","SZ",
-        "TD","TG","TH","TJ","TM","TN","TO","TR","TT","TV","TW","TZ",
-        "UA","UG","US","UY","UZ",
-        "VA","VC","VE","VG","VI","VN","VU",
-        "WS",
-        "YE",
-        "ZA","ZM","ZW",
+        "AD", "AE", "AF", "AG", "AL", "AM", "AO", "AR", "AT", "AU", "AZ", "BA", "BB", "BD", "BE",
+        "BG", "BH", "BJ", "BM", "BN", "BO", "BR", "BS", "BT", "BW", "BY", "BZ", "CA", "CD", "CG",
+        "CH", "CI", "CL", "CM", "CN", "CO", "CR", "CU", "CY", "CZ", "DE", "DJ", "DK", "DM", "DO",
+        "DZ", "EC", "EE", "EG", "ER", "ES", "ET", "FI", "FJ", "FK", "FM", "FO", "FR", "GA", "GB",
+        "GE", "GH", "GI", "GL", "GM", "GN", "GR", "GT", "GU", "GW", "GY", "HK", "HN", "HR", "HT",
+        "HU", "ID", "IE", "IL", "IM", "IN", "IQ", "IR", "IS", "IT", "JM", "JO", "JP", "KE", "KG",
+        "KH", "KM", "KN", "KP", "KR", "KW", "KY", "KZ", "LA", "LB", "LC", "LI", "LK", "LR", "LS",
+        "LT", "LU", "LV", "LY", "MA", "MC", "MD", "ME", "MG", "MK", "ML", "MM", "MN", "MO", "MR",
+        "MT", "MU", "MV", "MW", "MX", "MY", "MZ", "NA", "NE", "NG", "NI", "NL", "NO", "NP", "NR",
+        "NU", "NZ", "OM", "PA", "PE", "PF", "PG", "PH", "PK", "PL", "PR", "PT", "PW", "PY", "QA",
+        "RE", "RO", "RS", "RU", "RW", "SA", "SB", "SC", "SD", "SE", "SG", "SI", "SK", "SL", "SM",
+        "SN", "SO", "SR", "SS", "ST", "SV", "SY", "SZ", "TD", "TG", "TH", "TJ", "TM", "TN", "TO",
+        "TR", "TT", "TV", "TW", "TZ", "UA", "UG", "US", "UY", "UZ", "VA", "VC", "VE", "VG", "VI",
+        "VN", "VU", "WS", "YE", "ZA", "ZM", "ZW",
     ]
     .iter()
     .copied()
@@ -192,13 +176,10 @@ static COUNTRY_CODES: Lazy<HashSet<&'static str>> = Lazy::new(|| {
 
 static LOCALE_LANGUAGE_CODES: Lazy<HashSet<&'static str>> = Lazy::new(|| {
     [
-        "ar","bg","bn","ca","cs","da","de","el",
-        "en","es","et","fa","fi","fr","gu","he",
-        "hi","hr","hu","id","it","ja","ka","kk",
-        "km","kn","ko","lt","lv","mk","ml","mr",
-        "ms","my","nb","nl","no","pa","pl","pt",
-        "ro","ru","sk","sl","sr","sv","sw","ta",
-        "te","th","tl","tr","uk","ur","vi","zh",
+        "ar", "bg", "bn", "ca", "cs", "da", "de", "el", "en", "es", "et", "fa", "fi", "fr", "gu",
+        "he", "hi", "hr", "hu", "id", "it", "ja", "ka", "kk", "km", "kn", "ko", "lt", "lv", "mk",
+        "ml", "mr", "ms", "my", "nb", "nl", "no", "pa", "pl", "pt", "ro", "ru", "sk", "sl", "sr",
+        "sv", "sw", "ta", "te", "th", "tl", "tr", "uk", "ur", "vi", "zh",
     ]
     .iter()
     .copied()
@@ -207,10 +188,9 @@ static LOCALE_LANGUAGE_CODES: Lazy<HashSet<&'static str>> = Lazy::new(|| {
 
 static CURRENCY_CODES: Lazy<HashSet<&'static str>> = Lazy::new(|| {
     [
-        "USD","EUR","GBP","JPY","CNY","CHF","CAD","AUD","NZD","HKD","SGD",
-        "INR","KRW","MXN","BRL","ZAR","SEK","NOK","DKK","PLN","CZK","HUF",
-        "RUB","TRY","ILS","AED","SAR","THB","IDR","PHP","VND","TWD","MYR",
-        "NGN","EGP",
+        "USD", "EUR", "GBP", "JPY", "CNY", "CHF", "CAD", "AUD", "NZD", "HKD", "SGD", "INR", "KRW",
+        "MXN", "BRL", "ZAR", "SEK", "NOK", "DKK", "PLN", "CZK", "HUF", "RUB", "TRY", "ILS", "AED",
+        "SAR", "THB", "IDR", "PHP", "VND", "TWD", "MYR", "NGN", "EGP",
     ]
     .iter()
     .copied()
@@ -249,31 +229,40 @@ impl FileKind {
 static FILE_EXTENSION_KIND: Lazy<HashMap<&'static str, FileKind>> = Lazy::new(|| {
     let mut m = HashMap::new();
     use FileKind::*;
-    for e in ["png","jpg","jpeg","gif","webp","svg","bmp","tiff","tif","ico","avif","heic","heif"] {
+    for e in [
+        "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "tiff", "tif", "ico", "avif", "heic",
+        "heif",
+    ] {
         m.insert(e, Image);
     }
-    for e in ["pdf","doc","docx","xls","xlsx","ppt","pptx","odt","ods","odp","rtf","epub"] {
+    for e in [
+        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "rtf", "epub",
+    ] {
         m.insert(e, Document);
     }
-    for e in ["csv","tsv","json","xml","yaml","yml","parquet","sqlite","db","ndjson","jsonl"] {
+    for e in [
+        "csv", "tsv", "json", "xml", "yaml", "yml", "parquet", "sqlite", "db", "ndjson", "jsonl",
+    ] {
         m.insert(e, Data);
     }
-    for e in ["txt","md","log","markdown","rst"] {
+    for e in ["txt", "md", "log", "markdown", "rst"] {
         m.insert(e, Text);
     }
-    for e in ["html","htm","css","js","mjs","cjs","ts","jsx","tsx"] {
+    for e in ["html", "htm", "css", "js", "mjs", "cjs", "ts", "jsx", "tsx"] {
         m.insert(e, Web);
     }
-    for e in ["mp3","wav","ogg","flac","aac","m4a","opus"] {
+    for e in ["mp3", "wav", "ogg", "flac", "aac", "m4a", "opus"] {
         m.insert(e, Audio);
     }
-    for e in ["mp4","mov","avi","mkv","webm","flv","wmv","m4v"] {
+    for e in ["mp4", "mov", "avi", "mkv", "webm", "flv", "wmv", "m4v"] {
         m.insert(e, Video);
     }
-    for e in ["zip","tar","gz","bz2","7z","rar","xz","tgz"] {
+    for e in ["zip", "tar", "gz", "bz2", "7z", "rar", "xz", "tgz"] {
         m.insert(e, Archive);
     }
-    for e in ["rb","py","go","java","c","cc","cpp","h","hpp","sh","swift","kt","rs"] {
+    for e in [
+        "rb", "py", "go", "java", "c", "cc", "cpp", "h", "hpp", "sh", "swift", "kt", "rs",
+    ] {
         m.insert(e, Code);
     }
     m
@@ -282,21 +271,62 @@ static FILE_EXTENSION_KIND: Lazy<HashMap<&'static str, FileKind>> = Lazy::new(||
 static PARAM_NAME_HINTS: Lazy<HashMap<&'static str, SegmentType>> = Lazy::new(|| {
     use SegmentType::*;
     let mut m = HashMap::new();
-    for k in ["phone","tel","telephone","mobile","cell"] { m.insert(k, Phone); }
-    for k in ["email","e_mail","mail"] { m.insert(k, Email); }
-    for k in ["locale","lang","language"] { m.insert(k, Locale); }
-    for k in ["currency","cur","curr"] { m.insert(k, Currency); }
-    for k in ["url","uri","redirect","redirect_url","return_to","return_url","callback","callback_url","next_url"] { m.insert(k, Url); }
-    for k in ["jwt","bearer","auth_token"] { m.insert(k, Jwt); }
-    for k in ["mime","content_type","media_type"] { m.insert(k, Mime); }
-    for k in ["color","colour","bg","background","fg","foreground"] { m.insert(k, Color); }
-    for k in ["coords","coordinates","geo","location","position","latlng","latlon"] { m.insert(k, Coordinate); }
-    for k in ["country","country_code","nation"] { m.insert(k, Country); }
+    for k in ["phone", "tel", "telephone", "mobile", "cell"] {
+        m.insert(k, Phone);
+    }
+    for k in ["email", "e_mail", "mail"] {
+        m.insert(k, Email);
+    }
+    for k in ["locale", "lang", "language"] {
+        m.insert(k, Locale);
+    }
+    for k in ["currency", "cur", "curr"] {
+        m.insert(k, Currency);
+    }
+    for k in [
+        "url",
+        "uri",
+        "redirect",
+        "redirect_url",
+        "return_to",
+        "return_url",
+        "callback",
+        "callback_url",
+        "next_url",
+    ] {
+        m.insert(k, Url);
+    }
+    for k in ["jwt", "bearer", "auth_token"] {
+        m.insert(k, Jwt);
+    }
+    for k in ["mime", "content_type", "media_type"] {
+        m.insert(k, Mime);
+    }
+    for k in ["color", "colour", "bg", "background", "fg", "foreground"] {
+        m.insert(k, Color);
+    }
+    for k in [
+        "coords",
+        "coordinates",
+        "geo",
+        "location",
+        "position",
+        "latlng",
+        "latlon",
+    ] {
+        m.insert(k, Coordinate);
+    }
+    for k in ["country", "country_code", "nation"] {
+        m.insert(k, Country);
+    }
     m
 });
 
 fn is_overridable(t: SegmentType) -> bool {
-    matches!(t, SegmentType::Literal | SegmentType::OpaqueId | SegmentType::Slug)
+    matches!(
+        t,
+        SegmentType::Literal | SegmentType::OpaqueId | SegmentType::Slug
+    )
 }
 
 /// Return a hinted type for a param name when the value type is generic.
@@ -474,7 +504,11 @@ impl Recognizer for UuidRecognizer {
         if segment.len() != 36 || !segment.contains('-') || !UUID_RE.is_match(segment) {
             return None;
         }
-        Some(Verdict { ty: SegmentType::Uuid, confidence: 1.0, specificity: SPECIFICITY_SEMANTIC })
+        Some(Verdict {
+            ty: SegmentType::Uuid,
+            confidence: 1.0,
+            specificity: SPECIFICITY_SEMANTIC,
+        })
     }
 }
 
@@ -540,7 +574,11 @@ impl Recognizer for IntegerRecognizer {
                 });
             }
         }
-        Some(Verdict { ty: SegmentType::Integer, confidence: 1.0, specificity: SPECIFICITY_TYPED })
+        Some(Verdict {
+            ty: SegmentType::Integer,
+            confidence: 1.0,
+            specificity: SPECIFICITY_TYPED,
+        })
     }
 }
 

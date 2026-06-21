@@ -36,9 +36,20 @@ static IRREGULARS: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
 
 static UNCOUNTABLE: Lazy<HashSet<&'static str>> = Lazy::new(|| {
     [
-        "news", "fish", "sheep", "deer", "series", "species",
-        "equipment", "information", "money", "rice", "jeans",
-        "police", "data", "media",
+        "news",
+        "fish",
+        "sheep",
+        "deer",
+        "series",
+        "species",
+        "equipment",
+        "information",
+        "money",
+        "rice",
+        "jeans",
+        "police",
+        "data",
+        "media",
     ]
     .iter()
     .copied()
@@ -52,35 +63,99 @@ struct Rule {
 
 static RULES: Lazy<Vec<Rule>> = Lazy::new(|| {
     vec![
-        Rule { re: Regex::new(r"(?i)(quiz)zes$").unwrap(), repl: "${1}" },
-        Rule { re: Regex::new(r"(?i)(matri|appendi)ces$").unwrap(), repl: "${1}x" },
-        Rule { re: Regex::new(r"(?i)(ox)en$").unwrap(), repl: "${1}" },
-        Rule { re: Regex::new(r"(?i)(alias|status)(es)?$").unwrap(), repl: "${1}" },
-        Rule { re: Regex::new(r"(?i)(octop|vir)(us|i)$").unwrap(), repl: "${1}us" },
-        Rule { re: Regex::new(r"(?i)(cris|ax|test)es$").unwrap(), repl: "${1}is" },
-        Rule { re: Regex::new(r"(?i)(shoe)s$").unwrap(), repl: "${1}" },
-        Rule { re: Regex::new(r"(?i)(bus)(es)?$").unwrap(), repl: "${1}" },
-        Rule { re: Regex::new(r"(?i)([ml])ice$").unwrap(), repl: "${1}ouse" },
-        Rule { re: Regex::new(r"(?i)(x|ch|ss|sh)es$").unwrap(), repl: "${1}" },
-        Rule { re: Regex::new(r"(?i)(m)ovies$").unwrap(), repl: "${1}ovie" },
-        Rule { re: Regex::new(r"(?i)(s)eries$").unwrap(), repl: "${1}eries" },
-        Rule { re: Regex::new(r"(?i)([^aeiouy]|qu)ies$").unwrap(), repl: "${1}y" },
-        Rule { re: Regex::new(r"(?i)([lr])ves$").unwrap(), repl: "${1}f" },
-        Rule { re: Regex::new(r"(?i)(tive)s$").unwrap(), repl: "${1}" },
-        Rule { re: Regex::new(r"(?i)(hive)s$").unwrap(), repl: "${1}" },
-        Rule { re: Regex::new(r"(?i)([^f])ves$").unwrap(), repl: "${1}fe" },
         Rule {
-            re: Regex::new(
-                r"(?i)((a)naly|(b)a|(d)iagno|(p)arenthe|(p)rogno|(s)ynop|(t)he)ses$",
-            )
-            .unwrap(),
+            re: Regex::new(r"(?i)(quiz)zes$").unwrap(),
+            repl: "${1}",
+        },
+        Rule {
+            re: Regex::new(r"(?i)(matri|appendi)ces$").unwrap(),
+            repl: "${1}x",
+        },
+        Rule {
+            re: Regex::new(r"(?i)(ox)en$").unwrap(),
+            repl: "${1}",
+        },
+        Rule {
+            re: Regex::new(r"(?i)(alias|status)(es)?$").unwrap(),
+            repl: "${1}",
+        },
+        Rule {
+            re: Regex::new(r"(?i)(octop|vir)(us|i)$").unwrap(),
+            repl: "${1}us",
+        },
+        Rule {
+            re: Regex::new(r"(?i)(cris|ax|test)es$").unwrap(),
+            repl: "${1}is",
+        },
+        Rule {
+            re: Regex::new(r"(?i)(shoe)s$").unwrap(),
+            repl: "${1}",
+        },
+        Rule {
+            re: Regex::new(r"(?i)(bus)(es)?$").unwrap(),
+            repl: "${1}",
+        },
+        Rule {
+            re: Regex::new(r"(?i)([ml])ice$").unwrap(),
+            repl: "${1}ouse",
+        },
+        Rule {
+            re: Regex::new(r"(?i)(x|ch|ss|sh)es$").unwrap(),
+            repl: "${1}",
+        },
+        Rule {
+            re: Regex::new(r"(?i)(m)ovies$").unwrap(),
+            repl: "${1}ovie",
+        },
+        Rule {
+            re: Regex::new(r"(?i)(s)eries$").unwrap(),
+            repl: "${1}eries",
+        },
+        Rule {
+            re: Regex::new(r"(?i)([^aeiouy]|qu)ies$").unwrap(),
+            repl: "${1}y",
+        },
+        Rule {
+            re: Regex::new(r"(?i)([lr])ves$").unwrap(),
+            repl: "${1}f",
+        },
+        Rule {
+            re: Regex::new(r"(?i)(tive)s$").unwrap(),
+            repl: "${1}",
+        },
+        Rule {
+            re: Regex::new(r"(?i)(hive)s$").unwrap(),
+            repl: "${1}",
+        },
+        Rule {
+            re: Regex::new(r"(?i)([^f])ves$").unwrap(),
+            repl: "${1}fe",
+        },
+        Rule {
+            re: Regex::new(r"(?i)((a)naly|(b)a|(d)iagno|(p)arenthe|(p)rogno|(s)ynop|(t)he)ses$")
+                .unwrap(),
             repl: "${1}sis",
         },
-        Rule { re: Regex::new(r"(?i)([ti])a$").unwrap(), repl: "${1}um" },
-        Rule { re: Regex::new(r"(?i)(n)ews$").unwrap(), repl: "${1}ews" },
-        Rule { re: Regex::new(r"(?i)(o)es$").unwrap(), repl: "${1}" },
-        Rule { re: Regex::new(r"(?i)(ss)$").unwrap(), repl: "${1}" },
-        Rule { re: Regex::new(r"(?i)s$").unwrap(), repl: "" },
+        Rule {
+            re: Regex::new(r"(?i)([ti])a$").unwrap(),
+            repl: "${1}um",
+        },
+        Rule {
+            re: Regex::new(r"(?i)(n)ews$").unwrap(),
+            repl: "${1}ews",
+        },
+        Rule {
+            re: Regex::new(r"(?i)(o)es$").unwrap(),
+            repl: "${1}",
+        },
+        Rule {
+            re: Regex::new(r"(?i)(ss)$").unwrap(),
+            repl: "${1}",
+        },
+        Rule {
+            re: Regex::new(r"(?i)s$").unwrap(),
+            repl: "",
+        },
     ]
 });
 

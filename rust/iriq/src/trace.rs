@@ -181,7 +181,11 @@ fn would_be_hint(
         return None;
     }
     let base = singularize(prev);
-    let suffix = if t == SegmentType::Uuid { "_uuid" } else { "_id" };
+    let suffix = if t == SegmentType::Uuid {
+        "_uuid"
+    } else {
+        "_id"
+    };
     Some(format!("{}{}", base, suffix))
 }
 

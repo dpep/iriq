@@ -17,7 +17,11 @@ pub struct PositionStats {
 
 impl PositionStats {
     pub fn new(max_values: usize) -> Self {
-        let cap = if max_values == 0 { DEFAULT_MAX_VALUES_PER_POSITION } else { max_values };
+        let cap = if max_values == 0 {
+            DEFAULT_MAX_VALUES_PER_POSITION
+        } else {
+            max_values
+        };
         PositionStats {
             value_counts: HashMap::new(),
             type_counts: HashMap::new(),
@@ -44,7 +48,9 @@ impl PositionStats {
         if t != SegmentType::Integer && t != SegmentType::Float {
             return;
         }
-        let Ok(n) = value.parse::<f64>() else { return; };
+        let Ok(n) = value.parse::<f64>() else {
+            return;
+        };
         if self.numeric_count == 0 || n < self.numeric_min {
             self.numeric_min = n;
         }

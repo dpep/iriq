@@ -39,8 +39,11 @@ impl OrderedMap {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.keys
-            .iter()
-            .map(move |k| (k.as_str(), self.values.get(k).map(String::as_str).unwrap_or("")))
+        self.keys.iter().map(move |k| {
+            (
+                k.as_str(),
+                self.values.get(k).map(String::as_str).unwrap_or(""),
+            )
+        })
     }
 }

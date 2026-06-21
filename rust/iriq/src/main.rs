@@ -124,7 +124,14 @@ fn run<R: Read, W: Write, E: Write>(
     let (args, opts) = match parse_options(argv) {
         Ok(p) => p,
         Err(e) => {
-            return emit_error(&mut stderr, argv_wants_json(argv), "option_error", &e, "", 1);
+            return emit_error(
+                &mut stderr,
+                argv_wants_json(argv),
+                "option_error",
+                &e,
+                "",
+                1,
+            );
         }
     };
     if opts.help {
@@ -188,7 +195,15 @@ fn run<R: Read, W: Write, E: Write>(
     } else if opts.cross_host_shapes {
         cmd_cross_host_shapes(&mut stdout, &mut stderr, corpus.as_ref(), &opts)
     } else if batch_mode {
-        cmd_batch(&mut stdin, &mut stdout, &mut stderr, &args, &opts, corpus.as_mut(), explicit_cluster)
+        cmd_batch(
+            &mut stdin,
+            &mut stdout,
+            &mut stderr,
+            &args,
+            &opts,
+            corpus.as_mut(),
+            explicit_cluster,
+        )
     } else if opts.stats {
         cmd_stats(&mut stdout, &mut stderr, corpus.as_ref(), &opts)
     } else {
@@ -221,7 +236,8 @@ fn parseable_iri(s: &str) -> bool {
 }
 
 fn argv_wants_json(argv: &[String]) -> bool {
-    argv.iter().any(|a| a == "-j" || a == "--json" || a == "-J" || a == "--ndjson")
+    argv.iter()
+        .any(|a| a == "-j" || a == "--json" || a == "-J" || a == "--ndjson")
 }
 
 fn parse_options(argv: &[String]) -> Result<(Vec<String>, Opts), String> {
@@ -238,16 +254,24 @@ fn parse_options(argv: &[String]) -> Result<(Vec<String>, Opts), String> {
                     "--corpus" => opts.corpus = val.to_string(),
                     "--host" => opts.host_strategy = parse_host_strategy(val)?,
                     "--activate-above" => {
-                        opts.activate_above = val.parse().map_err(|e: std::num::ParseFloatError| e.to_string())?
+                        opts.activate_above = val
+                            .parse()
+                            .map_err(|e: std::num::ParseFloatError| e.to_string())?
                     }
                     "--min-hosts" => {
-                        opts.min_hosts = val.parse().map_err(|e: std::num::ParseIntError| e.to_string())?
+                        opts.min_hosts = val
+                            .parse()
+                            .map_err(|e: std::num::ParseIntError| e.to_string())?
                     }
                     "--min-observations" => {
-                        opts.propose_min_obs = val.parse().map_err(|e: std::num::ParseIntError| e.to_string())?
+                        opts.propose_min_obs = val
+                            .parse()
+                            .map_err(|e: std::num::ParseIntError| e.to_string())?
                     }
                     "--min-coverage" => {
-                        opts.propose_min_coverage = val.parse().map_err(|e: std::num::ParseFloatError| e.to_string())?
+                        opts.propose_min_coverage = val
+                            .parse()
+                            .map_err(|e: std::num::ParseFloatError| e.to_string())?
                     }
                     _ => return Err(format!("invalid option: {}", a)),
                 }
@@ -294,9 +318,8 @@ fn parse_options(argv: &[String]) -> Result<(Vec<String>, Opts), String> {
             }
             "--host" => {
                 i += 1;
-                opts.host_strategy = parse_host_strategy(
-                    argv.get(i).ok_or("--host requires a value")?.as_str(),
-                )?;
+                opts.host_strategy =
+                    parse_host_strategy(argv.get(i).ok_or("--host requires a value")?.as_str())?;
             }
             "--min-hosts" => {
                 i += 1;
@@ -356,7 +379,10 @@ fn parse_host_strategy(v: &str) -> Result<HostStrategy, String> {
         "full" => Ok(HostStrategy::Full),
         "registrable" | "reg" => Ok(HostStrategy::Registrable),
         "none" => Ok(HostStrategy::None),
-        _ => Err(format!("--host: expected full|registrable|reg|none, got {:?}", v)),
+        _ => Err(format!(
+            "--host: expected full|registrable|reg|none, got {:?}",
+            v
+        )),
     }
 }
 
@@ -370,7 +396,14 @@ fn cmd_summary<W: Write, E: Write>(
     corpus: Option<&mut Corpus>,
 ) -> u8 {
     if args.is_empty() {
-        return emit_error(stderr, opts.json, "missing_argument", "missing argument <input>", "", 1);
+        return emit_error(
+            stderr,
+            opts.json,
+            "missing_argument",
+            "missing argument <input>",
+            "",
+            1,
+        );
     }
     let iri = match parse(&args[0]) {
         Ok(i) => i,
@@ -438,14 +471,19 @@ fn section_payload(iri: &Identifier, sec: Section, opts: &Opts, corpus: Option<&
         Section::Parse => identifier_json(iri),
         Section::Canonical => Value::String(iri.canonical()),
         Section::Normalize => Value::String(normalize_section(iri, opts, corpus)),
-        Section::Explain => serde_json::to_value(trace_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints)).unwrap(),
+        Section::Explain => {
+            serde_json::to_value(trace_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints)).unwrap()
+        }
     }
 }
 
 fn identifier_json(iri: &Identifier) -> Value {
     let mut o = serde_json::Map::new();
     o.insert("original".to_string(), Value::String(iri.original.clone()));
-    o.insert("kind".to_string(), Value::String(iri.kind.as_str().to_string()));
+    o.insert(
+        "kind".to_string(),
+        Value::String(iri.kind.as_str().to_string()),
+    );
     if !iri.scheme.is_empty() {
         o.insert("scheme".to_string(), Value::String(iri.scheme.clone()));
     }
@@ -458,7 +496,12 @@ fn identifier_json(iri: &Identifier) -> Value {
     if !iri.path_segments.is_empty() {
         o.insert(
             "path_segments".to_string(),
-            Value::Array(iri.path_segments.iter().map(|s| Value::String(s.clone())).collect()),
+            Value::Array(
+                iri.path_segments
+                    .iter()
+                    .map(|s| Value::String(s.clone()))
+                    .collect(),
+            ),
         );
     }
     if !iri.query_params.is_empty() {
@@ -504,7 +547,10 @@ fn emit_sections_human<W: Write>(
                 let _ = writeln!(stdout, "{}", normalize_section(iri, opts, corpus));
             }
             Section::Explain => {
-                emit_explain_human(stdout, &trace_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints));
+                emit_explain_human(
+                    stdout,
+                    &trace_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints),
+                );
             }
         }
     }
@@ -523,14 +569,23 @@ fn emit_parse_human<W: Write>(stdout: &mut W, iri: &Identifier) {
         let _ = writeln!(stdout, "port:          {}", iri.port);
     }
     if !iri.path_segments.is_empty() {
-        let _ = writeln!(stdout, "path_segments: {}", inspect_strings(&iri.path_segments));
+        let _ = writeln!(
+            stdout,
+            "path_segments: {}",
+            inspect_strings(&iri.path_segments)
+        );
     }
     if !iri.query_params.is_empty() {
         let mut keys = iri.query_params.keys();
         keys.sort();
         let m: HashMap<String, String> = keys
             .into_iter()
-            .map(|k| (k.clone(), iri.query_params.get(&k).unwrap_or("").to_string()))
+            .map(|k| {
+                (
+                    k.clone(),
+                    iri.query_params.get(&k).unwrap_or("").to_string(),
+                )
+            })
             .collect();
         let _ = writeln!(stdout, "query_params:  {}", inspect_string_map_ordered(&m));
     }
@@ -628,7 +683,9 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
             return 1;
         }
     };
-    let extractor = Extractor { scheme_less: opts.scheme_less };
+    let extractor = Extractor {
+        scheme_less: opts.scheme_less,
+    };
     let iris = extractor.extract(&text);
 
     // Feed observations into the corpus when present.
@@ -651,8 +708,11 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
     if !opts.sections.is_empty() {
         // Corpus-informed only when the user actually passed --corpus; the
         // throwaway in-memory corpus above is just for cluster/stats views.
-        let real_corpus: Option<&Corpus> =
-            if opts.corpus.is_empty() { None } else { Some(&*working) };
+        let real_corpus: Option<&Corpus> = if opts.corpus.is_empty() {
+            None
+        } else {
+            Some(&*working)
+        };
         emit_per_iri_sections(stdout, &iris, opts, real_corpus);
         return 0;
     }
@@ -736,9 +796,10 @@ fn emit_per_iri_sections<W: Write>(
                 Section::Normalize => {
                     let _ = writeln!(stdout, "{}", normalize_section(iri, opts, corpus));
                 }
-                Section::Explain => {
-                    emit_explain_human(stdout, &trace_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints))
-                }
+                Section::Explain => emit_explain_human(
+                    stdout,
+                    &trace_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints),
+                ),
             }
         }
     }
@@ -759,7 +820,14 @@ fn emit_url_list<W: Write>(stdout: &mut W, iris: &[Identifier], opts: &Opts) {
         if let Some(c) = counts.get_mut(&key) {
             c.count += 1;
         } else {
-            counts.insert(key.clone(), UrlCount { url: key.clone(), count: 1, first: i });
+            counts.insert(
+                key.clone(),
+                UrlCount {
+                    url: key.clone(),
+                    count: 1,
+                    first: i,
+                },
+            );
             order.push(key);
         }
     }
@@ -810,8 +878,16 @@ fn emit_clusters<W: Write>(stdout: &mut W, clusters: &[Cluster], opts: &Opts) {
         if i > 0 {
             let _ = writeln!(stdout);
         }
-        let host = if c.host.is_empty() { "(urn)" } else { c.host.as_str() };
-        let shape = if opts.hints { c.shape.clone() } else { raw_shape_for(c) };
+        let host = if c.host.is_empty() {
+            "(urn)"
+        } else {
+            c.host.as_str()
+        };
+        let shape = if opts.hints {
+            c.shape.clone()
+        } else {
+            raw_shape_for(c)
+        };
         let _ = writeln!(stdout, "[{}] {}  {}", c.count, host, shape);
         let limit = c.examples.len().min(3);
         for e in &c.examples[..limit] {
@@ -842,14 +918,22 @@ fn cluster_json(c: &Cluster) -> Value {
     m.insert("count".to_string(), Value::Number((c.count as u64).into()));
     m.insert(
         "examples".to_string(),
-        Value::Array(c.examples.iter().map(|e| Value::String(e.canonical())).collect()),
+        Value::Array(
+            c.examples
+                .iter()
+                .map(|e| Value::String(e.canonical()))
+                .collect(),
+        ),
     );
     let stats = c.segment_stats();
     let segs: Vec<Value> = stats
         .iter()
         .map(|s| {
             let mut o = serde_json::Map::new();
-            o.insert("position".to_string(), Value::Number((s.position as u64).into()));
+            o.insert(
+                "position".to_string(),
+                Value::Number((s.position as u64).into()),
+            );
             o.insert("stable".to_string(), Value::Bool(s.stable));
             let mut v = serde_json::Map::new();
             for (k, n) in &s.values {
@@ -868,7 +952,10 @@ fn cluster_json(c: &Cluster) -> Value {
             o.insert("name".to_string(), Value::String(p.name.clone()));
             o.insert("count".to_string(), Value::Number((p.count as u64).into()));
             o.insert("type".to_string(), Value::String(p.ty.as_str().to_string()));
-            o.insert("cardinality".to_string(), Value::Number((p.cardinality as u64).into()));
+            o.insert(
+                "cardinality".to_string(),
+                Value::Number((p.cardinality as u64).into()),
+            );
             o.insert("presence".to_string(), Value::from(p.presence));
             Value::Object(o)
         })
@@ -894,7 +981,13 @@ fn emit_param_summary<W: Write>(stdout: &mut W, c: &Cluster) {
             r.cardinality,
             (r.presence * 100.0 + 0.5) as u32
         ));
-        let _ = writeln!(stdout, "    {:<width$}  {}", r.name, parts.join("  "), width = width);
+        let _ = writeln!(
+            stdout,
+            "    {:<width$}  {}",
+            r.name,
+            parts.join("  "),
+            width = width
+        );
     }
 }
 
@@ -916,7 +1009,14 @@ fn cmd_stats<W: Write, E: Write>(
     opts: &Opts,
 ) -> u8 {
     let Some(c) = corpus else {
-        return emit_error(stderr, opts.json, "missing_argument", "missing argument <--corpus>", "", 1);
+        return emit_error(
+            stderr,
+            opts.json,
+            "missing_argument",
+            "missing argument <--corpus>",
+            "",
+            1,
+        );
     };
     emit_stats(stdout, c, opts);
     0
@@ -933,8 +1033,14 @@ fn emit_stats<W: Write>(stdout: &mut W, corpus: &Corpus, opts: &Opts) {
 
     if opts.json {
         let mut out = serde_json::Map::new();
-        out.insert("observations".to_string(), Value::Number((observations as u64).into()));
-        out.insert("clusters".to_string(), Value::Number((corpus.size() as u64).into()));
+        out.insert(
+            "observations".to_string(),
+            Value::Number((observations as u64).into()),
+        );
+        out.insert(
+            "clusters".to_string(),
+            Value::Number((corpus.size() as u64).into()),
+        );
         out.insert("hosts".to_string(), kv_to_value(&hosts));
         out.insert("shapes".to_string(), kv_to_value(&shapes));
         out.insert("raw_shapes".to_string(), kv_to_value(&raw));
@@ -981,7 +1087,14 @@ fn cmd_reinfer<W: Write, E: Write>(
     opts: &Opts,
 ) -> u8 {
     let Some(c) = corpus else {
-        return emit_error(stderr, opts.json, "missing_argument", "missing argument <--corpus>", "", 1);
+        return emit_error(
+            stderr,
+            opts.json,
+            "missing_argument",
+            "missing argument <--corpus>",
+            "",
+            1,
+        );
     };
     let n = c.observed_iri_count();
     let before = c.size();
@@ -990,9 +1103,17 @@ fn cmd_reinfer<W: Write, E: Write>(
         return 1;
     }
     let after = c.size();
-    let noun = if n == 1 { "observation" } else { "observations" };
+    let noun = if n == 1 {
+        "observation"
+    } else {
+        "observations"
+    };
     let clusters = if after == 1 { "cluster" } else { "clusters" };
-    let _ = writeln!(stdout, "reinferred {} {}: {} → {} {}", n, noun, before, after, clusters);
+    let _ = writeln!(
+        stdout,
+        "reinferred {} {}: {} → {} {}",
+        n, noun, before, after, clusters
+    );
     0
 }
 
@@ -1003,7 +1124,14 @@ fn cmd_propose<W: Write, E: Write>(
     opts: &Opts,
 ) -> u8 {
     let Some(c) = corpus else {
-        return emit_error(stderr, opts.json, "missing_argument", "missing argument <--corpus>", "", 1);
+        return emit_error(
+            stderr,
+            opts.json,
+            "missing_argument",
+            "missing argument <--corpus>",
+            "",
+            1,
+        );
     };
     let popts = ProposalOptions {
         min_observations: opts.propose_min_obs,
@@ -1014,7 +1142,11 @@ fn cmd_propose<W: Write, E: Write>(
         match c.activate_proposals_above(opts.activate_above, popts) {
             Ok(activated) => {
                 if activated.is_empty() {
-                    let _ = writeln!(stdout, "no proposals at or above coverage {}", opts.activate_above);
+                    let _ = writeln!(
+                        stdout,
+                        "no proposals at or above coverage {}",
+                        opts.activate_above
+                    );
                     return 0;
                 }
                 for r in activated {
@@ -1036,7 +1168,11 @@ fn cmd_propose<W: Write, E: Write>(
         return 0;
     }
     if proposals.is_empty() {
-        let _ = writeln!(stdout, "no recognizer proposals ({} observations scanned)", c.observed_iri_count());
+        let _ = writeln!(
+            stdout,
+            "no recognizer proposals ({} observations scanned)",
+            c.observed_iri_count()
+        );
         return 0;
     }
     for (i, p) in proposals.iter().enumerate() {
@@ -1050,7 +1186,11 @@ fn cmd_propose<W: Write, E: Write>(
         let _ = writeln!(stdout, "  observations: {}", p.observation_count);
         let _ = writeln!(stdout, "  hosts:       {}", p.hosts.join(", "));
         let _ = writeln!(stdout, "  positions:   {}", p.positions.len());
-        let samples = if p.sample_values.len() > 3 { &p.sample_values[..3] } else { &p.sample_values[..] };
+        let samples = if p.sample_values.len() > 3 {
+            &p.sample_values[..3]
+        } else {
+            &p.sample_values[..]
+        };
         let _ = writeln!(stdout, "  samples:     {}", samples.join(", "));
     }
     0
@@ -1059,14 +1199,20 @@ fn cmd_propose<W: Write, E: Write>(
 fn proposal_json(p: &RecognizerProposal) -> Value {
     let mut o = serde_json::Map::new();
     o.insert("prefix".to_string(), Value::String(p.prefix.clone()));
-    o.insert("suggested_type".to_string(), Value::String(p.suggested_type.clone()));
+    o.insert(
+        "suggested_type".to_string(),
+        Value::String(p.suggested_type.clone()),
+    );
     let pos: Vec<Value> = p
         .positions
         .iter()
         .map(|pos| {
             let mut o = serde_json::Map::new();
             o.insert("host".to_string(), Value::String(pos.host.clone()));
-            o.insert("scope".to_string(), Value::String(pos.scope.as_str().to_string()));
+            o.insert(
+                "scope".to_string(),
+                Value::String(pos.scope.as_str().to_string()),
+            );
             o.insert("locator".to_string(), Value::String(pos.locator.clone()));
             Value::Object(o)
         })
@@ -1090,7 +1236,12 @@ fn proposal_json(p: &RecognizerProposal) -> Value {
     );
     o.insert(
         "sample_values".to_string(),
-        Value::Array(p.sample_values.iter().map(|s| Value::String(s.clone())).collect()),
+        Value::Array(
+            p.sample_values
+                .iter()
+                .map(|s| Value::String(s.clone()))
+                .collect(),
+        ),
     );
     o.insert("strategy".to_string(), Value::String(p.strategy.clone()));
     Value::Object(o)
@@ -1103,7 +1254,14 @@ fn cmd_cross_host_shapes<W: Write, E: Write>(
     opts: &Opts,
 ) -> u8 {
     let Some(c) = corpus else {
-        return emit_error(stderr, opts.json, "missing_argument", "missing argument <--corpus>", "", 1);
+        return emit_error(
+            stderr,
+            opts.json,
+            "missing_argument",
+            "missing argument <--corpus>",
+            "",
+            1,
+        );
     };
     let shapes = cross_host_shapes(c, opts.min_hosts);
     if opts.json {
@@ -1116,7 +1274,10 @@ fn cmd_cross_host_shapes<W: Write, E: Write>(
                     "hosts".to_string(),
                     Value::Array(s.hosts.iter().map(|h| Value::String(h.clone())).collect()),
                 );
-                o.insert("host_count".to_string(), Value::Number((s.host_count() as u64).into()));
+                o.insert(
+                    "host_count".to_string(),
+                    Value::Number((s.host_count() as u64).into()),
+                );
                 o.insert(
                     "observation_count".to_string(),
                     Value::Number((s.observation_count as u64).into()),

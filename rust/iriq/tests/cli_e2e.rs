@@ -15,7 +15,12 @@ fn run_full(args: &[&str], stdin_data: &str) -> (String, String, bool) {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn iriq");
-    child.stdin.take().unwrap().write_all(stdin_data.as_bytes()).unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stdin_data.as_bytes())
+        .unwrap();
     let o = child.wait_with_output().expect("wait iriq");
     (
         String::from_utf8(o.stdout).unwrap(),
@@ -43,10 +48,19 @@ fn corpus_with(tag: &str, urls: &str) -> String {
 #[test]
 fn canonical_vs_normalize() {
     // -c cleans the URL but keeps the specifics; -n erases them into a shape.
-    assert_eq!(run(&["-c", "HTTP://Foo.com:80/pull/42"], "").trim(), "http://foo.com/pull/42");
+    assert_eq!(
+        run(&["-c", "HTTP://Foo.com:80/pull/42"], "").trim(),
+        "http://foo.com/pull/42"
+    );
     let norm = run(&["-n", "HTTP://Foo.com:80/pull/42"], "");
-    assert!(norm.contains("/pull/{"), "expected a placeholder, got: {norm}");
-    assert!(!norm.contains("/pull/42"), "normalize should not keep the literal: {norm}");
+    assert!(
+        norm.contains("/pull/{"),
+        "expected a placeholder, got: {norm}"
+    );
+    assert!(
+        !norm.contains("/pull/42"),
+        "normalize should not keep the literal: {norm}"
+    );
 }
 
 #[test]
@@ -104,23 +118,32 @@ fn batch_lists_extracted_urls() {
 
 #[test]
 fn large_batch_switches_to_cluster_view() {
-    let urls: String = (1..=12).map(|i| format!("https://foo.com/users/{i}\n")).collect();
+    let urls: String = (1..=12)
+        .map(|i| format!("https://foo.com/users/{i}\n"))
+        .collect();
     let out = run(&[], &urls);
-    assert!(out.contains("[12] foo.com"), "expected one cluster of 12: {out}");
+    assert!(
+        out.contains("[12] foo.com"),
+        "expected one cluster of 12: {out}"
+    );
     assert!(out.contains("/users/{user_id}"), "{out}");
 }
 
 #[test]
 fn host_registrable_collapses_subdomains() {
-    let urls: String =
-        (1..=6).map(|i| format!("https://api.foo.com/users/{i}\nhttps://app.foo.com/users/{i}\n")).collect();
+    let urls: String = (1..=6)
+        .map(|i| format!("https://api.foo.com/users/{i}\nhttps://app.foo.com/users/{i}\n"))
+        .collect();
     let cp = std::env::temp_dir().join(format!("iriq_e2e_{}_reg.json", std::process::id()));
     let _ = std::fs::remove_file(&cp);
     let cps = cp.to_str().unwrap();
     run(&["--host", "registrable", "--corpus", cps], &urls);
     let stats = run(&["--corpus", cps, "--stats"], "");
     assert!(stats.contains("foo.com"), "{stats}");
-    assert!(!stats.contains("api.foo.com"), "subdomains should collapse: {stats}");
+    assert!(
+        !stats.contains("api.foo.com"),
+        "subdomains should collapse: {stats}"
+    );
     let _ = std::fs::remove_file(&cp);
 }
 
@@ -128,7 +151,9 @@ fn host_registrable_collapses_subdomains() {
 
 #[test]
 fn stats_reports_observations_and_shapes() {
-    let urls: String = (1..=12).map(|i| format!("https://foo.com/users/{i}\n")).collect();
+    let urls: String = (1..=12)
+        .map(|i| format!("https://foo.com/users/{i}\n"))
+        .collect();
     let cp = corpus_with("stats", &urls);
     let out = run(&["--corpus", &cp, "--stats"], "");
     assert!(out.contains("observations:"), "{out}");
@@ -139,7 +164,9 @@ fn stats_reports_observations_and_shapes() {
 
 #[test]
 fn propose_recognizers_runs() {
-    let urls: String = (1..=12).map(|i| format!("https://foo.com/users/{i}\n")).collect();
+    let urls: String = (1..=12)
+        .map(|i| format!("https://foo.com/users/{i}\n"))
+        .collect();
     let cp = corpus_with("propose", &urls);
     let (out, _err, ok) = run_full(&["--corpus", &cp, "--propose-recognizers"], "");
     assert!(ok);
@@ -151,14 +178,19 @@ fn propose_recognizers_runs() {
 fn cross_host_shapes_runs() {
     let urls = "https://a.com/users/1\nhttps://b.com/users/2\nhttps://c.com/users/3\n";
     let cp = corpus_with("crosshost", urls);
-    let out = run(&["--corpus", &cp, "--cross-host-shapes", "--min-hosts", "2"], "");
+    let out = run(
+        &["--corpus", &cp, "--cross-host-shapes", "--min-hosts", "2"],
+        "",
+    );
     assert!(out.contains("hosts"), "{out}");
     let _ = std::fs::remove_file(&cp);
 }
 
 #[test]
 fn reinfer_runs() {
-    let urls: String = (1..=12).map(|i| format!("https://foo.com/users/{i}\n")).collect();
+    let urls: String = (1..=12)
+        .map(|i| format!("https://foo.com/users/{i}\n"))
+        .collect();
     let cp = corpus_with("reinfer", &urls);
     let out = run(&["--corpus", &cp, "--reinfer"], "");
     assert!(out.contains("reinferred"), "{out}");

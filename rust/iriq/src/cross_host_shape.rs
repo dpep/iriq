@@ -20,7 +20,9 @@ pub fn cross_host_shapes(cp: &Corpus, min_hosts: usize) -> Vec<CrossHostShape> {
     let min = if min_hosts == 0 { 2 } else { min_hosts };
     let mut by_shape: HashMap<String, (Vec<String>, usize)> = HashMap::new();
     for c in cp.clusters() {
-        let entry = by_shape.entry(c.shape.clone()).or_insert_with(|| (Vec::new(), 0));
+        let entry = by_shape
+            .entry(c.shape.clone())
+            .or_insert_with(|| (Vec::new(), 0));
         if !entry.0.contains(&c.host) {
             entry.0.push(c.host.clone());
         }
@@ -33,7 +35,11 @@ pub fn cross_host_shapes(cp: &Corpus, min_hosts: usize) -> Vec<CrossHostShape> {
                 None
             } else {
                 hosts.sort();
-                Some(CrossHostShape { shape, hosts, observation_count: count })
+                Some(CrossHostShape {
+                    shape,
+                    hosts,
+                    observation_count: count,
+                })
             }
         })
         .collect();

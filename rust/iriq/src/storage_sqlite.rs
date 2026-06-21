@@ -28,12 +28,19 @@ impl SqliteStorage {
     pub fn open(path: &str, max_values: usize) -> std::io::Result<Self> {
         let conn = Connection::open(path).map_err(rs_err)?;
         // PRAGMAs first (busy_timeout before journal_mode).
-        conn.execute_batch("PRAGMA busy_timeout = 30000;").map_err(rs_err)?;
-        conn.execute_batch("PRAGMA journal_mode = WAL;").map_err(rs_err)?;
-        conn.execute_batch("PRAGMA synchronous = NORMAL;").map_err(rs_err)?;
+        conn.execute_batch("PRAGMA busy_timeout = 30000;")
+            .map_err(rs_err)?;
+        conn.execute_batch("PRAGMA journal_mode = WAL;")
+            .map_err(rs_err)?;
+        conn.execute_batch("PRAGMA synchronous = NORMAL;")
+            .map_err(rs_err)?;
         conn.execute_batch(SCHEMA).map_err(rs_err)?;
 
-        let max_values = if max_values == 0 { DEFAULT_MAX_VALUES_PER_POSITION } else { max_values };
+        let max_values = if max_values == 0 {
+            DEFAULT_MAX_VALUES_PER_POSITION
+        } else {
+            max_values
+        };
         let existing: Option<String> = conn
             .query_row(
                 "SELECT value FROM meta WHERE key = 'schema_version'",
@@ -72,7 +79,11 @@ impl SqliteStorage {
             }
         }
 
-        Ok(SqliteStorage { conn: Mutex::new(conn), max_values, path: path.to_string() })
+        Ok(SqliteStorage {
+            conn: Mutex::new(conn),
+            max_values,
+            path: path.to_string(),
+        })
     }
 }
 
@@ -149,7 +160,8 @@ impl Storage for SqliteStorage {
                     "UPDATE position_values SET count = count + 1 WHERE host = ? AND scope = ? AND locator = ? AND value = ?",
                 )
                 .unwrap();
-            stmt.execute(params![pos.host, scope, pos.locator, value]).unwrap_or(0)
+            stmt.execute(params![pos.host, scope, pos.locator, value])
+                .unwrap_or(0)
         };
         if updated == 0 {
             let card: i64 = {
@@ -172,7 +184,14 @@ impl Storage for SqliteStorage {
         }
     }
 
-    fn add_to_cluster(&mut self, key: &str, host: &str, scheme: &str, shape: &str, iri: &Identifier) {
+    fn add_to_cluster(
+        &mut self,
+        key: &str,
+        host: &str,
+        scheme: &str,
+        shape: &str,
+        iri: &Identifier,
+    ) {
         let c = self.conn.lock().unwrap();
         {
             let mut stmt = c
@@ -199,7 +218,8 @@ impl Storage for SqliteStorage {
                         "SELECT COUNT(*) FROM cluster_examples WHERE cluster_key = ? AND canonical = ?",
                     )
                     .unwrap();
-                stmt.query_row(params![key, canon], |r| r.get(0)).unwrap_or(0)
+                stmt.query_row(params![key, canon], |r| r.get(0))
+                    .unwrap_or(0)
             };
             if exists == 0 {
                 let mut stmt = c
@@ -259,7 +279,8 @@ impl Storage for SqliteStorage {
                             "SELECT COUNT(*) FROM cluster_param_values WHERE cluster_key = ? AND name = ?",
                         )
                         .unwrap();
-                    stmt.query_row(params![key, name], |r| r.get(0)).unwrap_or(0)
+                    stmt.query_row(params![key, name], |r| r.get(0))
+                        .unwrap_or(0)
                 };
                 if (card as usize) < self.max_values {
                     let mut stmt = c
@@ -279,7 +300,9 @@ impl Storage for SqliteStorage {
     fn path_length_counts(&self) -> HashMap<usize, usize> {
         let c = self.conn.lock().unwrap();
         let mut out = HashMap::new();
-        let mut stmt = c.prepare("SELECT length, count FROM path_length_counts").unwrap();
+        let mut stmt = c
+            .prepare("SELECT length, count FROM path_length_counts")
+            .unwrap();
         let rows = stmt
             .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))
             .unwrap();
@@ -343,8 +366,15 @@ impl Storage for SqliteStorage {
         }
         // Recompute numeric stats from value_counts × types — same approach
         // as JSON load, same caveat (cap-trimmed values are lost).
-        if ps.type_counts.get(&SegmentType::Integer).copied().unwrap_or(0)
-            + ps.type_counts.get(&SegmentType::Float).copied().unwrap_or(0)
+        if ps
+            .type_counts
+            .get(&SegmentType::Integer)
+            .copied()
+            .unwrap_or(0)
+            + ps.type_counts
+                .get(&SegmentType::Float)
+                .copied()
+                .unwrap_or(0)
             > 0
         {
             for (v, n) in &ps.value_counts {
@@ -373,13 +403,21 @@ impl Storage for SqliteStorage {
                 .unwrap();
             let rows = stmt
                 .query_map([], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
                 })
                 .unwrap();
             rows.filter_map(|r| {
                 r.ok().map(|(h, sc, l)| Position {
                     host: h,
-                    scope: if sc == "query" { PositionScope::Query } else { PositionScope::Path },
+                    scope: if sc == "query" {
+                        PositionScope::Query
+                    } else {
+                        PositionScope::Path
+                    },
                     locator: l,
                 })
             })
@@ -412,13 +450,7 @@ impl Storage for SqliteStorage {
             .optional()
             .ok()
             .flatten()?;
-        let mut cluster = Cluster::new(
-            key.to_string(),
-            row.0,
-            row.1,
-            row.2,
-            self.max_values,
-        );
+        let mut cluster = Cluster::new(key.to_string(), row.0, row.1, row.2, self.max_values);
         cluster.count = row.3 as usize;
 
         {
@@ -446,7 +478,11 @@ impl Storage for SqliteStorage {
                 .unwrap();
             let rows = stmt
                 .query_map(params![key], |r| {
-                    Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, i64>(2)?,
+                    ))
                 })
                 .unwrap();
             for (pos, value, count) in rows.flatten() {
@@ -481,7 +517,11 @@ impl Storage for SqliteStorage {
                 .unwrap();
             let rows = stmt
                 .query_map(params![key], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, i64>(2)?,
+                    ))
                 })
                 .unwrap();
             for (name, value, count) in rows.flatten() {
@@ -492,13 +532,15 @@ impl Storage for SqliteStorage {
         }
         {
             let mut stmt = c
-                .prepare(
-                    "SELECT name, type, count FROM cluster_param_types WHERE cluster_key = ?",
-                )
+                .prepare("SELECT name, type, count FROM cluster_param_types WHERE cluster_key = ?")
                 .unwrap();
             let rows = stmt
                 .query_map(params![key], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, i64>(2)?,
+                    ))
                 })
                 .unwrap();
             for (name, t_str, count) in rows.flatten() {
@@ -511,8 +553,16 @@ impl Storage for SqliteStorage {
         }
         // Recompute numeric for each param.
         for stats in cluster.param_stats.values_mut() {
-            if stats.type_counts.get(&SegmentType::Integer).copied().unwrap_or(0)
-                + stats.type_counts.get(&SegmentType::Float).copied().unwrap_or(0)
+            if stats
+                .type_counts
+                .get(&SegmentType::Integer)
+                .copied()
+                .unwrap_or(0)
+                + stats
+                    .type_counts
+                    .get(&SegmentType::Float)
+                    .copied()
+                    .unwrap_or(0)
                 > 0
             {
                 for (v, n) in &stats.value_counts.clone() {
@@ -550,7 +600,9 @@ impl Storage for SqliteStorage {
     }
     fn each_observed_iri(&self, f: &mut dyn FnMut(&str)) {
         let c = self.conn.lock().unwrap();
-        let mut stmt = c.prepare("SELECT canonical FROM observed_iris ORDER BY id").unwrap();
+        let mut stmt = c
+            .prepare("SELECT canonical FROM observed_iris ORDER BY id")
+            .unwrap();
         let rows = stmt.query_map([], |r| r.get::<_, String>(0)).unwrap();
         for r in rows.flatten() {
             f(&r);
@@ -585,9 +637,20 @@ impl Storage for SqliteStorage {
     }
     fn record_activated_recognizer(&mut self, dump: Value) {
         let c = self.conn.lock().unwrap();
-        let prefix = dump.get("prefix").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let ty = dump.get("type").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let spec = dump.get("specificity").and_then(|v| v.as_f64()).unwrap_or(1.0);
+        let prefix = dump
+            .get("prefix")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let ty = dump
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let spec = dump
+            .get("specificity")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1.0);
         let _ = c.execute(
             "INSERT INTO activated_recognizers (prefix, type, specificity) VALUES (?, ?, ?) \
              ON CONFLICT(prefix) DO UPDATE SET type = excluded.type, specificity = excluded.specificity",
@@ -601,7 +664,11 @@ impl Storage for SqliteStorage {
             .unwrap();
         let rows = stmt
             .query_map([], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, f64>(2)?))
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, f64>(2)?,
+                ))
             })
             .unwrap();
         for r in rows.flatten() {
@@ -619,7 +686,9 @@ impl Storage for SqliteStorage {
     fn activated_recognizer_count(&self) -> usize {
         let c = self.conn.lock().unwrap();
         let n: i64 = c
-            .query_row("SELECT COUNT(*) FROM activated_recognizers", [], |r| r.get(0))
+            .query_row("SELECT COUNT(*) FROM activated_recognizers", [], |r| {
+                r.get(0)
+            })
             .unwrap_or(0);
         n as usize
     }

@@ -26,8 +26,15 @@ pub struct MemoryStorage {
 
 impl MemoryStorage {
     pub fn new(max_values: usize) -> Self {
-        let cap = if max_values == 0 { DEFAULT_MAX_VALUES_PER_POSITION } else { max_values };
-        MemoryStorage { max_values: cap, ..Default::default() }
+        let cap = if max_values == 0 {
+            DEFAULT_MAX_VALUES_PER_POSITION
+        } else {
+            max_values
+        };
+        MemoryStorage {
+            max_values: cap,
+            ..Default::default()
+        }
     }
 }
 
@@ -46,13 +53,17 @@ impl Storage for MemoryStorage {
         *self.raw_shape_counts.entry(shape.to_string()).or_insert(0) += 1;
     }
     fn increment_fingerprint(&mut self, shape: &str) {
-        *self.fingerprint_counts.entry(shape.to_string()).or_insert(0) += 1;
+        *self
+            .fingerprint_counts
+            .entry(shape.to_string())
+            .or_insert(0) += 1;
     }
 
     fn observe_position(&mut self, pos: &Position, value: &str, t: SegmentType) {
         let max = self.max_values;
         if !self.position_stats.contains_key(pos) {
-            self.position_stats.insert(pos.clone(), PositionStats::new(max));
+            self.position_stats
+                .insert(pos.clone(), PositionStats::new(max));
             self.position_keys.push(pos.clone());
         }
         self.position_stats.get_mut(pos).unwrap().observe(value, t);
@@ -156,7 +167,10 @@ impl Storage for MemoryStorage {
     }
 
     fn record_activated_recognizer(&mut self, dump: serde_json::Value) {
-        let prefix = dump.get("prefix").and_then(|v| v.as_str()).map(String::from);
+        let prefix = dump
+            .get("prefix")
+            .and_then(|v| v.as_str())
+            .map(String::from);
         if let Some(p) = &prefix {
             for existing in &mut self.activated_recognizers {
                 if existing.get("prefix").and_then(|v| v.as_str()) == Some(p) {

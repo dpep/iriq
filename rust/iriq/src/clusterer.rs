@@ -105,7 +105,10 @@ impl Clusterer {
     }
 
     pub fn clusters(&self) -> Vec<&Cluster> {
-        self.keys.iter().filter_map(|k| self.clusters.get(k)).collect()
+        self.keys
+            .iter()
+            .filter_map(|k| self.clusters.get(k))
+            .collect()
     }
 
     pub fn size(&self) -> usize {
@@ -127,7 +130,10 @@ impl Clusterer {
             .map(|(i, mut entry)| {
                 let stable = i < stats.len() && stats[i].stable;
                 entry.variable = !stable && entry.variable;
-                ExplainEntry { hint: entry, stable }
+                ExplainEntry {
+                    hint: entry,
+                    stable,
+                }
             })
             .collect())
     }

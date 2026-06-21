@@ -51,8 +51,18 @@ pub struct Cluster {
 }
 
 impl Cluster {
-    pub fn new(key: String, host: String, scheme: String, shape: String, max_values: usize) -> Self {
-        let cap = if max_values == 0 { DEFAULT_MAX_VALUES_PER_POSITION } else { max_values };
+    pub fn new(
+        key: String,
+        host: String,
+        scheme: String,
+        shape: String,
+        max_values: usize,
+    ) -> Self {
+        let cap = if max_values == 0 {
+            DEFAULT_MAX_VALUES_PER_POSITION
+        } else {
+            max_values
+        };
         Cluster {
             key,
             host,

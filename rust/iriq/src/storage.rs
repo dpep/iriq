@@ -84,12 +84,11 @@ pub trait Storage: Send + Sync {
 }
 
 /// Pick the backend by file extension. Empty path → in-memory.
-pub fn open_storage(
-    path: &str,
-    max_values: usize,
-) -> Result<Box<dyn Storage>, std::io::Error> {
+pub fn open_storage(path: &str, max_values: usize) -> Result<Box<dyn Storage>, std::io::Error> {
     if path.is_empty() {
-        return Ok(Box::new(crate::storage_memory::MemoryStorage::new(max_values)));
+        return Ok(Box::new(crate::storage_memory::MemoryStorage::new(
+            max_values,
+        )));
     }
     let lower = path.to_lowercase();
     if lower.ends_with(".db") || lower.ends_with(".sqlite") || lower.ends_with(".sqlite3") {
@@ -97,7 +96,9 @@ pub fn open_storage(
             path, max_values,
         )?));
     }
-    Ok(Box::new(crate::storage_json::JsonStorage::open(path, max_values)?))
+    Ok(Box::new(crate::storage_json::JsonStorage::open(
+        path, max_values,
+    )?))
 }
 
 /// Coerce an arbitrary input into an Identifier. Helper used by Corpus.

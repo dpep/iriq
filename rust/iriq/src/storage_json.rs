@@ -132,14 +132,23 @@ impl Storage for JsonStorage {
 
 pub fn dump_memory_to_json(m: &MemoryStorage, path: &str) -> std::io::Result<()> {
     let mut root = Map::new();
-    root.insert("host_counts".to_string(), map_str_usize_to_value(m.host_counts_ref()));
+    root.insert(
+        "host_counts".to_string(),
+        map_str_usize_to_value(m.host_counts_ref()),
+    );
     let plc: HashMap<String, usize> = m
         .path_length_counts_ref()
         .iter()
         .map(|(k, v)| (k.to_string(), *v))
         .collect();
-    root.insert("path_length_counts".to_string(), map_str_usize_to_value(&plc));
-    root.insert("raw_shape_counts".to_string(), map_str_usize_to_value(m.raw_shape_counts_ref()));
+    root.insert(
+        "path_length_counts".to_string(),
+        map_str_usize_to_value(&plc),
+    );
+    root.insert(
+        "raw_shape_counts".to_string(),
+        map_str_usize_to_value(m.raw_shape_counts_ref()),
+    );
     root.insert(
         "fingerprint_counts".to_string(),
         map_str_usize_to_value(m.fingerprint_counts_ref()),
@@ -154,7 +163,10 @@ pub fn dump_memory_to_json(m: &MemoryStorage, path: &str) -> std::io::Result<()>
         let stats = m.position_stats_map().get(k).unwrap();
         let mut pos_m = Map::new();
         pos_m.insert("host".to_string(), Value::String(k.host.clone()));
-        pos_m.insert("scope".to_string(), Value::String(k.scope.as_str().to_string()));
+        pos_m.insert(
+            "scope".to_string(),
+            Value::String(k.scope.as_str().to_string()),
+        );
         pos_m.insert("locator".to_string(), Value::String(k.locator.clone()));
         let mut entry = Map::new();
         entry.insert("position".to_string(), Value::Object(pos_m));
@@ -193,7 +205,10 @@ pub fn dump_memory_to_json(m: &MemoryStorage, path: &str) -> std::io::Result<()>
 
 fn position_stats_to_value(s: &PositionStats) -> Value {
     let mut o = Map::new();
-    o.insert("value_counts".to_string(), map_str_usize_to_value(&s.value_counts));
+    o.insert(
+        "value_counts".to_string(),
+        map_str_usize_to_value(&s.value_counts),
+    );
     let tc: HashMap<String, usize> = s
         .type_counts
         .iter()
@@ -201,7 +216,10 @@ fn position_stats_to_value(s: &PositionStats) -> Value {
         .collect();
     o.insert("type_counts".to_string(), map_str_usize_to_value(&tc));
     o.insert("total".to_string(), Value::Number((s.total as u64).into()));
-    o.insert("max_values".to_string(), Value::Number((s.max_values as u64).into()));
+    o.insert(
+        "max_values".to_string(),
+        Value::Number((s.max_values as u64).into()),
+    );
     Value::Object(o)
 }
 
@@ -212,7 +230,11 @@ fn cluster_to_value(c: &Cluster) -> Value {
     o.insert("scheme".to_string(), Value::String(c.scheme.clone()));
     o.insert("shape".to_string(), Value::String(c.shape.clone()));
     o.insert("count".to_string(), Value::Number((c.count as u64).into()));
-    let examples: Vec<Value> = c.examples.iter().map(|e| Value::String(e.canonical())).collect();
+    let examples: Vec<Value> = c
+        .examples
+        .iter()
+        .map(|e| Value::String(e.canonical()))
+        .collect();
     o.insert("examples".to_string(), Value::Array(examples));
     let seg: Vec<Value> = c
         .segment_counts
@@ -281,7 +303,9 @@ pub fn load_memory_from_json(m: &mut MemoryStorage, data: &[u8]) -> Result<(), S
     }
     if let Some(map) = obj.get("path_length_counts").and_then(|v| v.as_object()) {
         for (k, v) in map {
-            let len: usize = k.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let len: usize = k
+                .parse()
+                .map_err(|e: std::num::ParseIntError| e.to_string())?;
             if let Some(n) = v.as_u64() {
                 for _ in 0..n {
                     m.increment_path_length(len);
@@ -301,13 +325,25 @@ pub fn load_memory_from_json(m: &mut MemoryStorage, data: &[u8]) -> Result<(), S
                 continue;
             }
             let po = pos_obj.unwrap();
-            let host = po.get("host").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let host = po
+                .get("host")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             let scope = match po.get("scope").and_then(|v| v.as_str()).unwrap_or("path") {
                 "query" => PositionScope::Query,
                 _ => PositionScope::Path,
             };
-            let locator = po.get("locator").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let pos = Position { host, scope, locator };
+            let locator = po
+                .get("locator")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let pos = Position {
+                host,
+                scope,
+                locator,
+            };
             let stats = parse_position_stats(stats_obj.unwrap());
             m.insert_position_stats(pos, stats);
         }
@@ -317,17 +353,23 @@ pub fn load_memory_from_json(m: &mut MemoryStorage, data: &[u8]) -> Result<(), S
         if let Some(clusters) = clu.get("clusters").and_then(|v| v.as_object()) {
             for (key, cobj) in clusters {
                 let cobj = cobj.as_object().ok_or("cluster value not an object")?;
-                let host = cobj.get("host").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let scheme = cobj.get("scheme").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let shape = cobj.get("shape").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let host = cobj
+                    .get("host")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let scheme = cobj
+                    .get("scheme")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let shape = cobj
+                    .get("shape")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let count = cobj.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                let mut cluster = Cluster::new(
-                    key.clone(),
-                    host,
-                    scheme,
-                    shape,
-                    m.max_values(),
-                );
+                let mut cluster = Cluster::new(key.clone(), host, scheme, shape, m.max_values());
                 cluster.count = count;
                 if let Some(ex) = cobj.get("examples").and_then(|v| v.as_array()) {
                     for e in ex {
@@ -355,7 +397,9 @@ pub fn load_memory_from_json(m: &mut MemoryStorage, data: &[u8]) -> Result<(), S
                 if let Some(params) = cobj.get("param_stats").and_then(|v| v.as_object()) {
                     for (name, sv) in params {
                         if let Some(so) = sv.as_object() {
-                            cluster.param_stats.insert(name.clone(), parse_position_stats(so));
+                            cluster
+                                .param_stats
+                                .insert(name.clone(), parse_position_stats(so));
                         }
                     }
                 }
@@ -387,7 +431,11 @@ pub fn load_memory_from_json(m: &mut MemoryStorage, data: &[u8]) -> Result<(), S
 
 fn parse_position_stats(obj: &Map<String, Value>) -> PositionStats {
     let max = obj.get("max_values").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-    let mut ps = PositionStats::new(if max == 0 { DEFAULT_MAX_VALUES_PER_POSITION } else { max });
+    let mut ps = PositionStats::new(if max == 0 {
+        DEFAULT_MAX_VALUES_PER_POSITION
+    } else {
+        max
+    });
     ps.total = obj.get("total").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
     if let Some(vc) = obj.get("value_counts").and_then(|v| v.as_object()) {
         for (k, v) in vc {
@@ -412,8 +460,18 @@ fn parse_position_stats(obj: &Map<String, Value>) -> PositionStats {
     for (v, n) in &ps.value_counts {
         if let Ok(num) = v.parse::<f64>() {
             // Only count as numeric if integer / float type was tracked.
-            let was_numeric = ps.type_counts.get(&SegmentType::Integer).copied().unwrap_or(0) > 0
-                || ps.type_counts.get(&SegmentType::Float).copied().unwrap_or(0) > 0;
+            let was_numeric = ps
+                .type_counts
+                .get(&SegmentType::Integer)
+                .copied()
+                .unwrap_or(0)
+                > 0
+                || ps
+                    .type_counts
+                    .get(&SegmentType::Float)
+                    .copied()
+                    .unwrap_or(0)
+                    > 0;
             if was_numeric {
                 for _ in 0..*n {
                     if ps.numeric_count == 0 || num < ps.numeric_min {

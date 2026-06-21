@@ -61,7 +61,11 @@ pub fn hint_for(
         return String::new();
     }
     let base = singularize(prev);
-    let suffix = if t == SegmentType::Uuid { "_uuid" } else { "_id" };
+    let suffix = if t == SegmentType::Uuid {
+        "_uuid"
+    } else {
+        "_id"
+    };
     format!("{}{}", base, suffix)
 }
 

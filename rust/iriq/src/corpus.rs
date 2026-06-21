@@ -1,15 +1,12 @@
-use crate::classifier::{
-    canonical_date, segment_type_from_str, SegmentClassifier, SegmentType,
-};
+use crate::classifier::{canonical_date, segment_type_from_str, SegmentClassifier, SegmentType};
+use crate::cluster::ParamSummary;
 use crate::cluster::{placeholder_for, Cluster};
 use crate::clusterer::cluster_key_for_host;
 use crate::errors::ParseError;
 use crate::event::Event;
 use crate::hints::{derive_hints, SegmentHint};
 use crate::identifier::Identifier;
-use crate::normalizer::{
-    normalize_identifier_with_evidence, NormalizationEvidence,
-};
+use crate::normalizer::{normalize_identifier_with_evidence, NormalizationEvidence};
 use crate::parser::parse;
 use crate::position::Position;
 use crate::position_stats::{PositionStats, DEFAULT_MAX_VALUES_PER_POSITION};
@@ -19,7 +16,6 @@ use crate::shape::{Shape, ShapeRenderOptions};
 use crate::storage::{open_storage, Storage};
 use crate::storage_memory::MemoryStorage;
 use crate::synthesized_recognizer::SynthesizedRecognizer;
-use crate::cluster::ParamSummary;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -78,7 +74,10 @@ pub struct Corpus {
 
 impl Corpus {
     pub fn new() -> Self {
-        Self::new_with_classifier(DEFAULT_CLASSIFIER_ARC.clone(), DEFAULT_MAX_VALUES_PER_POSITION)
+        Self::new_with_classifier(
+            DEFAULT_CLASSIFIER_ARC.clone(),
+            DEFAULT_MAX_VALUES_PER_POSITION,
+        )
     }
 
     pub fn new_with_classifier(c: Arc<SegmentClassifier>, max_values: usize) -> Self {
@@ -145,7 +144,8 @@ impl Corpus {
 
     pub fn reinfer(&mut self) -> Result<(), ParseError> {
         let mut iris = Vec::new();
-        self.storage.each_observed_iri(&mut |c| iris.push(c.to_string()));
+        self.storage
+            .each_observed_iri(&mut |c| iris.push(c.to_string()));
         self.storage.clear_materialized_views();
         for canonical in iris {
             let iri = parse(&canonical)?;
@@ -174,11 +174,12 @@ impl Corpus {
         let ty = segment_type_from_str(&p.suggested_type).unwrap_or(SegmentType::OpaqueId);
         let r = SynthesizedRecognizer::from_prefix(p.prefix.clone(), ty);
         self.ensure_per_corpus_classifier();
-        self.classifier.register_recognizer(Arc::new(SynthesizedRecognizer {
-            prefix: r.prefix.clone(),
-            ty: r.ty,
-            specificity: r.specificity,
-        }));
+        self.classifier
+            .register_recognizer(Arc::new(SynthesizedRecognizer {
+                prefix: r.prefix.clone(),
+                ty: r.ty,
+                specificity: r.specificity,
+            }));
         self.storage.record_activated_recognizer(r.dump());
         self.reinfer()?;
         Ok(r)
@@ -228,17 +229,25 @@ impl Corpus {
 
     fn events_for_iri(&self, iri: &Identifier) -> Vec<Event> {
         let hinted = derive_hints(&iri.path_segments, &self.classifier);
-        let raw_shape = Shape::from_entries(hinted.clone())
-            .render(ShapeRenderOptions { hints_off: true, ..Default::default() });
-        let hinted_shape = Shape::from_entries(hinted.clone())
-            .render(ShapeRenderOptions::default());
+        let raw_shape = Shape::from_entries(hinted.clone()).render(ShapeRenderOptions {
+            hints_off: true,
+            ..Default::default()
+        });
+        let hinted_shape =
+            Shape::from_entries(hinted.clone()).render(ShapeRenderOptions::default());
         let keying_host = self.effective_host(&iri.host);
 
         let mut events = vec![
-            Event::HostSeen { host: keying_host.clone() },
-            Event::PathLengthSeen { length: iri.path_segments.len() },
+            Event::HostSeen {
+                host: keying_host.clone(),
+            },
+            Event::PathLengthSeen {
+                length: iri.path_segments.len(),
+            },
             Event::RawShapeSeen { shape: raw_shape },
-            Event::FingerprintSeen { shape: hinted_shape.clone() },
+            Event::FingerprintSeen {
+                shape: hinted_shape.clone(),
+            },
         ];
 
         let mut prefix = String::new();
@@ -252,7 +261,12 @@ impl Corpus {
             prefix.push_str(&placeholder_for(e));
         }
 
-        let k = cluster_key_for_host(iri, &self.classifier, Some(hinted_shape.clone()), keying_host);
+        let k = cluster_key_for_host(
+            iri,
+            &self.classifier,
+            Some(hinted_shape.clone()),
+            keying_host,
+        );
         events.push(Event::ClusterAddition {
             key: k.key,
             host: k.host,
@@ -280,7 +294,10 @@ impl Corpus {
         };
         self.annotate_segments(&iri)
             .into_iter()
-            .map(|a| CorpusEntry { hint: a.hint, classification: a.classification })
+            .map(|a| CorpusEntry {
+                hint: a.hint,
+                classification: a.classification,
+            })
             .collect()
     }
 
@@ -307,7 +324,8 @@ impl Corpus {
     }
 
     pub fn stats_for(&self, host: &str, prefix: &str) -> Option<PositionStats> {
-        self.storage.position_stats_for(&Position::path(host, prefix))
+        self.storage
+            .position_stats_for(&Position::path(host, prefix))
     }
 
     pub fn save(&mut self, path: &str) -> std::io::Result<()> {
@@ -331,7 +349,9 @@ impl Corpus {
     }
 
     pub fn params_for(&self, input: &str) -> Vec<ParamSummary> {
-        let Ok(iri) = parse(input) else { return Vec::new(); };
+        let Ok(iri) = parse(input) else {
+            return Vec::new();
+        };
         let cluster = self.cluster_for_iri(&iri);
         cluster.map(|c| c.param_summary()).unwrap_or_default()
     }
@@ -358,7 +378,11 @@ impl Corpus {
                 .storage
                 .position_stats_for(&Position::path(keying_host.clone(), prefix.clone()));
             let cls = classify_segment(entry, stats.as_ref(), &self.classifier);
-            out.push(Annotated { hint: entry.clone(), prefix: prefix.clone(), classification: cls });
+            out.push(Annotated {
+                hint: entry.clone(),
+                prefix: prefix.clone(),
+                classification: cls,
+            });
             prefix.push('/');
             prefix.push_str(&placeholder_for(entry));
         }
@@ -555,12 +579,18 @@ fn apply_event(e: Event, s: &mut dyn Storage) {
         Event::PathLengthSeen { length } => s.increment_path_length(length),
         Event::RawShapeSeen { shape } => s.increment_raw_shape(&shape),
         Event::FingerprintSeen { shape } => s.increment_fingerprint(&shape),
-        Event::PositionSeen { position, value, ty } => {
-            s.observe_position(&position, &value, ty)
-        }
-        Event::ClusterAddition { key, host, scheme, shape, iri } => {
-            s.add_to_cluster(&key, &host, &scheme, &shape, &iri)
-        }
+        Event::PositionSeen {
+            position,
+            value,
+            ty,
+        } => s.observe_position(&position, &value, ty),
+        Event::ClusterAddition {
+            key,
+            host,
+            scheme,
+            shape,
+            iri,
+        } => s.add_to_cluster(&key, &host, &scheme, &shape, &iri),
     }
 }
 

@@ -17,7 +17,11 @@ impl Extractor {
         if text.is_empty() {
             return Vec::new();
         }
-        let pattern: &Regex = if self.scheme_less { &COMBINED_RE } else { &CANDIDATE_RE };
+        let pattern: &Regex = if self.scheme_less {
+            &COMBINED_RE
+        } else {
+            &CANDIDATE_RE
+        };
         let mut out = Vec::new();
         for m in pattern.find_iter(text) {
             if !left_boundary_ok(text, m.start(), self.scheme_less) {
@@ -55,9 +59,12 @@ impl Default for Extractor {
 }
 
 const SCHEMES: &[&str] = &["https", "http", "ftp", "wss", "ws"];
-const SCHEMELESS_TLDS: &[&str] = &["com", "org", "net", "io", "ai", "dev", "co", "app", "gov", "edu"];
+const SCHEMELESS_TLDS: &[&str] = &[
+    "com", "org", "net", "io", "ai", "dev", "co", "app", "gov", "edu",
+];
 
-const NON_ASCII_BOUNDARY: &str = "」』）】〉》〕〗〙〛｠｝］＞「『（【〈《〔〖〘〚｟｛［＜“”‘’„‟‚«»‹›";
+const NON_ASCII_BOUNDARY: &str =
+    "」』）】〉》〕〗〙〛｠｝］＞「『（【〈《〔〖〘〚｟｛［＜“”‘’„‟‚«»‹›";
 
 fn url_chars_class() -> String {
     let mut escaped = String::new();
@@ -112,7 +119,9 @@ fn left_boundary_ok(text: &str, start: usize, schemeless: bool) -> bool {
         return true;
     }
     let prev = text[..start].chars().last();
-    let Some(r) = prev else { return true; };
+    let Some(r) = prev else {
+        return true;
+    };
     if is_word(r) {
         return false;
     }
