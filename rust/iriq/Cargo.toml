@@ -1,8 +1,8 @@
 [package]
 name = "iriq"
-version = "0.29.1"
+version = "0.30.0"
 edition = "2021"
-description = "IRI extraction, normalization, and clustering — peer of the Ruby gem + Go module."
+description = "IRI/URL extraction, normalization, and shape clustering."
 license = "MIT"
 repository = "https://github.com/dpep/iriq"
 homepage = "https://github.com/dpep/iriq"
@@ -13,14 +13,18 @@ categories = ["parser-implementations", "command-line-utilities", "text-processi
 authors = ["Daniel Pepper"]
 exclude = ["tests/fixtures/*"]
 
+# One crate ships both the library (src/lib.rs) and the `iriq` CLI
+# (src/main.rs) — the idiomatic Rust shape (cf. ripgrep), not the Go
+# package+cmd split. `cargo install iriq` builds the binary; `iriq = "0.x"`
+# pulls the library.
+[[bin]]
+name = "iriq"
+path = "src/main.rs"
+
 [dependencies]
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 thiserror = "1"
 once_cell = "1"
-rusqlite = { version = "0.32", features = ["bundled"], optional = true }
-
-[features]
-default = []
-sqlite = ["dep:rusqlite"]
+rusqlite = { version = "0.32", features = ["bundled"] }

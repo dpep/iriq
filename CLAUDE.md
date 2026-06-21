@@ -10,15 +10,15 @@
 >   4. `go -C go test ./...` — fixture tests should still pass.
 >   5. `make build && script/cli_parity.sh` — Ruby ↔ Go CLI parity should still pass.
 >   6. Port the change to Rust under `rust/`.
->   7. `cd rust && cargo test --workspace --features iriq/sqlite` — Rust fixture
->      tests should still pass.
+>   7. `cd rust && cargo test --workspace` — Rust fixture tests should still pass
+>      (SQLite is a default feature).
 >   8. `cd rust && cargo build --release --bin iriq && cd .. && script/rust_parity.sh`
 >      — Rust ↔ Go CLI parity (covers Ruby transitively).
 >   9. Commit the regenerated fixtures alongside the code change.
 >
 > CI's `Ruby ↔ Go parity` + `Rust ↔ Go parity` jobs will fail if any step is
 > skipped. Local pre-push:
-> `bundle exec rspec && go -C go test ./... && script/cli_parity.sh && cd rust && cargo test --workspace --features iriq/sqlite && cargo clippy --workspace --features iriq/sqlite -- -D warnings && cd .. && script/rust_parity.sh`.
+> `bundle exec rspec && go -C go test ./... && script/cli_parity.sh && cd rust && cargo test --workspace && cargo clippy --workspace -- -D warnings && cd .. && script/rust_parity.sh`.
 
 ## Repo layout — Ruby at the root, Go and Rust in subdirs
 
@@ -42,8 +42,7 @@ iriq/
 
   rust/                   ← Cargo workspace
     Cargo.toml            ← workspace root
-    iriq/                 ← library crate (`iriq` on crates.io)
-    iriq-cli/             ← CLI crate (binary name `iriq`); inlines completions
+    iriq/                 ← one crate: library + `iriq` CLI binary; inlines completions
     REPORT.md             ← Go → Rust port spike notes + perf
     target/               ← Rust build artifacts (gitignored)
 
@@ -78,16 +77,16 @@ make uninstall                  # remove from $GOBIN
 make clean                      # remove ./bin/
 make test                       # go test ./...
 
-# Rust binary — release build with SQLite bundled
+# Rust — one crate (library + `iriq` binary), SQLite bundled by default
 cd rust && cargo build --release --bin iriq    # → ./rust/target/release/iriq
-cd rust && cargo install --path iriq-cli       # install into ~/.cargo/bin
-cd rust && cargo test --workspace --features iriq/sqlite
+cd rust && cargo install --path iriq           # install into ~/.cargo/bin
+cd rust && cargo test --workspace
 
 # Via Homebrew (builds the Rust CLI from main)
 brew install dpep/tools/iriq
 
 # Via crates.io
-cargo install iriq-cli
+cargo install iriq
 ```
 
 ## Keeping the three runtimes in sync
@@ -120,7 +119,7 @@ When changing behavior:
 4. `go test ./...` (uses the updated fixtures).
 5. `script/cli_parity.sh` should pass.
 6. Port the change to Rust under `rust/`.
-7. `cd rust && cargo test --workspace --features iriq/sqlite`.
+7. `cd rust && cargo test --workspace`.
 8. `cd rust && cargo build --release --bin iriq && cd .. && script/rust_parity.sh` should pass.
 9. Commit fixtures with the change — CI will fail if they're stale.
 
@@ -130,8 +129,8 @@ When changing behavior:
 bundle exec rspec                                # Ruby suite (305+ examples)
 go test ./...                                    # Go suite (native + fixture parity)
 script/cli_parity.sh                             # Ruby ↔ Go CLI parity
-cd rust && cargo test --workspace --features iriq/sqlite
-cd rust && cargo clippy --workspace --features iriq/sqlite -- -D warnings
+cd rust && cargo test --workspace
+cd rust && cargo clippy --workspace -- -D warnings
 script/rust_parity.sh                            # Rust ↔ Go CLI parity (~59 scenarios)
 ```
 
@@ -141,24 +140,24 @@ Versioning is single-stream: one `vX.Y.Z` covers all three runtimes. Bump the
 three version constants **together** — the `--version` parity checks fail
 if they drift:
 
-1. `lib/iriq/version.rb` (`VERSION`), `go/version.go` (`Version`), and the three
-   `version = "X.Y.Z"` lines in `rust/iriq/Cargo.toml`, `rust/iriq-cli/Cargo.toml`,
-   and `rust/iriq/src/lib.rs` (the `pub const VERSION` line) — same string.
+1. `lib/iriq/version.rb` (`VERSION`), `go/version.go` (`Version`), and the two
+   `version = "X.Y.Z"` / `pub const VERSION` lines in `rust/iriq/Cargo.toml` and
+   `rust/iriq/src/lib.rs` — same string.
 2. `Gemfile.lock` — re-resolve so the pinned `iriq (X.Y.Z)` matches
    (`bundle install`, or it regenerates on the next `bundle exec`). Commit it.
-3. Run `cd rust && cargo update -p iriq -p iriq-cli` to refresh `Cargo.lock`.
+3. Run `cd rust && cargo update -p iriq` to refresh `Cargo.lock`.
 4. Tag `vX.Y.Z` and push. Go consumers pick it up via
    `go get github.com/dpep/iriq/go@vX.Y.Z`.
 5. `gem push iriq-X.Y.Z.gem` to publish to RubyGems.
-6. `cd rust && cargo publish -p iriq && cargo publish -p iriq-cli` to publish
-   to crates.io (publish iriq first; iriq-cli depends on it).
+6. `cd rust && cargo publish -p iriq` to publish to crates.io (the crate ships
+   both the library and the `iriq` binary).
 
 ### Keep Homebrew in sync — bump on EVERY version change
 
 The tap (`~/code/lib/homebrew-tools`) ships a single `Formula/iriq.rb` that
-builds the Rust CLI (`cargo install --path rust/iriq-cli`) from `branch: "main"`.
-SQLite is always linked (the `iriq-cli` crate pins the `sqlite` feature), so
-there is no longer a separate `iriq-sqlite` formula.
+builds the Rust CLI (`cargo install --path rust/iriq`) from `branch: "main"`.
+SQLite is on by default (the `iriq` crate's `default` feature set), so there is
+no longer a separate `iriq-sqlite` formula.
 
 The formula pins a static `version "X.Y.Z"` label. Because the build tracks
 `main` rather than a tagged tarball, `brew upgrade` only rebuilds when that

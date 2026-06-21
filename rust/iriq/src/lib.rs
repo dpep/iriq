@@ -1,10 +1,10 @@
-//! # iriq — IRI extraction, normalization, clustering
+//! # iriq — IRI/URL extraction, normalization, shape clustering
 //!
-//! Rust port of the [iriq] Ruby gem and Go module. The three runtimes
-//! share golden JSON fixtures and a CLI parity harness in CI — any
-//! observable behavior divergence is a bug.
+//! iriq finds the *shape* of a URL — the route template behind it. Erase the
+//! parts that vary, keep the parts that don't: `/users/123` → `/users/{user_id}`.
 //!
-//! [iriq]: https://github.com/dpep/iriq
+//! (An IRI is just a URL — the internationalized superset of URI/URL that also
+//! allows non-ASCII characters. If you know URLs, you know IRIs.)
 //!
 //! ## Quick start
 //!
@@ -30,7 +30,7 @@
 //! ```no_run
 //! use iriq::Corpus;
 //!
-//! // .db / .sqlite / .sqlite3 → SQLite backend; anything else → JSON.
+//! // Persisted to SQLite (.db / .sqlite / .sqlite3).
 //! let mut corpus = Corpus::open("c.db").unwrap();
 //! for url in &["https://foo.com/users/1",
 //!              "https://foo.com/users/2",
@@ -40,16 +40,11 @@
 //! corpus.save("c.db").unwrap();
 //! ```
 //!
-//! ## Features
-//!
-//! - **(default)** — Memory + JSON corpus backends. Pure Rust, no system
-//!   deps.
-//! - **`sqlite`** — Adds the SQLite corpus backend via bundled
-//!   [`rusqlite`]. Concurrent observers, incremental UPSERTs.
+//! Corpora persist to SQLite out of the box (bundled [`rusqlite`], WAL,
+//! concurrent observers) — no system dependency.
 //!
 //! See the [project README](https://github.com/dpep/iriq) for the
-//! conceptual overview shared with the Ruby + Go siblings, and the
-//! CHANGELOG for version history.
+//! conceptual overview and the CHANGELOG for version history.
 
 pub mod errors;
 pub mod identifier;
@@ -74,7 +69,6 @@ pub mod observation;
 pub mod storage;
 pub mod storage_memory;
 pub mod storage_json;
-#[cfg(feature = "sqlite")]
 pub mod storage_sqlite;
 pub mod synthesized_recognizer;
 pub mod recognizer_proposal;
@@ -111,5 +105,4 @@ pub use cross_host_shape::CrossHostShape;
 pub use recognizer_proposal::{ProposalOptions, RecognizerProposal};
 pub use synthesized_recognizer::SynthesizedRecognizer;
 
-pub const VERSION: &str = "0.29.1";
-pub const HAS_SQLITE: bool = cfg!(feature = "sqlite");
+pub const VERSION: &str = "0.30.0";

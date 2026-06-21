@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["iriq", "iriq-cli"]
+members = ["iriq"]
 
 [profile.release]
 lto = "thin"

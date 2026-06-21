@@ -93,19 +93,9 @@ pub fn open_storage(
     }
     let lower = path.to_lowercase();
     if lower.ends_with(".db") || lower.ends_with(".sqlite") || lower.ends_with(".sqlite3") {
-        #[cfg(feature = "sqlite")]
-        {
-            return Ok(Box::new(crate::storage_sqlite::SqliteStorage::open(
-                path, max_values,
-            )?));
-        }
-        #[cfg(not(feature = "sqlite"))]
-        {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                "iriq: SQLite corpus support not compiled in (rebuild with --features sqlite)",
-            ));
-        }
+        return Ok(Box::new(crate::storage_sqlite::SqliteStorage::open(
+            path, max_values,
+        )?));
     }
     Ok(Box::new(crate::storage_json::JsonStorage::open(path, max_values)?))
 }

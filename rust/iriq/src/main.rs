@@ -129,7 +129,6 @@ fn run<R: Read, W: Write, E: Write>(
     };
     if opts.help {
         let _ = write!(stdout, "{}", USAGE);
-        let _ = writeln!(stdout, "\nBuild: rust port (json{})", if iriq::HAS_SQLITE { " + sqlite" } else { "" });
         return 0;
     }
     if opts.version {
