@@ -29,6 +29,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ matrix.rust-version }}
+          components: rustfmt, clippy
 
       - name: cache cargo
         uses: Swatinem/rust-cache@v2
@@ -46,6 +47,10 @@ jobs:
 
       - name: test
         run: cargo test --workspace
+        if: always()
+
+      - name: fmt
+        run: cargo fmt --check
         if: always()
 
       - name: clippy

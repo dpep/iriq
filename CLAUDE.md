@@ -16,9 +16,11 @@
 >      — Rust ↔ Go CLI parity (covers Ruby transitively).
 >   9. Commit the regenerated fixtures alongside the code change.
 >
-> CI's `Ruby ↔ Go parity` + `Rust ↔ Go parity` jobs will fail if any step is
-> skipped. Local pre-push:
-> `bundle exec rspec && go -C go test ./... && script/cli_parity.sh && cd rust && cargo test --workspace && cargo clippy --workspace -- -D warnings && cd .. && script/rust_parity.sh`.
+> CI's parity + Rust jobs will fail if any step is skipped. The **Rust gate**
+> (fmt + clippy + tests) is automated — run `make hooks` once to install the
+> committed pre-push hook that runs `make check`. Full multi-runtime pre-push
+> for a behavior change:
+> `bundle exec rspec && go -C go test ./... && script/cli_parity.sh && make check && script/rust_parity.sh`.
 
 ## Repo layout — Ruby at the root, Go and Rust in subdirs
 
@@ -130,7 +132,9 @@ bundle exec rspec                                # Ruby suite (305+ examples)
 go test ./...                                    # Go suite (native + fixture parity)
 script/cli_parity.sh                             # Ruby ↔ Go CLI parity
 cd rust && cargo test --workspace
-cd rust && cargo clippy --workspace -- -D warnings
+cd rust && cargo fmt --check                      # formatting (CI-gated)
+cd rust && cargo clippy --workspace --all-targets -- -D warnings
+make check                                        # the three Rust checks above, in one shot
 script/rust_parity.sh                            # Rust ↔ Go CLI parity (~59 scenarios)
 ```
 

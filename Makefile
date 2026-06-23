@@ -25,6 +25,10 @@ BIN         := $(BIN_DIR)/iriq
 ABS_BIN     := $(CURDIR)/$(BIN)
 PKG         := ./cmd/iriq
 
+# Rust crate lives under rust/; CI gates fmt + clippy + tests there.
+CARGO       ?= cargo
+RUST_DIR    := rust
+
 # Release flags strip the symbol table (-s), debug info (-w), and bake
 # reproducible paths (-trimpath). Drops binary size ~30% with no
 # functional impact; stack-trace function names are gone but file:line
@@ -39,7 +43,7 @@ endif
 INSTALLED   := $(GOBIN)/iriq
 
 .DEFAULT_GOAL := help
-.PHONY: help build build-sqlite release release-sqlite install test clean uninstall
+.PHONY: help build build-sqlite release release-sqlite install test clean uninstall check fmt hooks
 
 help:
 	@echo "Iriq Go targets:"
@@ -49,6 +53,9 @@ help:
 	@echo "  make release-sqlite   stripped build with SQLite backend"
 	@echo "  make install          go install into $(GOBIN)"
 	@echo "  make test             run go test ./... in both tag states"
+	@echo "  make check            Rust gate: cargo fmt --check + clippy + test (run before merging)"
+	@echo "  make fmt              cargo fmt the Rust crate"
+	@echo "  make hooks            enable the committed git hooks (pre-push runs 'make check')"
 	@echo "  make clean            remove $(BIN_DIR)/"
 	@echo "  make uninstall        remove $(INSTALLED)"
 
@@ -79,6 +86,20 @@ install:
 test:
 	$(GO) -C $(GO_DIR) test ./...
 	$(GO) -C $(GO_DIR) test -tags sqlite ./...
+
+# The Rust gate — mirrors CI's Rust job. Run before merging/pushing (the
+# pre-push hook runs this for you once `make hooks` is enabled).
+check:
+	cd $(RUST_DIR) && $(CARGO) fmt --check
+	cd $(RUST_DIR) && $(CARGO) clippy --workspace --all-targets -- -D warnings
+	cd $(RUST_DIR) && $(CARGO) test --workspace
+
+fmt:
+	cd $(RUST_DIR) && $(CARGO) fmt
+
+hooks:
+	git config core.hooksPath .githooks
+	@echo "git hooks enabled (.githooks) — pre-push now runs 'make check'"
 
 clean:
 	rm -rf $(BIN_DIR)

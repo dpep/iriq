@@ -1,0 +1,4 @@
+#!/bin/sh
+# Pre-push gate: run the same Rust checks CI gates (fmt + clippy + tests) so a
+# push can't go red. Enable once with `make hooks` (sets core.hooksPath).
+exec make check
