@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"io"
@@ -8,9 +9,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dpep/iriq/go"
 )
+
+// pipedReader wraps a reader so the CLI's pipedStdin check treats it as a live
+// pipe (non-empty) — used by the streaming liveness test.
+type pipedReader struct{ io.Reader }
+
+func (pipedReader) IsEmpty() bool { return false }
 
 // stringReader satisfies emptyReporter so the CLI's pipedStdin check works
 // without needing a real fd.
@@ -274,6 +282,39 @@ func TestPipeNormalize(t *testing.T) {
 	if len(lines) != len(want) || lines[0] != want[0] || lines[1] != want[1] {
 		t.Errorf("got %v", lines)
 	}
+}
+
+// TestSectionsStreamBeforeStdinCloses proves -n emits each IRI as it arrives,
+// not after EOF: with stdin held open, the first normalized line must appear.
+// A slurping implementation would block on ReadAll and emit nothing.
+func TestSectionsStreamBeforeStdinCloses(t *testing.T) {
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+	go func() {
+		Run(pipedReader{inR}, outW, io.Discard, []string{"-n"})
+		outW.Close()
+	}()
+	go func() { io.WriteString(inW, "https://foo.com/users/1\n") }() // keep stdin open
+
+	type res struct {
+		line string
+		err  error
+	}
+	ch := make(chan res, 1)
+	go func() {
+		l, e := bufio.NewReader(outR).ReadString('\n')
+		ch <- res{l, e}
+	}()
+
+	select {
+	case r := <-ch:
+		if !strings.Contains(r.line, "{user_id}") {
+			t.Fatalf("unexpected first streamed line: %q (err %v)", r.line, r.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no output before stdin closed — -n is not streaming")
+	}
+	inW.Close()
 }
 
 func TestClusterSubcommand(t *testing.T) {

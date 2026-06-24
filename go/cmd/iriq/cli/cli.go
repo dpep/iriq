@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -466,6 +467,15 @@ func cmdBatch(stdin io.Reader, stdout, stderr io.Writer, args []string, opts *op
 	if corpus == nil {
 		corpus = iriq.NewCorpus()
 	}
+
+	// Per-IRI sections (-n/-p/-c/-e) are independent line to line, so we
+	// stream: read input lazily, extract per line, emit each IRI as it arrives
+	// (flushed for live `tail -f | iriq -n`). The aggregate views below need
+	// the whole input, so they slurp.
+	if len(opts.sections) > 0 {
+		return streamPerIRISections(stdin, stdout, stderr, args, opts, corpus)
+	}
+
 	text, err := readText(stdin, args)
 	if err != nil {
 		fmt.Fprintf(stderr, "iriq: %s\n", err)
@@ -481,14 +491,79 @@ func cmdBatch(stdin io.Reader, stdout, stderr io.Writer, args []string, opts *op
 	})
 
 	switch {
-	case len(opts.sections) > 0:
-		emitPerIRISections(stdout, iris, opts)
 	case opts.stats:
 		emitStats(stdout, corpus, opts)
 	case explicitCluster || len(iris) >= largeBatchThreshold:
 		emitClusters(stdout, corpus.Clusters(), opts)
 	default:
 		emitURLList(stdout, iris, opts)
+	}
+	return 0
+}
+
+// streamIRIs reads the input one line at a time (no length cap, unlike
+// bufio.Scanner) and invokes fn for each extracted IRI, so an unbounded stream
+// flows through without being buffered in full. Matches whole-text extraction
+// exactly: a candidate never spans a newline (URL char class excludes
+// whitespace) and Extract does not dedup.
+func streamIRIs(stdin io.Reader, args []string, opts *options, fn func(*iriq.Identifier)) error {
+	var r *bufio.Reader
+	if len(args) == 0 || args[0] == "-" {
+		r = bufio.NewReader(stdin)
+	} else {
+		f, err := os.Open(args[0])
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		r = bufio.NewReader(f)
+	}
+	extractor := &iriq.Extractor{SchemeLess: opts.schemeLess}
+	for {
+		line, err := r.ReadString('\n')
+		if len(line) > 0 {
+			for _, iri := range extractor.Extract(line) {
+				fn(iri)
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+	}
+}
+
+// streamPerIRISections drives the per-IRI sections output. Human and NDJSON
+// stream (flushed per IRI); a single wrapping JSON array can't be emitted
+// incrementally, so it collects first.
+func streamPerIRISections(stdin io.Reader, stdout, stderr io.Writer, args []string, opts *options, corpus *iriq.Corpus) int {
+	if opts.json && !opts.ndjson {
+		var iris []*iriq.Identifier
+		if err := streamIRIs(stdin, args, opts, func(iri *iriq.Identifier) {
+			_, _ = corpus.Observe(iri)
+			iris = append(iris, iri)
+		}); err != nil {
+			fmt.Fprintf(stderr, "iriq: %s\n", err)
+			return 1
+		}
+		emitPerIRIJSONArray(stdout, iris, opts)
+		return 0
+	}
+
+	i := 0
+	flusher, _ := stdout.(interface{ Flush() error })
+	if err := streamIRIs(stdin, args, opts, func(iri *iriq.Identifier) {
+		_, _ = corpus.Observe(iri)
+		emitIRISection(stdout, iri, i, opts)
+		i++
+		if flusher != nil {
+			_ = flusher.Flush()
+		}
+	}); err != nil {
+		fmt.Fprintf(stderr, "iriq: %s\n", err)
+		return 1
 	}
 	return 0
 }
@@ -923,46 +998,43 @@ func inspectStringMap(m map[string]string) string {
 	return "{" + strings.Join(parts, ", ") + "}"
 }
 
-func emitPerIRISections(stdout io.Writer, iris []*iriq.Identifier, opts *options) {
-	// orderedSections keeps multi-section JSON in Ruby's fixed key order.
-	type payload = orderedSections
-	payloads := make([]payload, len(iris))
-	for i, iri := range iris {
-		p := payload{}
-		for _, s := range opts.sections {
-			switch s {
-			case sectionParse:
-				p["parse"] = identifierMap(iri)
-			case sectionCanonical:
-				p["canonical"] = iri.Canonical()
-			case sectionNormalize:
-				p["normalize"] = iriq.NormalizeIdentifier(iri, nil, opts.hints)
-			}
+// sectionPayload builds the ordered section map for one IRI. orderedSections
+// keeps multi-section JSON in Ruby's fixed key order.
+func sectionPayload(iri *iriq.Identifier, opts *options) orderedSections {
+	p := orderedSections{}
+	for _, s := range opts.sections {
+		switch s {
+		case sectionParse:
+			p["parse"] = identifierMap(iri)
+		case sectionCanonical:
+			p["canonical"] = iri.Canonical()
+		case sectionNormalize:
+			p["normalize"] = iriq.NormalizeIdentifier(iri, nil, opts.hints)
 		}
-		payloads[i] = p
 	}
+	return p
+}
 
-	if opts.json {
+// emitIRISection writes one IRI's sections in human or NDJSON form (i is the
+// IRI's global index, controlling the blank-line separator). The wrapping-array
+// JSON case is handled separately by emitPerIRIJSONArray.
+func emitIRISection(stdout io.Writer, iri *iriq.Identifier, i int, opts *options) {
+	p := sectionPayload(iri, opts)
+
+	if opts.ndjson {
 		if len(opts.sections) == 1 {
-			flat := make([]interface{}, 0, len(payloads))
-			for _, p := range payloads {
-				// Single section: emit just that value, matching Ruby
-				// `payloads.map(&:values).flatten(1)`. There's only one
-				// key per payload, so the loop iterates once.
-				for _, s := range opts.sections {
-					switch s {
-					case sectionParse:
-						flat = append(flat, p["parse"])
-					case sectionCanonical:
-						flat = append(flat, p["canonical"])
-					case sectionNormalize:
-						flat = append(flat, p["normalize"])
-					}
-				}
+			// Single section: emit just that value, matching Ruby
+			// `payloads.map(&:values).flatten(1)`.
+			switch opts.sections[0] {
+			case sectionParse:
+				writeJSON(stdout, p["parse"])
+			case sectionCanonical:
+				writeJSON(stdout, p["canonical"])
+			case sectionNormalize:
+				writeJSON(stdout, p["normalize"])
 			}
-			emitJSON(stdout, opts, flat)
 		} else {
-			emitJSON(stdout, opts, payloads)
+			writeJSON(stdout, p)
 		}
 		return
 	}
@@ -970,31 +1042,51 @@ func emitPerIRISections(stdout io.Writer, iris []*iriq.Identifier, opts *options
 	if len(opts.sections) == 1 &&
 		(opts.sections[0] == sectionNormalize || opts.sections[0] == sectionCanonical) {
 		// Most common case — keep it tight: one URL per line, no headers.
-		key := sectionName(opts.sections[0])
-		for _, p := range payloads {
-			fmt.Fprintln(stdout, p[key])
-		}
+		fmt.Fprintln(stdout, p[sectionName(opts.sections[0])])
 		return
 	}
 
-	for i, p := range payloads {
-		if i > 0 {
+	if i > 0 {
+		fmt.Fprintln(stdout)
+	}
+	fmt.Fprintf(stdout, "# %s\n", iri.Canonical())
+	for j, s := range opts.sections {
+		if j > 0 {
 			fmt.Fprintln(stdout)
 		}
-		fmt.Fprintf(stdout, "# %s\n", iris[i].Canonical())
-		for j, s := range opts.sections {
-			if j > 0 {
-				fmt.Fprintln(stdout)
-			}
-			switch s {
+		switch s {
+		case sectionParse:
+			emitParseHuman(stdout, p["parse"].(*identifierJSON).ParseHuman())
+		case sectionCanonical:
+			fmt.Fprintln(stdout, p["canonical"])
+		case sectionNormalize:
+			fmt.Fprintln(stdout, p["normalize"])
+		}
+	}
+}
+
+// emitPerIRIJSONArray emits the buffered single-array JSON form (`-n --json`
+// without --ndjson), which can't be streamed incrementally.
+func emitPerIRIJSONArray(stdout io.Writer, iris []*iriq.Identifier, opts *options) {
+	payloads := make([]orderedSections, len(iris))
+	for i, iri := range iris {
+		payloads[i] = sectionPayload(iri, opts)
+	}
+	if len(opts.sections) == 1 {
+		flat := make([]interface{}, 0, len(payloads))
+		for _, p := range payloads {
+			switch opts.sections[0] {
 			case sectionParse:
-				emitParseHuman(stdout, p["parse"].(*identifierJSON).ParseHuman())
+				flat = append(flat, p["parse"])
 			case sectionCanonical:
-				fmt.Fprintln(stdout, p["canonical"])
+				flat = append(flat, p["canonical"])
 			case sectionNormalize:
-				fmt.Fprintln(stdout, p["normalize"])
+				flat = append(flat, p["normalize"])
 			}
 		}
+		emitJSON(stdout, opts, flat)
+	} else {
+		emitJSON(stdout, opts, payloads)
 	}
 }
 

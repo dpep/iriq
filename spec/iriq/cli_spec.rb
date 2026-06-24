@@ -257,6 +257,21 @@ describe Iriq::CLI do
         ])
       end
 
+      it "streams the sections path lazily, without slurping stdin" do
+        # A stdin that raises if read in full — proves -n consumes it line by
+        # line (so `tail -f | iriq -n` flows) rather than buffering everything.
+        no_slurp = Class.new(StringIO) do
+          def read(*) = raise("slurped stdin instead of streaming line by line")
+        end.new("https://foo.com/users/1\nhttps://foo.com/users/2\n")
+        out = StringIO.new
+        code = described_class.new(stdin: no_slurp, stdout: out, stderr: StringIO.new).run(["-n"])
+        expect(code).to eq(0)
+        expect(out.string.lines.map(&:chomp)).to eq([
+          "https://foo.com/users/{user_id}",
+          "https://foo.com/users/{user_id}",
+        ])
+      end
+
       it "-n --json emits a flat array of normalized strings" do
         stdin.string = "see https://foo.com/users/1 and https://foo.com/users/2"
         expect(run("-n", "--json")).to eq(0)

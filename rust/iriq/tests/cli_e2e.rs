@@ -35,6 +35,42 @@ fn run(args: &[&str], stdin_data: &str) -> String {
     out
 }
 
+/// Liveness: `-n` emits each IRI as it arrives, not after EOF. With stdin held
+/// open, the first normalized line must appear; a slurping implementation would
+/// block on `read_to_string` and print nothing.
+#[test]
+fn sections_stream_before_stdin_closes() {
+    use std::io::{BufRead, BufReader};
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_iriq"))
+        .arg("-n")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn iriq");
+    let mut stdin = child.stdin.take().unwrap();
+    stdin.write_all(b"https://foo.com/users/1\n").unwrap();
+    stdin.flush().unwrap();
+    // keep `stdin` open — do not drop it yet.
+
+    let stdout = child.stdout.take().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        let _ = BufReader::new(stdout).read_line(&mut line);
+        let _ = tx.send(line);
+    });
+
+    let line = rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("no output before stdin closed — -n is not streaming");
+    assert!(line.contains("{user_id}"), "got: {line:?}");
+
+    drop(stdin); // EOF → child exits
+    let _ = child.wait();
+}
+
 fn corpus_with(tag: &str, urls: &str) -> String {
     let p = std::env::temp_dir().join(format!("iriq_e2e_{}_{}.json", std::process::id(), tag));
     let _ = std::fs::remove_file(&p);

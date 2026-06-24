@@ -277,12 +277,21 @@ module Iriq
     # corpus is ephemeral unless --corpus was given.
     def cmd_batch(args, opts, corpus, explicit_cluster: false)
       corpus ||= Corpus.new
+
+      # Per-IRI sections (-n/-p/-c/-e) are independent line to line, so we
+      # stream: read input lazily, extract per line, and emit each IRI as it
+      # arrives (flushed for live `tail -f | iriq -n` pipelines). The aggregate
+      # views below — stats, clusters, the deduped URL list — need the whole
+      # input, so they slurp.
+      if opts[:sections].any?
+        emit_per_iri_sections(lazy_iris(args.first, opts), opts, corpus)
+        return 0
+      end
+
       iris = extract_text(read_text(args.first), opts)
       corpus.batch { iris.each { |iri| corpus.observe(iri) } }
 
-      if opts[:sections].any?
-        emit_per_iri_sections(iris, opts)
-      elsif opts[:stats]
+      if opts[:stats]
         emit_stats(corpus, opts)
       elsif explicit_cluster || iris.size >= LARGE_BATCH_THRESHOLD
         # Either the user asked for clusters explicitly, or the input is
@@ -294,23 +303,51 @@ module Iriq
       0
     end
 
-    # Emit the requested sections (parse/normalize/explain) for each
-    # extracted IRI. -n alone is the cleanest case: one line per URL.
-    def emit_per_iri_sections(iris, opts)
-      sections = opts[:sections]
-      payloads = iris.map { |iri| section_payload(iri, sections, opts) }
+    # Lazily yield IRIs from the input, one input line at a time, so an
+    # unbounded stream flows through without being buffered in full. Matches
+    # whole-text extraction exactly: a candidate never spans a newline
+    # (URL_CHAR_CLASS excludes whitespace) and `extract` does not dedup.
+    def lazy_iris(path, opts)
+      extractor = Extractor.new(scheme_less: opts[:scheme_less])
+      input_lines(path).lazy.flat_map { |line| extractor.extract(line) }
+    end
 
-      if opts[:json]
-        out = sections.size == 1 ? payloads.map(&:values).flatten(1) : payloads
-        emit_json(out, opts)
-      elsif sections == [:normalize] || sections == [:canonical]
-        # Most common case — keep it tight: one URL per line, no headers.
-        key = sections.first
-        payloads.each { |p| stdout.puts p[key] }
+    def input_lines(path)
+      if path.nil? || path == "-"
+        stdin.each_line
       else
-        payloads.each_with_index do |p, i|
+        File.foreach(path)
+      end
+    end
+
+    # Emit the requested sections (parse/normalize/explain) for each extracted
+    # IRI, observing each into `corpus` as it passes. `iris` may be a lazy
+    # enumerator; human and NDJSON output stream (flushed per IRI) while a single
+    # JSON array must be materialized. -n alone is the cleanest case: one line
+    # per URL.
+    def emit_per_iri_sections(iris, opts, corpus)
+      sections = opts[:sections]
+
+      # A wrapping JSON array can't be emitted incrementally — collect it
+      # (force the lazy enumerator to a real Array so emit_json sees an array).
+      if opts[:json] && !opts[:ndjson]
+        payloads = iris.map { |iri| corpus.observe(iri); section_payload(iri, sections, opts) }.to_a
+        out = sections.size == 1 ? payloads.map(&:values).flatten(1) : payloads
+        return emit_json(out, opts)
+      end
+
+      iris.each_with_index do |iri, i|
+        corpus.observe(iri)
+        p = section_payload(iri, sections, opts)
+        if opts[:ndjson]
+          items = sections.size == 1 ? p.values : [p]
+          items.each { |item| stdout.puts JSON.generate(item) }
+        elsif sections == [:normalize] || sections == [:canonical]
+          # Most common case — keep it tight: one URL per line, no headers.
+          stdout.puts p[sections.first]
+        else
           stdout.puts if i > 0
-          stdout.puts "# #{iris[i].canonical}"
+          stdout.puts "# #{iri.canonical}"
           sections.each_with_index do |sec, j|
             stdout.puts if j > 0  # blank line between sections within one IRI
             case sec
@@ -320,6 +357,7 @@ module Iriq
             end
           end
         end
+        stdout.flush
       end
     end
 

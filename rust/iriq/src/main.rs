@@ -10,7 +10,8 @@ use iriq::{
 };
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::io::{self, Read, Write};
+use std::fs::File;
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::process::ExitCode;
 
 const LARGE_BATCH_THRESHOLD: usize = 10;
@@ -676,6 +677,15 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
     corpus: Option<&mut Corpus>,
     explicit_cluster: bool,
 ) -> u8 {
+    // Per-IRI sections (-n/-p/-c/-e) without --corpus are independent line to
+    // line, so we stream: read input lazily, extract per line, emit each IRI as
+    // it arrives (flushed for live `tail -f | iriq -n`). The corpus-informed
+    // sections path and the aggregate views below need the whole input first,
+    // so they slurp.
+    if !opts.sections.is_empty() && opts.corpus.is_empty() {
+        return stream_per_iri_sections(stdin, stdout, stderr, args, opts);
+    }
+
     let text = match read_text(stdin, args) {
         Ok(t) => t,
         Err(e) => {
@@ -801,6 +811,125 @@ fn emit_per_iri_sections<W: Write>(
                     &trace_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints),
                 ),
             }
+        }
+    }
+}
+
+// Stream the per-IRI sections output (no --corpus): read input one line at a
+// time, extract per line, and emit each IRI as it arrives. Human and NDJSON
+// flush per IRI (so `tail -f | iriq -n` is live); a single wrapping JSON array
+// can't be emitted incrementally, so it collects first. Matches whole-text
+// extraction exactly — a candidate never spans a newline and extract dedups
+// nothing.
+fn stream_per_iri_sections<R: Read, W: Write, E: Write>(
+    stdin: &mut R,
+    stdout: &mut W,
+    stderr: &mut E,
+    args: &[String],
+    opts: &Opts,
+) -> u8 {
+    let extractor = Extractor {
+        scheme_less: opts.scheme_less,
+    };
+    let mut reader: Box<dyn BufRead + '_> = if args.is_empty() || args[0] == "-" {
+        Box::new(BufReader::new(stdin))
+    } else {
+        match File::open(&args[0]) {
+            Ok(f) => Box::new(BufReader::new(f)),
+            Err(e) => {
+                let _ = writeln!(stderr, "iriq: {}", e);
+                return 1;
+            }
+        }
+    };
+
+    let buffered_json = opts.json && !opts.ndjson;
+    let mut collected: Vec<Identifier> = Vec::new();
+    let mut line = String::new();
+    let mut i = 0usize;
+    loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) => break,
+            Ok(_) => {
+                for iri in extractor.extract(&line) {
+                    if buffered_json {
+                        collected.push(iri);
+                    } else {
+                        emit_one_iri_section(stdout, &iri, i, opts);
+                        i += 1;
+                        let _ = stdout.flush();
+                    }
+                }
+            }
+            Err(e) => {
+                let _ = writeln!(stderr, "iriq: {}", e);
+                return 1;
+            }
+        }
+    }
+    if buffered_json {
+        emit_per_iri_sections(stdout, &collected, opts, None);
+    }
+    0
+}
+
+// Emit one IRI's sections in human or NDJSON form (i is its global index,
+// controlling the blank-line separator). The buffered JSON-array case is
+// handled by emit_per_iri_sections. Mirrors the human/NDJSON branches there
+// exactly, with no corpus (the streaming path is the no-`--corpus` case).
+fn emit_one_iri_section<W: Write>(stdout: &mut W, iri: &Identifier, i: usize, opts: &Opts) {
+    if opts.ndjson {
+        let payload = if opts.sections.len() == 1 {
+            section_payload(iri, opts.sections[0], opts, None)
+        } else {
+            let mut m = serde_json::Map::new();
+            for s in ["parse", "canonical", "normalize", "explain"] {
+                if let Some(sec) = opts.sections.iter().find(|sec| sec.name() == s) {
+                    m.insert(s.to_string(), section_payload(iri, *sec, opts, None));
+                }
+            }
+            Value::Object(m)
+        };
+        let _ = writeln!(stdout, "{}", serde_json::to_string(&payload).unwrap());
+        return;
+    }
+
+    if opts.sections.len() == 1
+        && (opts.sections[0] == Section::Normalize || opts.sections[0] == Section::Canonical)
+    {
+        match opts.sections[0] {
+            Section::Canonical => {
+                let _ = writeln!(stdout, "{}", iri.canonical());
+            }
+            Section::Normalize => {
+                let _ = writeln!(stdout, "{}", normalize_section(iri, opts, None));
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    if i > 0 {
+        let _ = writeln!(stdout);
+    }
+    let _ = writeln!(stdout, "# {}", iri.canonical());
+    for (j, sec) in opts.sections.iter().enumerate() {
+        if j > 0 {
+            let _ = writeln!(stdout);
+        }
+        match sec {
+            Section::Parse => emit_parse_human(stdout, iri),
+            Section::Canonical => {
+                let _ = writeln!(stdout, "{}", iri.canonical());
+            }
+            Section::Normalize => {
+                let _ = writeln!(stdout, "{}", normalize_section(iri, opts, None));
+            }
+            Section::Explain => emit_explain_human(
+                stdout,
+                &trace_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints),
+            ),
         }
     }
 }
