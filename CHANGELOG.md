@@ -1,3 +1,14 @@
+###  0.30.2  (2026-06-23)
+- Piped stdin and `--file` now **stream** the per-IRI sections (`-n`/`-p`/`-c`/`-e`) line by line, flushing each IRI as it's processed — `tail -f access.log | iriq -n` is live and memory stays bounded on huge inputs. Output is byte-identical to before; the aggregate views (deduped URL list, clusters, `--stats`) still read the whole input. Ruby, Go, and Rust.
+
+###  0.30.1  (2026-06-21)
+- Batch sections (`--normalize` etc.) are now corpus-informed when `--corpus` is supplied, matching single-input behavior.
+- Added a CLI end-to-end test suite (sections, formats, batch/cluster, subcommands) and a `make check` Rust gate + pre-push hook.
+
+###  0.30.0  (2026-06-21)
+- Rust consolidated into a single crate (library + `iriq` binary) with SQLite always on by default — no separate sqlite build.
+- Go moved into the `go/` subdirectory; import path is now `github.com/dpep/iriq/go`.
+
 ###  0.11.0  (2026-05-27)
 - New classifier types: `:color` (hex form `#fff`/`#ffffff`/`#ffffff80`), `:coordinate` (`lat,lng` pair with plausible-range validation), `:country` (ISO 3166-1 alpha-2, allowlisted), `:base64` (≥16 chars with `+`/`/`/`=` to disambiguate from `:opaque_id`).
 - `SegmentClassifier.color_kind(value)` / `ColorKind(value)` returns `:hex` for hex-shaped colors — placeholder for future named / rgb / hsl support, mirrors the file_kind pattern.
