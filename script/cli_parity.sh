@@ -136,6 +136,16 @@ run_pair "pipe url-list --ndjson" \
 run_pair "pipe cluster auto" \
   $'https://foo.com/users/1\nhttps://foo.com/users/2\nhttps://foo.com/users/3\nhttps://foo.com/users/4\nhttps://foo.com/users/5\nhttps://foo.com/users/6\nhttps://foo.com/users/7\nhttps://foo.com/users/8\nhttps://foo.com/users/9\nhttps://foo.com/users/10\n'
 
+# Param classification ladder (const → string → enum) + confidence score must
+# match across runtimes. status → enum, label → string, fmt → constant literal.
+param_words=(one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty alpha beta gamma delta)
+param_stream=""
+for pi in "${!param_words[@]}"; do
+  pst=open; [[ $((pi % 2)) -eq 1 ]] && pst=closed
+  param_stream+="https://foo.com/items?status=$pst&label=${param_words[$pi]}&fmt=json"$'\n'
+done
+run_pair "cluster params (enum/string/const/conf)" "$param_stream" cluster
+
 # Corpus mode parity — observe the same stream under JSON storage in one run
 # and SQLite storage in another, then dump stats from each and diff.
 corpus_dir="$(mktemp -d)"

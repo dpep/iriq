@@ -14,8 +14,10 @@ module Iriq
     #
     # `:enum` is similarly corpus-only — it surfaces when a position has a
     # bounded set of distinct values observed across enough samples (see
-    # Cluster::ENUM_* thresholds).
-    TYPES = %i[literal integer float number uuid date year timestamp hash slug
+    # Cluster::ENUM_* thresholds). `:string` is the rung below `:enum`: a
+    # param that varies across free-form literal values but isn't a confident
+    # bounded set yet. Neither is ever returned for a single value.
+    TYPES = %i[literal string integer float number uuid date year timestamp hash slug
                ipv4 ipv6 url email boolean version locale currency phone jwt mime
                file color coordinate country base64 http_status enum opaque_id].freeze
 

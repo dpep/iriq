@@ -51,6 +51,14 @@ describe "iriq CLI (end-to-end)" do
     expect(out).to include("[2] foo.com  /users/{user_id}")
   end
 
+  it "reports param type + confidence in the cluster param summary" do
+    input = ((["https://foo.com/posts?status=open"] * 20) +
+             (["https://foo.com/posts?status=closed"] * 20)).join("\n")
+    out, _err, status = iriq("cluster", stdin: input)
+    expect(status.exitstatus).to eq(0)
+    expect(out).to match(/status\s+enum\s+conf 0\.\d\d/)
+  end
+
   it "prints --stats from piped input" do
     input = "https://foo.com/users/1\nhttps://bar.com/x\n"
     out, _err, status = iriq("--stats", stdin: input)

@@ -41,6 +41,10 @@ pub enum SegmentType {
     Year,
     HttpStatus,
     Enum,
+    /// Corpus-only rung below Enum: a param that varies across free-form literal
+    /// values but isn't a confident bounded set yet. Never returned for a
+    /// single value.
+    String,
     OpaqueId,
 }
 
@@ -76,6 +80,7 @@ impl SegmentType {
             Year => "year",
             HttpStatus => "http_status",
             Enum => "enum",
+            String => "string",
             OpaqueId => "opaque_id",
         }
     }
@@ -477,6 +482,7 @@ pub fn segment_type_from_str(s: &str) -> Option<SegmentType> {
         "year" => Year,
         "http_status" => HttpStatus,
         "enum" => Enum,
+        "string" => String,
         "opaque_id" => OpaqueId,
         _ => return None,
     })

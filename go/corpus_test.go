@@ -176,6 +176,88 @@ func TestCorpusQueryParamInference(t *testing.T) {
 	}
 }
 
+func TestCorpusParamLadder(t *testing.T) {
+	// constant: a single observed value is rendered as-is.
+	c := NewCorpus()
+	for i := 0; i < 10; i++ {
+		_, _ = c.Observe("https://foo.com/x?format=json")
+	}
+	if got := c.ParamsFor("https://foo.com/x")[0].Type; got != TypeLiteral {
+		t.Errorf("constant param type = %q, want literal", got)
+	}
+	got, _ := c.Normalize("https://foo.com/x?format=json")
+	if got != "https://foo.com/x?format=json" {
+		t.Errorf("constant render = %q, want value preserved", got)
+	}
+
+	// A lone value stays a constant even past the enum observation threshold.
+	c = NewCorpus()
+	for i := 0; i < 40; i++ {
+		_, _ = c.Observe("https://foo.com/c?format=json")
+	}
+	if got := c.ParamsFor("https://foo.com/c")[0].Type; got != TypeLiteral {
+		t.Errorf("constant past threshold type = %q, want literal (not enum)", got)
+	}
+
+	// string: varies across many distinct literals, below the enum bar.
+	c = NewCorpus()
+	for _, v := range []string{"asc", "desc", "name", "created", "updated"} {
+		_, _ = c.Observe("https://foo.com/y?sort=" + v)
+	}
+	if got := c.ParamsFor("https://foo.com/y")[0].Type; got != TypeString {
+		t.Errorf("varying literal type = %q, want string", got)
+	}
+	got, _ = c.Normalize("https://foo.com/y?sort=relevance")
+	if got != "https://foo.com/y?sort={string}" {
+		t.Errorf("string render = %q, want {string}", got)
+	}
+
+	// enum: a bounded set, well supported, graduates from string.
+	c = NewCorpus()
+	for i := 0; i < 20; i++ {
+		_, _ = c.Observe("https://foo.com/z?state=on")
+		_, _ = c.Observe("https://foo.com/z?state=off")
+	}
+	if got := c.ParamsFor("https://foo.com/z")[0].Type; got != TypeEnum {
+		t.Errorf("bounded param type = %q, want enum", got)
+	}
+}
+
+func TestCorpusEnumStragglerRobust(t *testing.T) {
+	// A single one-off value must not knock an established enum back down.
+	c := NewCorpus()
+	for i := 0; i < 30; i++ {
+		_, _ = c.Observe("https://foo.com/posts?status=published")
+	}
+	for i := 0; i < 20; i++ {
+		_, _ = c.Observe("https://foo.com/posts?status=draft")
+	}
+	_, _ = c.Observe("https://foo.com/posts?status=typo") // straggler
+	p := c.ParamsFor("https://foo.com/posts")[0]
+	if p.Type != TypeEnum {
+		t.Errorf("type = %q, want enum despite straggler", p.Type)
+	}
+	if len(p.Values) != 2 {
+		t.Errorf("enum values = %v, want the 2 established members only", p.Values)
+	}
+}
+
+func TestCorpusParamConfidence(t *testing.T) {
+	c := NewCorpus()
+	_, _ = c.Observe("https://foo.com/x?a=1")
+	low := c.ParamsFor("https://foo.com/x")[0].Confidence
+	for i := 0; i < 1000; i++ {
+		_, _ = c.Observe("https://foo.com/x?a=1")
+	}
+	high := c.ParamsFor("https://foo.com/x")[0].Confidence
+	if !(low > 0 && low < high && high <= 1.0) {
+		t.Errorf("confidence should rise within (0,1]: low=%v high=%v", low, high)
+	}
+	if high <= 0.9 {
+		t.Errorf("confidence with abundant evidence = %v, want > 0.9", high)
+	}
+}
+
 func TestCanonicalDate(t *testing.T) {
 	cases := map[string]string{
 		"2024-01-15": "2024-01-15",

@@ -12,10 +12,33 @@ pub const DATE_CONFIDENCE_THRESHOLD: f64 = 0.8;
 pub const NUMBER_CONFIDENCE_THRESHOLD: f64 = 0.8;
 pub const NUMBER_SUBTYPE_THRESHOLD: f64 = 0.8;
 
+// Param classification is a confidence ladder: constant → string → enum. A
+// single-valued param is a constant (rendered as-is); one that varies but
+// isn't a trustworthy enum is SegmentType::String (a generic placeholder); a
+// bounded, well-supported value set is SegmentType::Enum.
+//
+// An enum is promoted when there are enough samples to trust the bound
+// (ENUM_MIN_OBSERVATIONS), the *established* values — those seen at least
+// ENUM_MIN_VALUE_COUNT times — number between ENUM_MIN_MEMBERS and
+// ENUM_MAX_CARDINALITY, and cover nearly all observations (ENUM_MIN_COVERAGE).
+// Rare one-off values are stragglers, not disqualifiers, so a single brand-new
+// value can't knock an established enum down (the observe-before-normalize case).
 pub const ENUM_MIN_OBSERVATIONS: usize = 20;
 pub const ENUM_MAX_CARDINALITY: usize = 10;
-pub const ENUM_MIN_VALUE_COUNT: usize = 2;
-pub const ENUM_MIN_COVERAGE: f64 = 0.95;
+pub const ENUM_MIN_VALUE_COUNT: usize = 3;
+pub const ENUM_MIN_COVERAGE: f64 = 0.9;
+// An enum is a bounded *set*: a single repeated value is a constant, not an
+// enum, so it takes at least two established members to qualify.
+pub const ENUM_MIN_MEMBERS: usize = 2;
+
+// A literal-valued param that has taken on at least this many distinct values
+// varies, so it's SegmentType::String rather than a fixed constant.
+pub const STRING_MIN_DISTINCT: usize = 2;
+
+// confidence = total / (total + K): a monotone curve that is 0.5 at K
+// observations and asymptotes to 1.0. The type names our guess; this number
+// says how much evidence backs it.
+pub const CONFIDENCE_SMOOTHING: usize = 15;
 
 pub const YEAR_RANGE_MIN: f64 = 1900.0;
 pub const YEAR_RANGE_MAX: f64 = 2100.0;
@@ -138,6 +161,7 @@ impl Cluster {
                     name: name.clone(),
                     count: stats.total,
                     ty,
+                    confidence: param_confidence(stats),
                     cardinality: stats.cardinality(),
                     presence,
                     values: Vec::new(),
@@ -221,6 +245,13 @@ impl Cluster {
         if let Some(hint) = param_name_hint(name, t) {
             return hint;
         }
+
+        // String rung — a literal-valued param that has taken on more than one
+        // distinct value varies, so it's a placeholder, not a fixed constant.
+        // Below the enum bar (checked above), so we claim only "free-form text".
+        if t == SegmentType::Literal && stats.cardinality() >= STRING_MIN_DISTINCT {
+            return SegmentType::String;
+        }
         t
     }
 }
@@ -230,6 +261,7 @@ pub struct ParamSummary {
     pub name: String,
     pub count: usize,
     pub ty: SegmentType,
+    pub confidence: f64,
     pub cardinality: usize,
     pub presence: f64,
     pub values: Vec<String>,
@@ -298,8 +330,16 @@ pub fn file_kind_distribution(stats: &PositionStats) -> HashMap<FileKind, f64> {
     out
 }
 
+// The enum's member values — the established ones (seen enough to be real),
+// ordered by descending count with a lex tie-break. Stragglers are excluded so
+// the advertised set is what the corpus is actually confident about.
 pub fn enum_values(stats: &PositionStats) -> Vec<String> {
-    let mut keys: Vec<String> = stats.value_counts.keys().cloned().collect();
+    let mut keys: Vec<String> = stats
+        .value_counts
+        .iter()
+        .filter(|(_, &n)| n >= ENUM_MIN_VALUE_COUNT)
+        .map(|(k, _)| k.clone())
+        .collect();
     keys.sort_by(|a, b| {
         let na = stats.value_counts[a];
         let nb = stats.value_counts[b];
@@ -308,22 +348,36 @@ pub fn enum_values(stats: &PositionStats) -> Vec<String> {
     keys
 }
 
+// Built around the *established* members (values seen at least
+// ENUM_MIN_VALUE_COUNT times) so a stray one-off value is a straggler, not a
+// disqualifier.
 pub fn is_enum(stats: &PositionStats) -> bool {
     if stats.total < ENUM_MIN_OBSERVATIONS {
         return false;
     }
-    let card = stats.cardinality();
-    if card == 0 || card > ENUM_MAX_CARDINALITY {
+    let mut established = 0usize; // established members
+    let mut covered = 0usize; // observations they account for
+    for &n in stats.value_counts.values() {
+        if n >= ENUM_MIN_VALUE_COUNT {
+            established += 1;
+            covered += n;
+        }
+    }
+    if !(ENUM_MIN_MEMBERS..=ENUM_MAX_CARDINALITY).contains(&established) {
         return false;
     }
-    let mut covered = 0usize;
-    for &n in stats.value_counts.values() {
-        if n < ENUM_MIN_VALUE_COUNT {
-            return false;
-        }
-        covered += n;
-    }
     (covered as f64) / (stats.total as f64) >= ENUM_MIN_COVERAGE
+}
+
+// How much evidence backs the assigned type: monotone in observation count,
+// 0.5 at CONFIDENCE_SMOOTHING, asymptoting to 1.0. Rounded to two decimals to
+// match the Ruby/Go output.
+pub fn param_confidence(stats: &PositionStats) -> f64 {
+    if stats.total == 0 {
+        return 0.0;
+    }
+    let c = (stats.total as f64) / ((stats.total + CONFIDENCE_SMOOTHING) as f64);
+    (c * 100.0).round() / 100.0
 }
 
 pub fn is_year_position(t: SegmentType, stats: &PositionStats) -> bool {

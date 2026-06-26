@@ -762,8 +762,8 @@ module Iriq
       end
     end
 
-    # One line per param: type, range (numeric), cardinality, presence.
-    # `page  integer  1..100  avg 50.5  (10 distinct, 100%)`
+    # One line per param: type, confidence, range (numeric), cardinality,
+    # presence. `page  integer  conf 0.87  1..100  avg 50.5  (10 distinct, 100%)`
     def emit_param_summary(cluster)
       rows = cluster.param_summary
       return if rows.empty?
@@ -771,6 +771,7 @@ module Iriq
       width = rows.map { |r| r[:name].length }.max
       rows.each do |r|
         bits = ["#{r[:type]}"]
+        bits << "conf #{format_conf(r[:confidence])}" if r[:confidence]
         if r[:min] && r[:max]
           bits << format_range(r[:min], r[:max])
           bits << "avg #{format_num(r[:avg])}" if r[:avg]
@@ -778,6 +779,11 @@ module Iriq
         bits << "(#{r[:cardinality]} distinct, #{format_pct(r[:presence])})"
         stdout.puts "    #{r[:name].to_s.ljust(width)}  #{bits.join('  ')}"
       end
+    end
+
+    # Two-decimal confidence, e.g. 0.87. Matches the Go/Rust CLI formatting.
+    def format_conf(conf)
+      format("%.2f", conf)
     end
 
     def format_range(lo, hi)

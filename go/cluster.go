@@ -23,16 +23,35 @@ const (
 	NumberSubtypeThreshold    = 0.8
 )
 
-// Enum* thresholds. Promote a param to TypeEnum when the corpus has seen
-// enough samples to trust the bound, the value set is small, each tracked
-// value appears more than once, and tracked values cover nearly all
-// observations.
+// Param classification is a confidence ladder: constant → string → enum. A
+// single-valued param is a constant (rendered as-is); one that varies but isn't
+// a trustworthy enum is TypeString (a generic placeholder); a bounded,
+// well-supported value set is TypeEnum.
+//
+// Enum* thresholds. Promote a param to TypeEnum when the corpus has seen enough
+// samples to trust the bound (EnumMinObservations), the *established* values
+// — those seen at least EnumMinValueCount times — are few (EnumMaxCardinality)
+// and cover nearly all observations (EnumMinCoverage). Rare one-off values are
+// stragglers, not disqualifiers: this keeps a single brand-new value from
+// knocking an established enum back down (the observe-before-normalize case).
 const (
 	EnumMinObservations = 20
 	EnumMaxCardinality  = 10
-	EnumMinValueCount   = 2
-	EnumMinCoverage     = 0.95
+	EnumMinValueCount   = 3
+	EnumMinCoverage     = 0.9
+	// An enum is a bounded *set*: a single repeated value is a constant, not
+	// an enum, so it takes at least two established members to qualify.
+	EnumMinMembers = 2
 )
+
+// StringMinDistinct — a literal-valued param that has taken on at least this
+// many distinct values varies, so it's TypeString rather than a fixed constant.
+const StringMinDistinct = 2
+
+// ConfidenceSmoothing — confidence = total / (total + K): a monotone curve that
+// is 0.5 at K observations and asymptotes to 1.0. The type names our guess;
+// this number says how much evidence backs it.
+const ConfidenceSmoothing = 15
 
 // Year* thresholds. Promote an :integer position to :year when observed
 // values cluster in the 1900..2100 window with enough samples and a
@@ -165,6 +184,7 @@ type ParamSummary struct {
 	Name                string
 	Count               int
 	Type                SegmentType
+	Confidence          float64
 	Cardinality         int
 	Presence            float64
 	Values              []string // populated only for TypeEnum
@@ -189,6 +209,7 @@ func (c *Cluster) ParamSummary() []ParamSummary {
 		}
 		row := ParamSummary{
 			Name: name, Count: stats.Total, Type: c.ParamType(name),
+			Confidence:  paramConfidence(stats),
 			Cardinality: stats.Cardinality(), Presence: presence,
 		}
 		if row.Type == TypeEnum {
@@ -281,12 +302,16 @@ func roundFrac(f float64) float64 {
 	return math.Round(f*10000) / 10000
 }
 
-// enumValues returns the distinct values tracked in stats, sorted by
-// descending count with a lex tie-break (mirrors Ruby's Cluster#enum_values).
+// enumValues returns the enum's member values — the established ones (seen
+// enough to be real), sorted by descending count with a lex tie-break.
+// Stragglers are excluded so the advertised set is what the corpus is actually
+// confident about (mirrors Ruby's Cluster#enum_values).
 func enumValues(stats *PositionStats) []string {
 	keys := make([]string, 0, len(stats.ValueCounts))
-	for k := range stats.ValueCounts {
-		keys = append(keys, k)
+	for k, n := range stats.ValueCounts {
+		if n >= EnumMinValueCount {
+			keys = append(keys, k)
+		}
 	}
 	sort.Slice(keys, func(i, j int) bool {
 		if stats.ValueCounts[keys[i]] != stats.ValueCounts[keys[j]] {
@@ -297,23 +322,36 @@ func enumValues(stats *PositionStats) []string {
 	return keys
 }
 
-// isEnum returns true when stats meets the Enum* bounds.
+// isEnum returns true when stats meets the Enum* bounds. Built around the
+// *established* members (values seen at least EnumMinValueCount times) so a
+// stray one-off value is a straggler, not a disqualifier.
 func isEnum(stats *PositionStats) bool {
 	if stats.Total < EnumMinObservations {
 		return false
 	}
-	card := stats.Cardinality()
-	if card == 0 || card > EnumMaxCardinality {
+	established := 0 // number of established members
+	covered := 0     // observations they account for
+	for _, n := range stats.ValueCounts {
+		if n >= EnumMinValueCount {
+			established++
+			covered += n
+		}
+	}
+	if established < EnumMinMembers || established > EnumMaxCardinality {
 		return false
 	}
-	covered := 0
-	for _, n := range stats.ValueCounts {
-		if n < EnumMinValueCount {
-			return false
-		}
-		covered += n
-	}
 	return float64(covered)/float64(stats.Total) >= EnumMinCoverage
+}
+
+// paramConfidence reports how much evidence backs the assigned type: monotone
+// in observation count, 0.5 at ConfidenceSmoothing, asymptoting to 1.0.
+// Rounded to two decimals to match the Ruby/Rust output.
+func paramConfidence(stats *PositionStats) float64 {
+	if stats.Total == 0 {
+		return 0.0
+	}
+	c := float64(stats.Total) / float64(stats.Total+ConfidenceSmoothing)
+	return math.Round(c*100) / 100
 }
 
 // ParamType returns the type the corpus is confident enough to call this
@@ -375,6 +413,13 @@ func (c *Cluster) ParamType(name string) SegmentType {
 	// to detect on its own.
 	if hint := ParamNameHint(name, t); hint != "" {
 		return hint
+	}
+
+	// TypeString rung — a literal-valued param that has taken on more than one
+	// distinct value varies, so it's a placeholder, not a fixed constant.
+	// Below the enum bar (checked above), so we claim only "free-form text".
+	if t == TypeLiteral && stats.Cardinality() >= StringMinDistinct {
+		return TypeString
 	}
 
 	return t

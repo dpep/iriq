@@ -259,7 +259,9 @@ describe Iriq::Corpus do
         corpus.observe("https://foo.com/search?q=widget&page=#{i + 1}&since=2024/01/#{(i % 28) + 1}")
       end
       out = corpus.normalize("https://foo.com/search?q=hammer&page=42&since=2024-02-15")
-      expect(out).to eq("https://foo.com/search?page={integer}&q=hammer&since=2024-02-15")
+      # q is constant (always "widget") so it keeps its value; page is a
+      # numeric variable; since varies across many literal values → {string}.
+      expect(out).to eq("https://foo.com/search?page={integer}&q=hammer&since={string}")
     end
 
     it "params_for returns per-param presence + type for the cluster" do
@@ -341,13 +343,24 @@ describe Iriq::Corpus do
       expect(row[:values]).to eq(%w[published draft archived])
     end
 
-    it "does NOT promote to :enum below the observation threshold" do
+    it "stays below :enum (a varying :string) under the observation threshold" do
       c = described_class.new
       5.times { c.observe("https://foo.com/posts?mode=draft") }
       5.times { c.observe("https://foo.com/posts?mode=published") }
       row = c.params_for("https://foo.com/posts").first
-      expect(row[:type]).to eq(:literal)
+      expect(row[:type]).to eq(:string)
       expect(row[:values]).to be_nil
+    end
+
+    it "holds :enum when a stray one-off value would have broken the old gate" do
+      c = described_class.new
+      30.times { c.observe("https://foo.com/posts?status=published") }
+      20.times { c.observe("https://foo.com/posts?status=draft") }
+      c.observe("https://foo.com/posts?status=typo") # single straggler
+      row = c.params_for("https://foo.com/posts").first
+      expect(row[:type]).to eq(:enum)
+      # the straggler is excluded from the established set
+      expect(row[:values]).to eq(%w[published draft])
     end
 
     it "does NOT promote when cardinality is too high" do
@@ -372,6 +385,71 @@ describe Iriq::Corpus do
 
       row = c.params_for("https://foo.com/posts").first
       expect(row[:value_distribution]).to eq("published" => 0.6, "draft" => 0.4)
+    end
+  end
+
+  describe "the const → string → enum ladder" do
+    it "treats a single-valued param as a constant (renders the value)" do
+      c = described_class.new
+      10.times { c.observe("https://foo.com/x?format=json") }
+      row = c.params_for("https://foo.com/x").first
+      expect(row[:type]).to eq(:literal)
+      expect(c.normalize("https://foo.com/x?format=json"))
+        .to eq("https://foo.com/x?format=json")
+    end
+
+    it "keeps a single-valued param a constant even past the enum threshold" do
+      c = described_class.new
+      40.times { c.observe("https://foo.com/x?format=json") } # well over ENUM_MIN_OBSERVATIONS
+      row = c.params_for("https://foo.com/x").first
+      expect(row[:type]).to eq(:literal) # a lone value is a constant, not an enum
+      expect(c.normalize("https://foo.com/x?format=json"))
+        .to eq("https://foo.com/x?format=json")
+    end
+
+    it "calls a varying literal param :string and renders {string}" do
+      c = described_class.new
+      %w[asc desc name -name created].each { |v| c.observe("https://foo.com/x?sort=#{v}") }
+      row = c.params_for("https://foo.com/x").first
+      expect(row[:type]).to eq(:string)
+      expect(c.normalize("https://foo.com/x?sort=updated"))
+        .to eq("https://foo.com/x?sort={string}")
+    end
+
+    it "graduates string → enum as a bounded set proves itself" do
+      c = described_class.new
+      3.times { c.observe("https://foo.com/x?sort=asc") }
+      3.times { c.observe("https://foo.com/x?sort=desc") }
+      expect(c.params_for("https://foo.com/x").first[:type]).to eq(:string)
+
+      17.times { c.observe("https://foo.com/x?sort=asc") }
+      17.times { c.observe("https://foo.com/x?sort=desc") }
+      expect(c.params_for("https://foo.com/x").first[:type]).to eq(:enum)
+    end
+  end
+
+  describe "confidence score" do
+    it "is reported on every param, bounded in (0, 1]" do
+      c = described_class.new
+      c.observe("https://foo.com/x?a=1")
+      conf = c.params_for("https://foo.com/x").first[:confidence]
+      expect(conf).to be > 0.0
+      expect(conf).to be <= 1.0
+    end
+
+    it "rises monotonically with more observations and approaches 1" do
+      c = described_class.new
+      confs = []
+      total = 0
+      [1, 10, 100, 1000].each do |target|
+        (target - total).times { c.observe("https://foo.com/x?a=1") }
+        total = target
+        confs << c.params_for("https://foo.com/x").first[:confidence]
+      end
+
+      expect(confs).to eq(confs.sort)             # non-decreasing
+      expect(confs.uniq.length).to eq(confs.length) # strictly increasing
+      expect(confs.last).to be > 0.9              # lots of evidence → near-certain
     end
   end
 

@@ -1227,6 +1227,7 @@ fn cluster_json(c: &Cluster) -> Value {
             o.insert("name".to_string(), Value::String(p.name.clone()));
             o.insert("count".to_string(), Value::Number((p.count as u64).into()));
             o.insert("type".to_string(), Value::String(p.ty.as_str().to_string()));
+            o.insert("confidence".to_string(), Value::from(p.confidence));
             o.insert(
                 "cardinality".to_string(),
                 Value::Number((p.cardinality as u64).into()),
@@ -1247,6 +1248,9 @@ fn emit_param_summary<W: Write>(stdout: &mut W, c: &Cluster) {
     let width = rows.iter().map(|r| r.name.len()).max().unwrap_or(0);
     for r in rows {
         let mut parts = vec![r.ty.as_str().to_string()];
+        if r.confidence > 0.0 {
+            parts.push(format!("conf {:.2}", r.confidence));
+        }
         if r.numeric_count > 0 {
             parts.push(format!("{}..{}", format_num(r.min), format_num(r.max)));
             parts.push(format!("avg {}", format_num(r.avg)));

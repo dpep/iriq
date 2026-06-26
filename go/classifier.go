@@ -49,6 +49,10 @@ const (
 	// a position has a bounded set of repeated values across enough samples
 	// (see Enum* thresholds in cluster.go).
 	TypeEnum       SegmentType = "enum"
+	// TypeString is the rung below TypeEnum: a param that varies across
+	// free-form literal values but isn't a confident bounded set yet.
+	// Corpus-only — never returned for a single value.
+	TypeString     SegmentType = "string"
 	TypeOpaqueID   SegmentType = "opaque_id"
 )
 

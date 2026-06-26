@@ -1298,6 +1298,7 @@ func emitClusters(stdout io.Writer, clusters []*iriq.Cluster, opts *options) {
 					"name":        p.Name,
 					"count":       p.Count,
 					"type":        string(p.Type),
+					"confidence":  p.Confidence,
 					"cardinality": p.Cardinality,
 					"presence":    p.Presence,
 				}
@@ -1359,6 +1360,9 @@ func emitParamSummary(stdout io.Writer, c *iriq.Cluster) {
 	}
 	for _, r := range rows {
 		parts := []string{string(r.Type)}
+		if r.Confidence > 0 {
+			parts = append(parts, fmt.Sprintf("conf %.2f", r.Confidence))
+		}
 		if r.NumericCount > 0 {
 			parts = append(parts, fmt.Sprintf("%s..%s", formatNum(r.Min), formatNum(r.Max)))
 			parts = append(parts, fmt.Sprintf("avg %s", formatNum(r.Avg)))

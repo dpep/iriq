@@ -30,14 +30,35 @@ module Iriq
     NUMBER_CONFIDENCE_THRESHOLD = 0.8
     NUMBER_SUBTYPE_THRESHOLD    = 0.8
 
+    # Param classification is a confidence ladder: constant → string → enum.
+    # A param with a single observed value is a constant (rendered as-is); one
+    # that varies but isn't yet a trustworthy enum is :string (a generic
+    # placeholder); a bounded, well-supported value set is :enum.
+    #
     # `:enum` thresholds. Promote a param to :enum when the corpus has seen
-    # enough samples to trust the bound, the value set is small, each value
-    # appears more than once (rules out singletons), and the tracked values
-    # account for nearly all observations (lets a few stragglers through).
+    # enough samples to trust the bound (ENUM_MIN_OBSERVATIONS), the *established*
+    # values — those seen at least ENUM_MIN_VALUE_COUNT times — are few
+    # (ENUM_MAX_CARDINALITY) and cover nearly all observations
+    # (ENUM_MIN_COVERAGE). Rare one-off values are stragglers, not
+    # disqualifiers: this is what keeps a single brand-new value from knocking
+    # an established enum back down (the observe-before-normalize case).
     ENUM_MIN_OBSERVATIONS = 20
     ENUM_MAX_CARDINALITY  = 10
-    ENUM_MIN_VALUE_COUNT  = 2
-    ENUM_MIN_COVERAGE     = 0.95
+    ENUM_MIN_VALUE_COUNT  = 3
+    ENUM_MIN_COVERAGE     = 0.9
+    # An enum is a bounded *set*: a single repeated value is a constant, not an
+    # enum, so it takes at least two established members to qualify.
+    ENUM_MIN_MEMBERS      = 2
+
+    # `:string` — a param that has taken on 2+ distinct non-typed values but
+    # isn't (yet) a confident enum. The intermediate rung: we know it varies
+    # and looks like free-form text, but haven't earned the bounded-set claim.
+    STRING_MIN_DISTINCT = 2
+
+    # Confidence smoothing constant. confidence = total / (total + K): a
+    # monotone curve that is 0.5 at K observations and asymptotes to 1.0. The
+    # type names our guess; this number says how much evidence backs it.
+    CONFIDENCE_SMOOTHING = 15
 
     def initialize(key:, host:, scheme:, shape:, max_values: PositionStats::DEFAULT_MAX_VALUES)
       @key            = key
@@ -105,7 +126,9 @@ module Iriq
     end
 
     # Per-param summary, ordered by descending presence. Each entry is:
-    #   { name: "page", count: N, type: :integer, cardinality: K, presence: 0.83 }
+    #   { name: "page", count: N, type: :integer, confidence: 0.83,
+    #     cardinality: K, presence: 0.83 }
+    # confidence is how much evidence backs the type (see param_confidence);
     # presence is count / @count — the fraction of observations that had
     # this param.
     def param_summary
@@ -118,6 +141,7 @@ module Iriq
           name:        name,
           count:       stats.total,
           type:        type,
+          confidence:  param_confidence(stats),
           cardinality: stats.cardinality,
           presence:    @count.positive? ? stats.total.to_f / @count : 0.0,
         }
@@ -205,6 +229,11 @@ module Iriq
         return hint
       end
 
+      # :string rung — a literal-valued param that has taken on more than one
+      # distinct value varies, so it's a placeholder, not a fixed constant.
+      # Below the enum bar (checked above), so we claim only "free-form text".
+      return :string if type == :literal && stats.cardinality >= STRING_MIN_DISTINCT
+
       type
     end
 
@@ -239,21 +268,37 @@ module Iriq
     end
 
     # True when stats shows a bounded set of repeated values worth treating
-    # as an enum. See ENUM_* constants at the top of this class.
+    # as an enum. Built around the *established* members (values seen at least
+    # ENUM_MIN_VALUE_COUNT times) so a stray one-off value is a straggler, not
+    # a disqualifier. See ENUM_* constants at the top of this class.
     def enum?(stats)
       return false if stats.total < ENUM_MIN_OBSERVATIONS
-      return false if stats.cardinality.zero? || stats.cardinality > ENUM_MAX_CARDINALITY
-      return false if stats.value_counts.any? { |_, n| n < ENUM_MIN_VALUE_COUNT }
 
-      coverage = stats.value_counts.values.sum.to_f / stats.total
+      established = established_values(stats)
+      return false unless established.size.between?(ENUM_MIN_MEMBERS, ENUM_MAX_CARDINALITY)
+
+      coverage = established.values.sum.to_f / stats.total
       coverage >= ENUM_MIN_COVERAGE
     end
 
-    # Distinct values tracked for this param, ordered by descending count
-    # (lex tie-break). Returned alongside :enum-typed rows in param_summary
-    # so verbose/explain consumers can render the value set.
+    # Values seen often enough to count as real members of the set (vs noise).
+    def established_values(stats)
+      stats.value_counts.select { |_, n| n >= ENUM_MIN_VALUE_COUNT }
+    end
+
+    # Confidence that the assigned type is right, given how much evidence backs
+    # it. Monotone in observation count; 0.5 at CONFIDENCE_SMOOTHING, → 1.0.
+    def param_confidence(stats)
+      return 0.0 if stats.total.zero?
+
+      (stats.total.to_f / (stats.total + CONFIDENCE_SMOOTHING)).round(2)
+    end
+
+    # The enum's member values — the established ones (seen enough to be real),
+    # ordered by descending count (lex tie-break). Stragglers are excluded so
+    # the advertised set is what the corpus is actually confident about.
     def enum_values(stats)
-      stats.value_counts.sort_by { |v, n| [-n, v] }.map(&:first)
+      established_values(stats).sort_by { |v, n| [-n, v] }.map(&:first)
     end
 
     # value_distribution returns the fraction of total observations each
