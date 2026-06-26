@@ -31,8 +31,13 @@ Sections (combine freely):
                         each placeholder / canonical value was chosen
 
 Corpus + stats:
-      --corpus PATH     Load/create a JSON / SQLite corpus; observe + save.
-                        .db/.sqlite/.sqlite3 → SQLite (incremental UPSERTs).
+      --corpus PATH     Use a specific corpus file (overrides the default).
+                        Extension picks the backend: .db/.sqlite/.sqlite3
+                        are SQLite; anything else is JSON.
+  -C, --no-corpus       Disable corpus persistence for this invocation.
+                        Same as IRIQ_NO_CORPUS=1 in the environment.
+      --reset           Delete the corpus database (default path or the
+                        one resolved via --corpus / IRIQ_CORPUS) and exit.
       --host MODE       Host-keying strategy: full (default), reg / registrable
                         strips subdomains, none ignores host entirely.
       --stats           Print rolling aggregates
@@ -45,6 +50,10 @@ Corpus + stats:
                         List route shapes that recur across multiple hosts.
       --activate-above F With --propose-recognizers, promote every proposal
                         at or above CONFIDENCE F into a live Recognizer.
+
+Environment:
+      IRIQ_CORPUS=PATH    Set the corpus path (overrides the default).
+      IRIQ_NO_CORPUS=1    Disable the default corpus (equivalent to -C).
 
 Other:
   -h, --help            Show this message
@@ -88,6 +97,8 @@ struct Opts {
     sections: Vec<Section>,
     scheme_less: bool,
     corpus: String,
+    no_corpus: bool,
+    reset: bool,
     stats: bool,
     reinfer: bool,
     propose: bool,
@@ -170,16 +181,40 @@ fn run<R: Read, W: Write, E: Write>(
     let piped = !atty_isatty_stdin();
     let batch_mode = explicit_cluster || positional_is_file || (args.is_empty() && piped);
 
+    // --reset short-circuits: delete the resolved corpus file + SQLite
+    // sidecars and exit. Resolves through the same precedence chain as
+    // the normal path.
+    if opts.reset {
+        return cmd_reset(&mut stderr, &opts);
+    }
+
     if args.is_empty() && !batch_mode && !opts.reinfer && !opts.propose && !opts.cross_host_shapes {
         let _ = write!(stdout, "{}", USAGE);
         return 0;
     }
 
+    let corpus_path = resolve_corpus_path(&opts);
     let mut corpus: Option<Corpus> = None;
-    if !opts.corpus.is_empty() {
-        match Corpus::open(&opts.corpus) {
+    if let Some(ref path) = corpus_path {
+        let pre_exists = std::path::Path::new(path).exists();
+        if !pre_exists {
+            if let Some(parent) = std::path::Path::new(path).parent() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    let _ = writeln!(stderr, "iriq: {}", e);
+                    return 1;
+                }
+            }
+        }
+        match Corpus::open(path) {
             Ok(mut c) => {
                 c.set_host_strategy(opts.host_strategy);
+                if !pre_exists {
+                    let _ = writeln!(
+                        stderr,
+                        "iriq: created corpus at {} (disable with --no-corpus or IRIQ_NO_CORPUS=1)",
+                        path
+                    );
+                }
                 corpus = Some(c);
             }
             Err(e) => {
@@ -212,8 +247,8 @@ fn run<R: Read, W: Write, E: Write>(
     };
 
     if let Some(mut c) = corpus {
-        if !opts.corpus.is_empty() {
-            if let Err(e) = c.save(&opts.corpus) {
+        if let Some(ref path) = corpus_path {
+            if let Err(e) = c.save(path) {
                 let _ = writeln!(stderr, "iriq: {}", e);
                 return 1;
             }
@@ -221,6 +256,112 @@ fn run<R: Read, W: Write, E: Write>(
         let _ = c.close();
     }
     code
+}
+
+// resolve_corpus_path applies the precedence chain:
+//   1. --corpus PATH       — explicit always wins
+//   2. --no-corpus / IRIQ_NO_CORPUS=1 — opt out of the default
+//   3. IRIQ_CORPUS=PATH    — env override of the default location
+//   4. default_corpus_path() — platform-aware location
+fn resolve_corpus_path(opts: &Opts) -> Option<String> {
+    if !opts.corpus.is_empty() {
+        return Some(opts.corpus.clone());
+    }
+    if opts.no_corpus || env_corpus_disabled() {
+        return None;
+    }
+    let env = std::env::var("IRIQ_CORPUS").unwrap_or_default();
+    if !env.is_empty() {
+        return Some(env);
+    }
+    Some(default_corpus_path())
+}
+
+// default_corpus_path mirrors the Ruby + Go resolvers — XDG on Linux,
+// Apple-style on macOS, %LOCALAPPDATA% on Windows.
+fn default_corpus_path() -> String {
+    use std::path::PathBuf;
+    let base: PathBuf = if cfg!(target_os = "macos") {
+        if let Some(home) = std::env::var_os("HOME") {
+            PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+                .join("iriq")
+        } else {
+            std::env::temp_dir().join("iriq")
+        }
+    } else if cfg!(target_os = "windows") {
+        let appdata = std::env::var_os("LOCALAPPDATA").or_else(|| {
+            std::env::var_os("USERPROFILE").map(|h| {
+                PathBuf::from(h)
+                    .join("AppData")
+                    .join("Local")
+                    .into_os_string()
+            })
+        });
+        match appdata {
+            Some(v) => PathBuf::from(v).join("iriq"),
+            None => std::env::temp_dir().join("iriq"),
+        }
+    } else {
+        // XDG-honoring on Linux + BSD.
+        let xdg = std::env::var_os("XDG_DATA_HOME").filter(|v| !v.is_empty());
+        match xdg {
+            Some(v) => PathBuf::from(v).join("iriq"),
+            None => match std::env::var_os("HOME") {
+                Some(home) => PathBuf::from(home)
+                    .join(".local")
+                    .join("share")
+                    .join("iriq"),
+                None => std::env::temp_dir().join("iriq"),
+            },
+        }
+    };
+    base.join("default.db").to_string_lossy().into_owned()
+}
+
+fn env_corpus_disabled() -> bool {
+    match std::env::var("IRIQ_NO_CORPUS") {
+        Ok(v) => {
+            let lc = v.to_lowercase();
+            !lc.is_empty() && lc != "0" && lc != "false" && lc != "no"
+        }
+        Err(_) => false,
+    }
+}
+
+fn cmd_reset<W: Write>(stderr: &mut W, opts: &Opts) -> u8 {
+    let path = resolve_reset_path(opts);
+    let mut removed = 0;
+    for p in [
+        path.clone(),
+        format!("{}-wal", path),
+        format!("{}-shm", path),
+        format!("{}.tmp", path),
+    ] {
+        if std::fs::remove_file(&p).is_ok() {
+            removed += 1;
+        }
+    }
+    if removed == 0 {
+        let _ = writeln!(stderr, "iriq: no corpus to reset at {}", path);
+    } else {
+        let _ = writeln!(stderr, "iriq: reset corpus at {}", path);
+    }
+    0
+}
+
+// resolve_reset_path honors --corpus / IRIQ_CORPUS even under --no-corpus —
+// the user is explicitly addressing a stored file, not runtime state.
+fn resolve_reset_path(opts: &Opts) -> String {
+    if !opts.corpus.is_empty() {
+        return opts.corpus.clone();
+    }
+    let env = std::env::var("IRIQ_CORPUS").unwrap_or_default();
+    if !env.is_empty() {
+        return env;
+    }
+    default_corpus_path()
 }
 
 fn atty_isatty_stdin() -> bool {
@@ -305,6 +446,8 @@ fn parse_options(argv: &[String]) -> Result<(Vec<String>, Opts), String> {
                 i += 1;
                 opts.corpus = argv.get(i).cloned().ok_or("--corpus requires a value")?;
             }
+            "-C" | "--no-corpus" => opts.no_corpus = true,
+            "--reset" => opts.reset = true,
             "--stats" => opts.stats = true,
             "--reinfer" => opts.reinfer = true,
             "--propose-recognizers" => opts.propose = true,
@@ -362,6 +505,7 @@ fn parse_options(argv: &[String]) -> Result<(Vec<String>, Opts), String> {
                             opts.ndjson = true;
                         }
                         'N' => opts.hints = false,
+                        'C' => opts.no_corpus = true,
                         'h' => opts.help = true,
                         'V' => opts.version = true,
                         _ => return Err(format!("invalid option: -{}", ch)),
@@ -682,7 +826,7 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
     // it arrives (flushed for live `tail -f | iriq -n`). The corpus-informed
     // sections path and the aggregate views below need the whole input first,
     // so they slurp.
-    if !opts.sections.is_empty() && opts.corpus.is_empty() {
+    if !opts.sections.is_empty() && corpus.is_none() {
         return stream_per_iri_sections(stdin, stdout, stderr, args, opts);
     }
 
@@ -699,6 +843,7 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
     let iris = extractor.extract(&text);
 
     // Feed observations into the corpus when present.
+    let caller_has_corpus = corpus.is_some();
     let mut owned_corpus = if corpus.is_none() {
         Some(Corpus::new())
     } else {
@@ -716,12 +861,13 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
     });
 
     if !opts.sections.is_empty() {
-        // Corpus-informed only when the user actually passed --corpus; the
-        // throwaway in-memory corpus above is just for cluster/stats views.
-        let real_corpus: Option<&Corpus> = if opts.corpus.is_empty() {
-            None
-        } else {
+        // Corpus-informed only when the caller actually had a corpus (auto-
+        // default or explicit --corpus). The throwaway in-memory corpus
+        // above is just for the cluster/stats views.
+        let real_corpus: Option<&Corpus> = if caller_has_corpus {
             Some(&*working)
+        } else {
+            None
         };
         emit_per_iri_sections(stdout, &iris, opts, real_corpus);
         return 0;

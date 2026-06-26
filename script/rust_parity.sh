@@ -8,6 +8,11 @@
 set -euo pipefail
 unset CDPATH
 
+# Disable auto-corpus so the parity diffs don't get noise from each
+# binary opening / mutating the shared default.db. Tests that exercise
+# corpus persistence pass --corpus PATH explicitly.
+export IRIQ_NO_CORPUS=1
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GO_BIN="${IRIQ_GO_BIN:-$REPO_ROOT/bin/iriq}"
 RUST_BIN="${IRIQ_RUST_BIN:-$REPO_ROOT/rust/target/release/iriq}"
@@ -15,9 +20,7 @@ RUST_BIN="${IRIQ_RUST_BIN:-$REPO_ROOT/rust/target/release/iriq}"
 if [[ ! -x "$GO_BIN" ]]; then
   echo "Building Go binary..."
   mkdir -p "$(dirname "$GO_BIN")"
-  # -tags sqlite: the Rust binary always links SQLite, and the parity
-  # scenarios include .db corpora, so the Go side must match.
-  (cd "$REPO_ROOT/go" && go build -tags sqlite -o "$GO_BIN" ./cmd/iriq)
+  (cd "$REPO_ROOT/go" && go build -o "$GO_BIN" ./cmd/iriq)
 fi
 if [[ ! -x "$RUST_BIN" ]]; then
   echo "Building Rust binary (release)..."

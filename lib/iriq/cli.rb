@@ -1,3 +1,4 @@
+require "fileutils"
 require "json"
 require "optparse"
 require "stringio"
@@ -35,29 +36,36 @@ module Iriq
                               each placeholder / canonical value was chosen
 
       Corpus + stats:
-            --corpus PATH     Load/create a JSON corpus; observe and save atomically.
-                              -n becomes corpus-informed once it has data.
+            --corpus PATH     Use a specific corpus file (overrides the default).
+                              Extension picks the backend: .db/.sqlite/.sqlite3
+                              are SQLite; anything else is JSON.
+        -C, --no-corpus       Disable corpus persistence for this invocation.
+                              Same as IRIQ_NO_CORPUS=1 in the environment.
+            --reset           Delete the corpus database (default path or the
+                              one resolved via --corpus / IRIQ_CORPUS) and exit.
             --host MODE       Host-keying strategy for clustering:
                               full (default), registrable (or reg) strips
                               subdomains, none ignores host entirely.
             --stats           Print rolling aggregates
             --reinfer         Replay the source-IRI log through the current
                               classifier + reducers; rebuilds materialized
-                              views from scratch. Requires --corpus.
+                              views from scratch.
             --propose-recognizers
                               Scan observed values for shape patterns that
                               recur enough to suggest a new Recognizer.
                               Combine with --json for structured output.
-                              Requires --corpus.
             --cross-host-shapes
                               List route shapes that recur across
                               multiple hosts. Combine with --min-hosts.
-                              Requires --corpus.
             --activate-above F  With --propose-recognizers, promote every
                               proposal at or above CONFIDENCE F into a
                               live Recognizer on the corpus, then
                               reinfer. Confidence integrates coverage
                               and cross-host corroboration.
+
+      Environment:
+            IRIQ_CORPUS=PATH    Set the corpus path (overrides the default).
+            IRIQ_NO_CORPUS=1    Disable the default corpus (equivalent to -C).
 
       Thresholds (apply to --propose-recognizers / --cross-host-shapes):
             --min-observations N  proposal noise floor (default 20)
@@ -123,9 +131,17 @@ module Iriq
       batch_mode = explicit_cluster || positional_is_file ||
                    (args.empty? && piped_stdin?)
 
+      # --reset short-circuits: delete the resolved corpus file (+ sidecars)
+      # and exit. Resolves through the same precedence chain as the normal
+      # path so `--reset --corpus other.db` and `IRIQ_CORPUS=… --reset` Just Work.
+      if opts[:reset]
+        return cmd_reset(opts)
+      end
+
       return print_usage(stdout, 0) if args.empty? && !batch_mode && !opts[:reinfer] && !opts[:propose] && !opts[:cross_host_shapes]
 
-      corpus = opts[:corpus] ? load_corpus(opts[:corpus], host_strategy: opts[:host_strategy]) : nil
+      corpus_path = resolve_corpus_path(opts)
+      corpus = corpus_path ? load_corpus(corpus_path, host_strategy: opts[:host_strategy], announce_create: true) : nil
 
       code = if opts[:reinfer]
         cmd_reinfer(corpus, opts)
@@ -141,7 +157,7 @@ module Iriq
         cmd_summary(args, opts, corpus)
       end
 
-      corpus.save(opts[:corpus]) if corpus && opts[:corpus]
+      corpus.save(corpus_path) if corpus && corpus_path
       code
     rescue Iriq::ParseError => e
       emit_error("parse_error", e.message, 2, human: "iriq: parse error: #{e.message}")
@@ -167,6 +183,8 @@ module Iriq
         hints:       true,
         sections:    [],
         corpus:        nil,
+        no_corpus:     false,
+        reset:         false,
         stats:         false,
         reinfer:       false,
         propose:       false,
@@ -191,6 +209,8 @@ module Iriq
         o.on("--[no-]hints")         { |v| opts[:hints] = v }
         o.on("-N")                   { opts[:hints] = false }
         o.on("--corpus PATH")        { |v| opts[:corpus] = v }
+        o.on("-C", "--no-corpus")    { opts[:no_corpus] = true }
+        o.on("--reset")              { opts[:reset] = true }
         o.on("--host MODE")          { |v| opts[:host_strategy] = host_strategy_arg(v) }
         o.on("--stats")              { opts[:stats]   = true }
         o.on("--reinfer")            { opts[:reinfer] = true }
@@ -220,8 +240,77 @@ module Iriq
       end
     end
 
-    def load_corpus(path, host_strategy: :full)
+    def load_corpus(path, host_strategy: :full, announce_create: false)
+      if announce_create && !File.exist?(path)
+        FileUtils.mkdir_p(File.dirname(path))
+        stderr.puts "iriq: created corpus at #{path} (disable with --no-corpus or IRIQ_NO_CORPUS=1)"
+      end
       Corpus.open(path, host_strategy: host_strategy)
+    end
+
+    # Resolve the corpus file the CLI should use. Precedence:
+    #   1. --corpus PATH       — explicit always wins (you asked for it)
+    #   2. --no-corpus / IRIQ_NO_CORPUS=1 — opt out of the default
+    #   3. IRIQ_CORPUS=PATH    — env override of the default location
+    #   4. default_corpus_path — platform-aware location
+    def resolve_corpus_path(opts)
+      return opts[:corpus] if opts[:corpus]
+      return nil if opts[:no_corpus] || env_corpus_disabled?
+
+      env_path = ENV["IRIQ_CORPUS"].to_s
+      return env_path unless env_path.empty?
+
+      default_corpus_path
+    end
+
+    # Platform-aware default. XDG-honoring on Linux + BSD, Apple-style on
+    # macOS, %LOCALAPPDATA% on Windows. Same logic in Go + Rust so all three
+    # runtimes share the same default.db.
+    def default_corpus_path
+      base = if (xdg = ENV["XDG_DATA_HOME"].to_s) && !xdg.empty?
+        File.join(xdg, "iriq")
+      elsif RUBY_PLATFORM =~ /darwin/
+        File.expand_path("~/Library/Application Support/iriq")
+      elsif RUBY_PLATFORM =~ /mingw|mswin|cygwin/
+        File.join(ENV["LOCALAPPDATA"].to_s.empty? ? File.expand_path("~/AppData/Local") : ENV["LOCALAPPDATA"], "iriq")
+      else
+        File.expand_path("~/.local/share/iriq")
+      end
+      File.join(base, "default.db")
+    end
+
+    def env_corpus_disabled?
+      v = ENV["IRIQ_NO_CORPUS"].to_s.downcase
+      !v.empty? && v != "0" && v != "false" && v != "no"
+    end
+
+    def cmd_reset(opts)
+      path = resolve_reset_path(opts)
+      unless path
+        return emit_error("missing_argument", "no corpus path to reset (use --corpus PATH or unset --no-corpus)", 1)
+      end
+      removed = []
+      [path, "#{path}-wal", "#{path}-shm", "#{path}.tmp"].each do |p|
+        if File.exist?(p)
+          File.delete(p)
+          removed << p
+        end
+      end
+      if removed.empty?
+        stderr.puts "iriq: no corpus to reset at #{path}"
+      else
+        stderr.puts "iriq: reset corpus at #{path}"
+      end
+      0
+    end
+
+    # --reset honors --corpus / IRIQ_CORPUS even when --no-corpus is set —
+    # the user is explicitly addressing a stored file, not the runtime state.
+    def resolve_reset_path(opts)
+      return opts[:corpus] if opts[:corpus]
+      env_path = ENV["IRIQ_CORPUS"].to_s
+      return env_path unless env_path.empty?
+      default_corpus_path
     end
 
     # Accept `--host=reg` as a short alias for the `registrable` mode.

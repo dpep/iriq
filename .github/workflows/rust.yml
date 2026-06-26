@@ -76,7 +76,7 @@ jobs:
 
       - name: build Go binary (with sqlite)
         working-directory: go
-        run: go build -tags sqlite -o ../bin/iriq ./cmd/iriq
+        run: go build -o ../bin/iriq ./cmd/iriq
 
       - name: build Rust binary (release, with sqlite)
         working-directory: rust

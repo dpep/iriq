@@ -55,7 +55,9 @@ describe Iriq::CLI do
     end
 
     it "wraps a missing required argument" do
-      expect(run("--propose-recognizers", "--json")).to eq(1)
+      # Corpus operations require a corpus. With auto-corpus on the default
+      # path, an explicit --no-corpus exposes the same error path.
+      expect(run("--propose-recognizers", "--no-corpus", "--json")).to eq(1)
       expect(error_payload["error"]).to include("code" => "missing_argument", "message" => "missing argument <--corpus>")
     end
 

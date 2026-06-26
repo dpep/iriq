@@ -11,7 +11,14 @@ describe "iriq CLI (end-to-end)" do
 
   def iriq(*args, stdin: nil)
     cmd = ["bundle", "exec", EXE, *args]
-    Open3.capture3({ "BUNDLE_GEMFILE" => File.join(ROOT, "Gemfile") }, *cmd, stdin_data: stdin || "")
+    # IRIQ_NO_CORPUS=1 so the e2e suite never writes into the user's real
+    # default corpus. Tests that need persistence pass --corpus PATH against
+    # a Tempfile.
+    env = {
+      "BUNDLE_GEMFILE" => File.join(ROOT, "Gemfile"),
+      "IRIQ_NO_CORPUS" => "1",
+    }
+    Open3.capture3(env, *cmd, stdin_data: stdin || "")
   end
 
   it "prints the version" do

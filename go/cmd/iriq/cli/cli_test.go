@@ -14,6 +14,16 @@ import (
 	"github.com/dpep/iriq/go"
 )
 
+// TestMain disables the auto-corpus default for the whole CLI test
+// package — otherwise every Run() call would touch the user's real
+// default.db at $XDG_DATA_HOME/iriq/default.db and inflate counts
+// across runs. Individual tests that exercise corpus behavior pass an
+// explicit --corpus PATH against a Tempfile.
+func TestMain(m *testing.M) {
+	_ = os.Setenv("IRIQ_NO_CORPUS", "1")
+	os.Exit(m.Run())
+}
+
 // pipedReader wraps a reader so the CLI's pipedStdin check treats it as a live
 // pipe (non-empty) — used by the streaming liveness test.
 type pipedReader struct{ io.Reader }

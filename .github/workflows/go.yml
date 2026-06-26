@@ -32,23 +32,14 @@ jobs:
           go-version: ${{ matrix.go-version }}
           cache: false
 
-      - name: build (slim)
+      - name: build
         run: go build ./...
 
-      - name: vet (slim)
+      - name: vet
         run: go vet ./...
 
-      - name: test (slim)
+      - name: test
         run: go test ./... -race
-
-      - name: build (sqlite)
-        run: go build -tags sqlite ./...
-
-      - name: vet (sqlite)
-        run: go vet -tags sqlite ./...
-
-      - name: test (sqlite)
-        run: go test -tags sqlite ./... -race
 
   parity:
     name: Ruby ↔ Go parity

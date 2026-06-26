@@ -70,20 +70,33 @@ $ cat access.log | iriq                       # ≥ 10 IRIs → cluster view
 $ cat access.log | iriq --stats               # rolling aggregates
 $ iriq ./access.log -n                        # auto-detect file → normalize each
 $ iriq -J < access.log                        # newline-delimited JSON
-$ iriq --corpus c.db < access.log             # persist into a SQLite corpus
+$ iriq --corpus team.db < access.log          # use a specific corpus file
 ```
 
-Once a corpus has data, `-n` becomes corpus-informed — a position that only ever
-holds integers clusters to a single `{user_id}` shape, and new values normalize
-to it:
+**Every invocation observes into a persistent corpus by default**, so
+classification sharpens as you use the tool — a position that only ever holds
+integers clusters to a single `{user_id}` shape, and new values normalize to it:
 
 ```sh
 $ for n in 1 2 3 4 5 6 7 8 9 10; do
-    iriq --corpus c.db https://api.foo.com/users/$n >/dev/null
+    iriq https://api.foo.com/users/$n >/dev/null
   done
 
-$ iriq -n --corpus c.db https://api.foo.com/users/999
+$ iriq -n https://api.foo.com/users/999
 https://api.foo.com/users/{user_id}
+```
+
+The default corpus lives at `$XDG_DATA_HOME/iriq/default.db` (Linux),
+`~/Library/Application Support/iriq/default.db` (macOS), or
+`%LOCALAPPDATA%/iriq/default.db` (Windows). First-run creation prints a
+one-line stderr notice. Three knobs control it:
+
+```sh
+$ iriq --no-corpus -n https://foo.com/users/123    # one-shot ephemeral; or -C
+$ IRIQ_NO_CORPUS=1 iriq -n https://foo.com/users/123  # globally disable
+$ IRIQ_CORPUS=/path/to/work.db iriq -n https://foo.com/users/123  # override path
+$ iriq --corpus team.db https://foo.com/users/123  # explicit override (wins over env)
+$ iriq --reset                                     # delete the corpus DB and exit
 ```
 
 ### Two ways to normalize
@@ -295,7 +308,9 @@ an ephemeral corpus.
 | `-J, --ndjson`      | Newline-delimited JSON (one object per line); implies `--json` |
 | `-N, --no-hints`    | Use `{integer}` etc. instead of `{user_id}`             |
 | `--no-scheme-less`  | Skip `foo.com/path`-style extraction (explicit-scheme only) |
-| `--corpus PATH`     | Load/create a corpus at PATH (`.json` or `.db`/`.sqlite`/`.sqlite3`) |
+| `--corpus PATH`     | Use a specific corpus file (`.json` or `.db`/`.sqlite`/`.sqlite3`). Overrides the default |
+| `-C, --no-corpus`   | Disable corpus persistence for this invocation (same as `IRIQ_NO_CORPUS=1`) |
+| `--reset`           | Delete the corpus database and exit                     |
 | `--host MODE`       | Host-keying for clustering: `full` (default), `reg` strips subdomains, `none` ignores host |
 | `--stats`           | Print rolling aggregates                                |
 | `--reinfer`         | Drop the materialized views and replay the source-IRI log through the current classifier + reducers |
@@ -307,6 +322,13 @@ an ephemeral corpus.
 | `--activate-above F`    | With `--propose-recognizers`, auto-activate every proposal whose confidence is ≥ F |
 | `completion bash\|zsh`  | Print shell completion script (Homebrew installs this automatically) |
 | `-V, --version`     | Print version                                           |
+
+Environment variables:
+
+| Variable             | Effect                                                  |
+| -------------------- | ------------------------------------------------------- |
+| `IRIQ_CORPUS=PATH`   | Set the corpus path (overrides the default)             |
+| `IRIQ_NO_CORPUS=1`   | Disable the default corpus (equivalent to `-C`)         |
 
 A positional argument that doesn't parse as an IRI but IS an existing file is
 read and extracted from automatically — `iriq ./access.log` and

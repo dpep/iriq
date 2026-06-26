@@ -4,6 +4,11 @@ require "rspec/debugging"
 require "simplecov"
 require "tempfile"
 
+# Specs run with auto-corpus disabled so no test ever touches the user's
+# real default corpus. Tests that exercise corpus behavior pass an
+# explicit --corpus PATH against a Tempfile.
+ENV["IRIQ_NO_CORPUS"] ||= "1"
+
 SimpleCov.start do
   add_filter "/spec/"
 end

@@ -185,12 +185,14 @@ by file extension. `corpus.save(other_path)` exports as JSON regardless of
 the live backend; `corpus.save(same_path)` is idempotent (no clobbering a
 SQLite file with JSON, etc.).
 
-The Ruby `sqlite3` gem is loaded lazily (only when a `.db` path is opened),
-keeping the iriq install footprint minimal for users that stick with JSON.
-On the Go side we use `modernc.org/sqlite` (pure Go — no cgo). The Rust
-side uses `rusqlite` with the `bundled` feature (statically links C SQLite,
-~3-4 MB binary cost). Schema v4 is shared across all three runtimes — a
-`.db` written by any binary opens cleanly in any other.
+As of v0.31.0 SQLite is always on across all three runtimes — corpus
+mode is enabled by default and the auto-default uses a `.db` file. The
+Ruby `sqlite3` gem is still loaded lazily so the require cost stays out
+of `iriq --help` etc. On the Go side we use `modernc.org/sqlite` (pure
+Go — no cgo); the previous slim / sqlite build split was retired. The
+Rust side uses `rusqlite` with the `bundled` feature (statically links C
+SQLite, ~3-4 MB binary cost). Schema v4 is shared across all three
+runtimes — a `.db` written by any binary opens cleanly in any other.
 
 When adding a new backend, replicate the contract in all three languages
 and add parity scenarios in `script/cli_parity.sh`'s `corpus_pair`

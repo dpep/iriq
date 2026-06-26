@@ -1,3 +1,11 @@
+###  0.31.0  (2026-06-26)
+- **Corpus is now on by default.** Every invocation observes into a persistent corpus, so classification gets sharper the more you use the tool — the streaming/learning behavior that was the selling point is no longer hidden behind a flag. Default location: `$XDG_DATA_HOME/iriq/default.db` on Linux, `~/Library/Application Support/iriq/default.db` on macOS, `%LOCALAPPDATA%/iriq/default.db` on Windows. First-run creation prints a one-line stderr notice.
+- New flag `-C` / `--no-corpus` (and `IRIQ_NO_CORPUS=1` env) — disables the default corpus for a single invocation. Explicit `--corpus PATH` always wins, even with `--no-corpus` set in the env.
+- New env var `IRIQ_CORPUS=PATH` — overrides the default location without needing `--corpus` on every call.
+- New flag `--reset` — deletes the resolved corpus file (and SQLite `-wal` / `-shm` sidecars) and exits. Honors `--corpus` / `IRIQ_CORPUS` so you can reset a non-default file.
+- **Go build simplification:** the slim / SQLite build split is gone. The Go binary now always links `modernc.org/sqlite` (pure Go, no cgo). `make build-sqlite`, `make release-sqlite`, and `-tags sqlite` are retired. The `dpep/tools/iriq-sqlite` Homebrew formula folds into `dpep/tools/iriq`.
+- Ruby, Go, and Rust ship this together — same defaults, same flags, parity preserved.
+
 ###  0.30.2  (2026-06-23)
 - Piped stdin and `--file` now **stream** the per-IRI sections (`-n`/`-p`/`-c`/`-e`) line by line, flushing each IRI as it's processed — `tail -f access.log | iriq -n` is live and memory stays bounded on huge inputs. Output is byte-identical to before; the aggregate views (deduped URL list, clusters, `--stats`) still read the whole input. Ruby, Go, and Rust.
 

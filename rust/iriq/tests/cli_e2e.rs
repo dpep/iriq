@@ -10,6 +10,9 @@ use std::process::{Command, Stdio};
 fn run_full(args: &[&str], stdin_data: &str) -> (String, String, bool) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_iriq"))
         .args(args)
+        // Auto-corpus disabled in the test suite — otherwise every shell-out
+        // would touch the user's real default.db and inflate counts.
+        .env("IRIQ_NO_CORPUS", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -44,6 +47,7 @@ fn sections_stream_before_stdin_closes() {
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_iriq"))
         .arg("-n")
+        .env("IRIQ_NO_CORPUS", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

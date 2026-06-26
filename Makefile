@@ -1,18 +1,16 @@
 # Iriq Go binary — build/install/clean/uninstall helpers.
 #
 #   make                   - same as `make help`
-#   make build             - dev build into ./bin/iriq (no SQLite, debug info)
-#   make build-sqlite      - dev build with SQLite backend included
-#   make release           - stripped + trimpath build (no SQLite)
-#   make release-sqlite    - stripped + trimpath build with SQLite
+#   make build             - dev build into ./bin/iriq
+#   make release           - stripped + trimpath build
 #   make install           - go install into $GOBIN
-#   make test              - go test ./... (both tag states)
+#   make test              - go test ./...
 #   make clean             - remove ./bin/
 #   make uninstall         - remove the binary from $GOBIN
 #
-# The default build excludes the SQLite backend to keep the binary lean.
-# Pass `-tags sqlite` (or use the *-sqlite targets) to compile it in. The
-# CLI's `--version` output tells you which backends are baked in.
+# As of v0.31.0 SQLite is always linked into the Go build (modernc.org/sqlite,
+# pure-Go, no cgo). The previous slim/sqlite split is gone — one binary,
+# both backends. The CLI's --version output still prints a `Build:` line.
 #
 # Ruby gem build/install is handled by Bundler/RubyGems; see CLAUDE.md.
 
@@ -43,16 +41,14 @@ endif
 INSTALLED   := $(GOBIN)/iriq
 
 .DEFAULT_GOAL := help
-.PHONY: help build build-sqlite release release-sqlite install test clean uninstall check fmt hooks
+.PHONY: help build release install test clean uninstall check fmt hooks
 
 help:
 	@echo "Iriq Go targets:"
-	@echo "  make build            slim dev build into $(BIN)"
-	@echo "  make build-sqlite     dev build with SQLite backend"
-	@echo "  make release          stripped slim build into $(BIN)"
-	@echo "  make release-sqlite   stripped build with SQLite backend"
+	@echo "  make build            dev build into $(BIN)"
+	@echo "  make release          stripped release build into $(BIN)"
 	@echo "  make install          go install into $(GOBIN)"
-	@echo "  make test             run go test ./... in both tag states"
+	@echo "  make test             run go test ./..."
 	@echo "  make check            Rust gate: cargo fmt --check + clippy + test (run before merging)"
 	@echo "  make fmt              cargo fmt the Rust crate"
 	@echo "  make hooks            enable the committed git hooks (pre-push runs 'make check')"
@@ -62,22 +58,12 @@ help:
 build:
 	@mkdir -p $(BIN_DIR)
 	$(GO) -C $(GO_DIR) build -o $(ABS_BIN) $(PKG)
-	@echo "built $(BIN) (slim, debug)"
-
-build-sqlite:
-	@mkdir -p $(BIN_DIR)
-	$(GO) -C $(GO_DIR) build -tags sqlite -o $(ABS_BIN) $(PKG)
-	@echo "built $(BIN) (sqlite, debug)"
+	@echo "built $(BIN) (debug)"
 
 release:
 	@mkdir -p $(BIN_DIR)
 	$(GO) -C $(GO_DIR) build $(RELEASE_FLAGS) -o $(ABS_BIN) $(PKG)
-	@echo "built $(BIN) (slim, stripped)"
-
-release-sqlite:
-	@mkdir -p $(BIN_DIR)
-	$(GO) -C $(GO_DIR) build -tags sqlite $(RELEASE_FLAGS) -o $(ABS_BIN) $(PKG)
-	@echo "built $(BIN) (sqlite, stripped)"
+	@echo "built $(BIN) (stripped)"
 
 install:
 	$(GO) -C $(GO_DIR) install $(PKG)
@@ -85,7 +71,6 @@ install:
 
 test:
 	$(GO) -C $(GO_DIR) test ./...
-	$(GO) -C $(GO_DIR) test -tags sqlite ./...
 
 # The Rust gate — mirrors CI's Rust job. Run before merging/pushing (the
 # pre-push hook runs this for you once `make hooks` is enabled).

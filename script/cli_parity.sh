@@ -10,15 +10,18 @@
 set -euo pipefail
 unset CDPATH  # don't let user CDPATH leak into our path resolution
 
+# Disable the default auto-corpus so the parity scenarios don't race for
+# the shared default.db. Tests that exercise corpus persistence pass an
+# explicit --corpus PATH against a per-test tempfile.
+export IRIQ_NO_CORPUS=1
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GO_BIN="${IRIQ_GO_BIN:-$REPO_ROOT/bin/iriq}"
 
 if [[ ! -x "$GO_BIN" ]]; then
   echo "Building Go binary at $GO_BIN..."
   mkdir -p "$(dirname "$GO_BIN")"
-  # -tags sqlite is required because the parity scenarios include SQLite
-  # corpora; the slim default build would error out on .db paths.
-  (cd "$REPO_ROOT/go" && go build -tags sqlite -o "$GO_BIN" ./cmd/iriq)
+  (cd "$REPO_ROOT/go" && go build -o "$GO_BIN" ./cmd/iriq)
 fi
 
 # Ruby's regex engine refuses UTF-8 pattern + ASCII-8BIT subject mixing, so

@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -39,29 +41,36 @@ Sections (combine freely):
                         each placeholder / canonical value was chosen
 
 Corpus + stats:
-      --corpus PATH     Load/create a JSON corpus; observe and save atomically.
-                        -n becomes corpus-informed once it has data.
+      --corpus PATH     Use a specific corpus file (overrides the default).
+                        Extension picks the backend: .db/.sqlite/.sqlite3
+                        are SQLite; anything else is JSON.
+  -C, --no-corpus       Disable corpus persistence for this invocation.
+                        Same as IRIQ_NO_CORPUS=1 in the environment.
+      --reset           Delete the corpus database (default path or the
+                        one resolved via --corpus / IRIQ_CORPUS) and exit.
       --host MODE       Host-keying strategy for clustering:
                         full (default), registrable (or reg) strips
                         subdomains, none ignores host entirely.
       --stats           Print rolling aggregates
       --reinfer         Replay the source-IRI log through the current
                         classifier + reducers; rebuilds materialized
-                        views from scratch. Requires --corpus.
+                        views from scratch.
       --propose-recognizers
                         Scan observed values for shape patterns that
                         recur enough to suggest a new Recognizer.
                         Combine with --json for structured output.
-                        Requires --corpus.
       --cross-host-shapes
                         List route shapes that recur across multiple
-                        hosts. Combine with --min-hosts. Requires
-                        --corpus.
+                        hosts. Combine with --min-hosts.
       --activate-above F  With --propose-recognizers, promote every
                         proposal at or above CONFIDENCE F into a live
                         Recognizer on the corpus, then reinfer.
                         Confidence integrates coverage and cross-host
                         corroboration.
+
+Environment:
+      IRIQ_CORPUS=PATH    Set the corpus path (overrides the default).
+      IRIQ_NO_CORPUS=1    Disable the default corpus (equivalent to -C).
 
 Thresholds (apply to --propose-recognizers / --cross-host-shapes):
       --min-observations N  proposal noise floor (default 20)
@@ -89,14 +98,10 @@ Examples:
   cat README.md | iriq --corpus c.json
 `
 
-// buildLabel summarizes which corpus backends are compiled in. Surfaces on
-// --help so users can tell which build they have without having to trigger
-// a "this build doesn't support .db files" error.
+// buildLabel is now constant — SQLite is always linked in. Kept so the
+// --help text retains the `Build:` line for parity with the Rust CLI.
 func buildLabel() string {
-	if iriq.HasSqlite {
-		return "sqlite (json + .db/.sqlite/.sqlite3 corpus support)"
-	}
-	return "slim (json corpus only — install iriq-sqlite or build with -tags sqlite for .db support)"
+	return "sqlite (json + .db/.sqlite/.sqlite3 corpus support)"
 }
 
 type section int
@@ -116,6 +121,8 @@ type options struct {
 	hints              bool
 	sections           []section
 	corpus             string
+	noCorpus           bool
+	reset              bool
 	stats              bool
 	reinfer            bool
 	propose            bool
@@ -172,14 +179,23 @@ func Run(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 
 	batchMode := explicitCluster || positionalIsFile || (len(args) == 0 && pipedStdin(stdin))
 
+	// --reset short-circuits: delete the resolved corpus file (+ SQLite
+	// sidecars) and exit. Resolves through the same precedence chain as
+	// the normal path so `--reset --corpus other.db` and `IRIQ_CORPUS=...
+	// --reset` Just Work.
+	if opts.reset {
+		return cmdReset(stdout, stderr, opts)
+	}
+
 	if len(args) == 0 && !batchMode && !opts.reinfer && !opts.propose && !opts.crossHostShapes {
 		fmt.Fprint(stdout, usage)
 		return 0
 	}
 
+	corpusPath := resolveCorpusPath(opts)
 	var corpus *iriq.Corpus
-	if opts.corpus != "" {
-		c, err := loadCorpus(opts.corpus, opts.hostStrategy)
+	if corpusPath != "" {
+		c, err := loadCorpus(corpusPath, opts.hostStrategy, stderr)
 		if err != nil {
 			fmt.Fprintf(stderr, "iriq: %s\n", err)
 			return 1
@@ -203,8 +219,8 @@ func Run(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 		code = cmdSummary(stdout, stderr, args, opts, corpus)
 	}
 
-	if corpus != nil && opts.corpus != "" {
-		if err := corpus.Save(opts.corpus); err != nil {
+	if corpus != nil && corpusPath != "" {
+		if err := corpus.Save(corpusPath); err != nil {
 			fmt.Fprintf(stderr, "iriq: %s\n", err)
 			return 1
 		}
@@ -220,16 +236,113 @@ func parseableIRI(input string) bool {
 	return err == nil
 }
 
-func loadCorpus(path string, host iriq.HostStrategy) (*iriq.Corpus, error) {
+func loadCorpus(path string, host iriq.HostStrategy, stderr io.Writer) (*iriq.Corpus, error) {
 	// OpenCorpus handles both create and load — picks the backend by file
 	// extension and creates the file (with schema, for SQLite) if it doesn't
-	// yet exist.
+	// yet exist. We pre-stat so we can print a one-line stderr notice on
+	// auto-creation of the default corpus.
+	announce := false
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		announce = true
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return nil, err
+		}
+	}
 	c, err := iriq.OpenCorpus(path)
 	if err != nil {
 		return nil, err
 	}
+	if announce && stderr != nil {
+		fmt.Fprintf(stderr, "iriq: created corpus at %s (disable with --no-corpus or IRIQ_NO_CORPUS=1)\n", path)
+	}
 	c.HostStrategy = host
 	return c, nil
+}
+
+// resolveCorpusPath applies the precedence chain:
+//
+//  1. --corpus PATH       — explicit always wins
+//  2. --no-corpus / IRIQ_NO_CORPUS=1 — opt out of the default
+//  3. IRIQ_CORPUS=PATH    — env override of the default location
+//  4. defaultCorpusPath() — platform-aware location
+func resolveCorpusPath(opts *options) string {
+	if opts.corpus != "" {
+		return opts.corpus
+	}
+	if opts.noCorpus || envCorpusDisabled() {
+		return ""
+	}
+	if env := os.Getenv("IRIQ_CORPUS"); env != "" {
+		return env
+	}
+	return defaultCorpusPath()
+}
+
+// defaultCorpusPath mirrors the Ruby + Rust resolvers — XDG on Linux,
+// Apple-style on macOS, %LOCALAPPDATA% on Windows.
+func defaultCorpusPath() string {
+	base := ""
+	switch runtime.GOOS {
+	case "darwin":
+		if home, err := os.UserHomeDir(); err == nil {
+			base = filepath.Join(home, "Library", "Application Support", "iriq")
+		}
+	case "windows":
+		if v := os.Getenv("LOCALAPPDATA"); v != "" {
+			base = filepath.Join(v, "iriq")
+		} else if home, err := os.UserHomeDir(); err == nil {
+			base = filepath.Join(home, "AppData", "Local", "iriq")
+		}
+	default:
+		// XDG-honoring on Linux + BSD.
+		if v := os.Getenv("XDG_DATA_HOME"); v != "" {
+			base = filepath.Join(v, "iriq")
+		} else if home, err := os.UserHomeDir(); err == nil {
+			base = filepath.Join(home, ".local", "share", "iriq")
+		}
+	}
+	if base == "" {
+		base = filepath.Join(os.TempDir(), "iriq")
+	}
+	return filepath.Join(base, "default.db")
+}
+
+func envCorpusDisabled() bool {
+	v := strings.ToLower(os.Getenv("IRIQ_NO_CORPUS"))
+	return v != "" && v != "0" && v != "false" && v != "no"
+}
+
+func cmdReset(stdout, stderr io.Writer, opts *options) int {
+	path := resolveResetPath(opts)
+	if path == "" {
+		return emitError(stderr, opts.json, "missing_argument",
+			"no corpus path to reset (use --corpus PATH or unset --no-corpus)", "", 1)
+	}
+	removed := 0
+	for _, p := range []string{path, path + "-wal", path + "-shm", path + ".tmp"} {
+		if err := os.Remove(p); err == nil {
+			removed++
+		}
+	}
+	_ = stdout
+	if removed == 0 {
+		fmt.Fprintf(stderr, "iriq: no corpus to reset at %s\n", path)
+	} else {
+		fmt.Fprintf(stderr, "iriq: reset corpus at %s\n", path)
+	}
+	return 0
+}
+
+// resolveResetPath honors --corpus / IRIQ_CORPUS even under --no-corpus —
+// the user is explicitly addressing a stored file, not runtime state.
+func resolveResetPath(opts *options) string {
+	if opts.corpus != "" {
+		return opts.corpus
+	}
+	if env := os.Getenv("IRIQ_CORPUS"); env != "" {
+		return env
+	}
+	return defaultCorpusPath()
 }
 
 // parseHostStrategy accepts full|registrable|reg|none (case-insensitive).
@@ -359,6 +472,10 @@ func parseOptions(argv []string) ([]string, *options, error) {
 			i++
 		case strings.HasPrefix(a, "--corpus="):
 			opts.corpus = strings.TrimPrefix(a, "--corpus=")
+		case a == "-C" || a == "--no-corpus":
+			opts.noCorpus = true
+		case a == "--reset":
+			opts.reset = true
 		case a == "--host":
 			if i+1 >= len(argv) {
 				return nil, nil, fmt.Errorf("missing argument: --host MODE")
@@ -396,6 +513,8 @@ func parseOptions(argv []string) ([]string, *options, error) {
 					opts.ndjson = true
 				case 'N':
 					opts.hints = false
+				case 'C':
+					opts.noCorpus = true
 				case 'h':
 					opts.help = true
 				case 'V':
