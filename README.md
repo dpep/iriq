@@ -9,17 +9,19 @@ URLs — a log file, a column of links, free-text prose — and it collapses the
 into a small set of stable, deterministic route templates. Fifty thousand
 distinct URLs become twelve shapes.
 
-(An **IRI** is just a URL — the internationalized superset of URI/URL that also
-allows non-ASCII characters. If you know URLs, you know IRIs. The name is *IRI
-Query*: iriq queries an IRI for its structure.)
+(If you know URLs, you already know IRIs — an **IRI** is just the bigger family.
+It covers the everyday `https://…` URL, plus URNs like `urn:isbn:0451450523`,
+other schemes like `mailto:`, and internationalized addresses with non-ASCII
+characters like `https://例え.jp/パス`. Formally it's the Unicode superset of
+URI/URL. The name is *IRI Query*: iriq queries an IRI for its structure.)
 
 Everything iriq does — parsing, normalizing, classifying path and query
 components, clustering, learning new patterns — exists to derive, render, or
 group by that shape.
 
-And it gets sharper the more you feed it. Point a *corpus* at a stream and
-classifications improve as data flows in — high-churn slots get promoted to
-placeholders, and whole types emerge that you can't see in any single URL (a
+And it gets sharper the more you feed it. A *corpus* — on by default — records
+what it sees and improves classifications as data flows in: high-churn slots get
+promoted to placeholders, and whole types emerge that no single URL can reveal (a
 position that's always 100–599 is an HTTP status; one bounded to a dozen values
 is an enum).
 
@@ -73,18 +75,40 @@ $ iriq -J < access.log                        # newline-delimited JSON
 $ iriq --corpus team.db < access.log          # use a specific corpus file
 ```
 
-**Every invocation observes into a persistent corpus by default**, so
-classification sharpens as you use the tool — a position that only ever holds
-integers clusters to a single `{user_id}` shape, and new values normalize to it:
+Per-IRI output (`-n`, `-p`, `-c`, `-J`) streams — each line is read, classified,
+and flushed as it arrives, so iriq works on an unbounded live feed:
 
 ```sh
-$ for n in 1 2 3 4 5 6 7 8 9 10; do
-    iriq https://api.foo.com/users/$n >/dev/null
+$ tail -f access.log | iriq -n                # one shape per line, as logs land
+$ tail -f access.log | iriq -J                # same, as newline-delimited JSON
+```
+
+**Every invocation observes into a persistent corpus by default**, so iriq gets
+smarter the more you run it. The corpus-only types — `enum`, `http_status`,
+`year`, `number` — emerge from the *distribution* of values a position has held,
+something no single URL can show. The cluster view and `--stats` report the
+learned type per position:
+
+```sh
+# Feed a stream where ?status only ever holds a couple of words:
+$ for n in $(seq 1 20); do
+    iriq --corpus demo.db "https://api.foo.com/orders/$n?status=open"   >/dev/null
+    iriq --corpus demo.db "https://api.foo.com/orders/$n?status=closed" >/dev/null
   done
 
-$ iriq -n https://api.foo.com/users/999
-https://api.foo.com/users/{user_id}
+# Ask what it learned. ?status is now an enum — a verdict no single URL
+# could support, since one URL shows only one value:
+$ iriq --corpus demo.db cluster
+[40] api.foo.com  /orders/{order_id}
+    https://api.foo.com/orders/1?status=open
+    https://api.foo.com/orders/1?status=closed
+    https://api.foo.com/orders/2?status=open
+    + 37 more
+    status  enum  (2 distinct, 100%)
 ```
+
+These learned types also flow into normalized output: once the corpus has pegged
+`?status` as an enum, `iriq -n …?status=open` renders `?status={enum}`.
 
 The default corpus lives at `$XDG_DATA_HOME/iriq/default.db` (Linux),
 `~/Library/Application Support/iriq/default.db` (macOS), or
@@ -212,12 +236,12 @@ slot is always 100–599, it's an HTTP status. That's the corpus earning its kee
 
 ## Corpus (streaming + learning)
 
-For processing many identifiers — possibly an unbounded stream — point iriq at a
-corpus. It maintains rolling aggregates and per-(host, prefix) frequency stats,
-so classification improves as more data comes in.
+The corpus maintains rolling aggregates and per-(host, prefix) frequency stats,
+so classification improves as more data comes in — handy for an unbounded stream
+of identifiers. The default corpus already persists; `--corpus PATH` points iriq
+at a specific file instead, to keep separate corpora or share one across runs.
 
-`--corpus PATH` makes the corpus survive across invocations. A `.db` /
-`.sqlite` / `.sqlite3` path is stored in SQLite (WAL journaling, incremental
+A `.db` / `.sqlite` / `.sqlite3` path is stored in SQLite (WAL journaling, incremental
 UPSERTs — multiple `iriq --corpus` processes can write concurrently); a
 `.json` path writes a plain JSON file instead.
 

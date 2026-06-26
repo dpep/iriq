@@ -90,6 +90,7 @@ module Iriq
         iriq -n https://foo.com/users/123
         iriq ./access.log                     # auto-detect file → extract URLs
         cat README.md | iriq -n               # one normalized URL per line
+        tail -f access.log | iriq -J          # live stream → NDJSON per IRI
         cat README.md | iriq --corpus c.json
     TXT
 
