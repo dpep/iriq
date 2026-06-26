@@ -1,3 +1,7 @@
+###  0.32.1  (2026-06-26)
+- Go and Rust `cluster --json` now include the per-param `values` and `value_distribution` (plus `subtype_distribution`, `kind_distribution`, and numeric `min`/`max`/`avg`) that Ruby already emitted — the cluster JSON is now identical across all three runtimes. No change to the human-readable cluster view.
+- Test coverage: new `param_summary` golden fixture exercises the const → string → enum ladder + confidence across Ruby/Go/Rust (`go test` / `cargo test`), and the parity harnesses gained a key-order-agnostic JSON comparison (`jq -S` + number canonicalization) with a `cluster --json` scenario.
+
 ###  0.32.0  (2026-06-26)
 - **Query params now climb a confidence ladder: constant → string → enum.** A param with a single observed value is a constant (rendered as its value); one that varies across free-form literal values is the new `string` type (renders `{string}`); a bounded, well-supported value set is `enum` (renders `{enum}`). Previously a varying literal param just echoed whatever value you passed.
 - **Enum detection is now coverage-based and straggler-robust.** An enum is promoted when its *established* values (each seen ≥ `ENUM_MIN_VALUE_COUNT`, now 3) number 2–10 and cover ≥ 90% of observations. A single brand-new value no longer knocks an established enum back down — fixing the observe-before-normalize order dependence where normalizing `?status=<new>` could flip the type. A lone repeated value is now correctly a constant, not a one-member enum.
