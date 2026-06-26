@@ -1,3 +1,6 @@
+###  0.31.1  (2026-06-26)
+- Docs: clarified the README around corpus-on-by-default — sharper IRI definition (URLs are one member of the family, alongside URNs, `mailto:`, and internationalized addresses), an accurate worked example of the corpus learning a query param is an `enum`, and a streaming example (`tail -f access.log | iriq -J`). Added the streaming example to `--help` (Ruby + Go). No behavior change.
+
 ###  0.31.0  (2026-06-26)
 - **Corpus is now on by default.** Every invocation observes into a persistent corpus, so classification gets sharper the more you use the tool — the streaming/learning behavior that was the selling point is no longer hidden behind a flag. Default location: `$XDG_DATA_HOME/iriq/default.db` on Linux, `~/Library/Application Support/iriq/default.db` on macOS, `%LOCALAPPDATA%/iriq/default.db` on Windows. First-run creation prints a one-line stderr notice.
 - New flag `-C` / `--no-corpus` (and `IRIQ_NO_CORPUS=1` env) — disables the default corpus for a single invocation. Explicit `--corpus PATH` always wins, even with `--no-corpus` set in the env.

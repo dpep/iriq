@@ -105,7 +105,7 @@ dependencies = [
 
 [[package]]
 name = "iriq"
-version = "0.31.0"
+version = "0.31.1"
 dependencies = [
  "once_cell",
  "regex",
