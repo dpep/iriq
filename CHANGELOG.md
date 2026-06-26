@@ -1,3 +1,9 @@
+###  0.32.0  (2026-06-26)
+- **Query params now climb a confidence ladder: constant → string → enum.** A param with a single observed value is a constant (rendered as its value); one that varies across free-form literal values is the new `string` type (renders `{string}`); a bounded, well-supported value set is `enum` (renders `{enum}`). Previously a varying literal param just echoed whatever value you passed.
+- **Enum detection is now coverage-based and straggler-robust.** An enum is promoted when its *established* values (each seen ≥ `ENUM_MIN_VALUE_COUNT`, now 3) number 2–10 and cover ≥ 90% of observations. A single brand-new value no longer knocks an established enum back down — fixing the observe-before-normalize order dependence where normalizing `?status=<new>` could flip the type. A lone repeated value is now correctly a constant, not a one-member enum.
+- **New `confidence` score on every param** (`total / (total + 15)`): a 0–1 figure of how much evidence backs the classification, shown in the cluster view (`status  enum  conf 0.93  ...`) and the cluster JSON. The type is the guess; confidence says how sure.
+- Ruby, Go, and Rust ship this together — same thresholds, same rendering, parity preserved (68/68 Ruby↔Go, 60/60 Rust↔Go).
+
 ###  0.31.1  (2026-06-26)
 - Docs: clarified the README around corpus-on-by-default — sharper IRI definition (URLs are one member of the family, alongside URNs, `mailto:`, and internationalized addresses), an accurate worked example of the corpus learning a query param is an `enum`, and a streaming example (`tail -f access.log | iriq -J`). Added the streaming example to `--help` (Ruby + Go). No behavior change.
 

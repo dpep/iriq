@@ -1,6 +1,6 @@
 [package]
 name = "iriq"
-version = "0.31.1"
+version = "0.32.0"
 edition = "2021"
 description = "IRI/URL extraction, normalization, and shape clustering."
 license = "MIT"
