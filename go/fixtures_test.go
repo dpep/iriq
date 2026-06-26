@@ -2,6 +2,7 @@ package iriq
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -350,5 +351,58 @@ func TestFixtureCorpusDump(t *testing.T) {
 	}
 	if !reflect.DeepEqual(reloaded.RawShapeCounts(), c.RawShapeCounts()) {
 		t.Errorf("round-trip raw_shape_counts mismatch")
+	}
+}
+
+// TestFixtureParamSummary replays the Ruby-produced param stream and asserts
+// Go derives the same per-param type, confidence, cardinality, and enum
+// member values — the const → string → enum ladder. Struct comparison is
+// inherently key-order-agnostic.
+func TestFixtureParamSummary(t *testing.T) {
+	var fx struct {
+		Query    string   `json:"query"`
+		Inputs   []string `json:"inputs"`
+		Expected map[string]struct {
+			Type        string   `json:"type"`
+			Confidence  float64  `json:"confidence"`
+			Cardinality int      `json:"cardinality"`
+			Values      []string `json:"values"`
+		} `json:"expected"`
+	}
+	loadFixture(t, "param_summary.json", &fx)
+
+	c := NewCorpus()
+	for _, u := range fx.Inputs {
+		if _, err := c.Observe(u); err != nil {
+			t.Fatalf("Observe(%q): %v", u, err)
+		}
+	}
+
+	rows := c.ParamsFor(fx.Query)
+	byName := map[string]ParamSummary{}
+	for _, r := range rows {
+		byName[r.Name] = r
+	}
+	if len(rows) != len(fx.Expected) {
+		t.Fatalf("param count = %d, want %d", len(rows), len(fx.Expected))
+	}
+	for name, want := range fx.Expected {
+		got, ok := byName[name]
+		if !ok {
+			t.Errorf("missing param %q", name)
+			continue
+		}
+		if string(got.Type) != want.Type {
+			t.Errorf("%s type = %q, want %q", name, got.Type, want.Type)
+		}
+		if math.Abs(got.Confidence-want.Confidence) > 1e-9 {
+			t.Errorf("%s confidence = %v, want %v", name, got.Confidence, want.Confidence)
+		}
+		if got.Cardinality != want.Cardinality {
+			t.Errorf("%s cardinality = %d, want %d", name, got.Cardinality, want.Cardinality)
+		}
+		if want.Values != nil && !reflect.DeepEqual(got.Values, want.Values) {
+			t.Errorf("%s values = %v, want %v", name, got.Values, want.Values)
+		}
 	}
 }

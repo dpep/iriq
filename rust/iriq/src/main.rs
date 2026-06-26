@@ -1233,11 +1233,59 @@ fn cluster_json(c: &Cluster) -> Value {
                 Value::Number((p.cardinality as u64).into()),
             );
             o.insert("presence".to_string(), Value::from(p.presence));
+            // Conditional fields mirror Ruby's Cluster#param_summary so the
+            // cluster JSON is identical across runtimes.
+            if !p.values.is_empty() {
+                o.insert(
+                    "values".to_string(),
+                    Value::Array(p.values.iter().map(|v| Value::String(v.clone())).collect()),
+                );
+            }
+            if !p.value_distribution.is_empty() {
+                o.insert(
+                    "value_distribution".to_string(),
+                    float_map(p.value_distribution.iter().map(|(k, v)| (k.clone(), *v))),
+                );
+            }
+            if !p.subtype_distribution.is_empty() {
+                o.insert(
+                    "subtype_distribution".to_string(),
+                    float_map(
+                        p.subtype_distribution
+                            .iter()
+                            .map(|(k, v)| (k.as_str().to_string(), *v)),
+                    ),
+                );
+            }
+            if !p.kind_distribution.is_empty() {
+                o.insert(
+                    "kind_distribution".to_string(),
+                    float_map(
+                        p.kind_distribution
+                            .iter()
+                            .map(|(k, v)| (k.as_str().to_string(), *v)),
+                    ),
+                );
+            }
+            if p.numeric_count > 0 {
+                o.insert("min".to_string(), Value::from(p.min));
+                o.insert("max".to_string(), Value::from(p.max));
+                o.insert("avg".to_string(), Value::from(p.avg));
+            }
             Value::Object(o)
         })
         .collect();
     m.insert("params".to_string(), Value::Array(params));
     Value::Object(m)
+}
+
+// Build a JSON object from string→f64 pairs.
+fn float_map<I: IntoIterator<Item = (String, f64)>>(pairs: I) -> Value {
+    let mut o = serde_json::Map::new();
+    for (k, v) in pairs {
+        o.insert(k, Value::from(v));
+    }
+    Value::Object(o)
 }
 
 fn emit_param_summary<W: Write>(stdout: &mut W, c: &Cluster) {

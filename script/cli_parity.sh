@@ -58,6 +58,41 @@ run_pair() {
   fi
 }
 
+# Like run_pair, but compares JSON *semantically* by normalizing both sides
+# through `jq -S` (sorts object keys recursively and canonicalizes number
+# formatting). This lets us parity-test JSON whose key order differs by
+# runtime — Go marshals maps with sorted keys while Ruby preserves insertion
+# order — without forcing one emission order on everyone. Skipped when jq is
+# unavailable.
+run_pair_json() {
+  local label="$1"
+  local stdin="$2"
+  shift 2
+  local args=("$@")
+
+  if ! command -v jq >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # `-S` sorts keys; `walk(.+0)` forces every number through arithmetic so
+  # whole-valued floats canonicalize identically (jq 1.7+ otherwise preserves
+  # `1` vs `1.0` literally).
+  local norm='walk(if type == "number" then . + 0 else . end)'
+  local ruby_out go_out
+  ruby_out=$(echo -n "$stdin" | (cd "$REPO_ROOT" && $RUBY "${args[@]}") 2>&1 | jq -S "$norm" 2>&1 || true)
+  go_out=$(echo -n "$stdin" | "$GO_BIN" "${args[@]}" 2>&1 | jq -S "$norm" 2>&1 || true)
+
+  if [[ "$ruby_out" == "$go_out" ]]; then
+    pass_count=$((pass_count + 1))
+  else
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH (json): $label"
+    echo "  args:  ${args[*]}"
+    diff <(echo "$ruby_out") <(echo "$go_out") | sed 's/^/    /'
+  fi
+}
+
 # Single-input forms
 run_pair "version"           "" --version
 run_pair "summary URL"       "" "https://foo.com/users/123"
@@ -145,6 +180,7 @@ for pi in "${!param_words[@]}"; do
   param_stream+="https://foo.com/items?status=$pst&label=${param_words[$pi]}&fmt=json"$'\n'
 done
 run_pair "cluster params (enum/string/const/conf)" "$param_stream" cluster
+run_pair_json "cluster params --json (key-order-agnostic)" "$param_stream" cluster --json
 
 # Corpus mode parity — observe the same stream under JSON storage in one run
 # and SQLite storage in another, then dump stats from each and diff.

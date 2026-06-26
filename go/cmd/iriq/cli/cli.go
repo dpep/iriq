@@ -1294,7 +1294,7 @@ func emitClusters(stdout io.Writer, clusters []*iriq.Cluster, opts *options) {
 			summaries := c.ParamSummary()
 			params := make([]map[string]interface{}, len(summaries))
 			for j, p := range summaries {
-				params[j] = map[string]interface{}{
+				pm := map[string]interface{}{
 					"name":        p.Name,
 					"count":       p.Count,
 					"type":        string(p.Type),
@@ -1302,6 +1302,34 @@ func emitClusters(stdout io.Writer, clusters []*iriq.Cluster, opts *options) {
 					"cardinality": p.Cardinality,
 					"presence":    p.Presence,
 				}
+				// Conditional fields mirror Ruby's Cluster#param_summary so the
+				// cluster JSON is identical across runtimes.
+				if len(p.Values) > 0 {
+					pm["values"] = p.Values
+				}
+				if p.ValueDistribution != nil {
+					pm["value_distribution"] = p.ValueDistribution
+				}
+				if p.SubtypeDistribution != nil {
+					sd := make(map[string]float64, len(p.SubtypeDistribution))
+					for k, v := range p.SubtypeDistribution {
+						sd[string(k)] = v
+					}
+					pm["subtype_distribution"] = sd
+				}
+				if p.KindDistribution != nil {
+					kd := make(map[string]float64, len(p.KindDistribution))
+					for k, v := range p.KindDistribution {
+						kd[string(k)] = v
+					}
+					pm["kind_distribution"] = kd
+				}
+				if p.NumericCount > 0 {
+					pm["min"] = p.Min
+					pm["max"] = p.Max
+					pm["avg"] = p.Avg
+				}
+				params[j] = pm
 			}
 			out[i] = map[string]interface{}{
 				"key":      c.Key,

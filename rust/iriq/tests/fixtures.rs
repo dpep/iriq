@@ -7,7 +7,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use iriq::{
-    normalize_identifier, parse, path_shape_for, singularize, Extractor, SegmentClassifier,
+    normalize_identifier, parse, path_shape_for, singularize, Corpus, Extractor, ParamSummary,
+    SegmentClassifier,
 };
 
 fn fixtures_dir() -> PathBuf {
@@ -240,5 +241,52 @@ fn fixture_extractor() {
         );
         let got_strict = strict.extract_strings(&case.text);
         assert_eq!(got_strict, case.strict, "extract strict {:?}", case.text);
+    }
+}
+
+// ─── Param summary (const → string → enum ladder + confidence) ─────────────
+
+#[derive(Deserialize)]
+struct ParamExpect {
+    #[serde(rename = "type")]
+    ty: String,
+    confidence: f64,
+    cardinality: usize,
+    #[serde(default)]
+    values: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+struct ParamSummaryFx {
+    query: String,
+    inputs: Vec<String>,
+    expected: HashMap<String, ParamExpect>,
+}
+
+#[test]
+fn fixture_param_summary() {
+    let fx: ParamSummaryFx = load("param_summary.json");
+    let mut c = Corpus::new();
+    for u in &fx.inputs {
+        c.observe(u).unwrap();
+    }
+    let rows = c.params_for(&fx.query);
+    assert_eq!(rows.len(), fx.expected.len(), "param count");
+    let by_name: HashMap<&str, &ParamSummary> = rows.iter().map(|r| (r.name.as_str(), r)).collect();
+    for (name, want) in &fx.expected {
+        let got = by_name
+            .get(name.as_str())
+            .unwrap_or_else(|| panic!("missing param {name}"));
+        assert_eq!(got.ty.as_str(), want.ty, "{name} type");
+        assert!(
+            (got.confidence - want.confidence).abs() < 1e-9,
+            "{name} confidence {} != {}",
+            got.confidence,
+            want.confidence
+        );
+        assert_eq!(got.cardinality, want.cardinality, "{name} cardinality");
+        if let Some(vals) = &want.values {
+            assert_eq!(&got.values, vals, "{name} values");
+        }
     }
 }

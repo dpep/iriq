@@ -48,6 +48,30 @@ run_pair() {
   fi
 }
 
+# Like run_pair, but compares JSON semantically via `jq -S` (sorts object keys
+# recursively, canonicalizes number formatting). Lets us parity-test JSON whose
+# key order differs by runtime. Skipped when jq is unavailable.
+run_pair_json() {
+  local label="$1"; local stdin="$2"; shift 2
+  local args=("$@")
+  command -v jq >/dev/null 2>&1 || return 0
+  # `-S` sorts keys; `walk(.+0)` forces numbers through arithmetic so whole
+  # floats canonicalize identically (jq 1.7+ preserves `1` vs `1.0` literally).
+  local norm='walk(if type == "number" then . + 0 else . end)'
+  local g r
+  g=$(echo -n "$stdin" | "$GO_BIN" "${args[@]}" 2>&1 | jq -S "$norm" 2>&1 || true)
+  r=$(echo -n "$stdin" | "$RUST_BIN" "${args[@]}" 2>&1 | jq -S "$norm" 2>&1 || true)
+  if [[ "$g" == "$r" ]]; then
+    pass=$((pass+1))
+  else
+    fail=$((fail+1))
+    echo
+    echo "MISMATCH (json): $label"
+    echo "  args: ${args[*]}"
+    diff <(echo "$g") <(echo "$r") | sed 's/^/    /'
+  fi
+}
+
 # ── Single-input scenarios ─────────────────────────────────────────────
 run_pair "version"           "" --version
 run_pair "summary URL"       "" "https://foo.com/users/123"
@@ -116,6 +140,7 @@ for pi in "${!param_words[@]}"; do
   param_stream+="https://foo.com/items?status=$pst&label=${param_words[$pi]}&fmt=json"$'\n'
 done
 run_pair "cluster params (enum/string/const/conf)" "$param_stream" cluster
+run_pair_json "cluster params --json (key-order-agnostic)" "$param_stream" cluster --json
 
 # ── Corpus scenarios ───────────────────────────────────────────────────
 corpus_dir="$(mktemp -d)"

@@ -273,4 +273,45 @@ small = Iriq::Corpus.new
 ].each { |u| small.observe(u) }
 write_fixture("corpus_dump", small.dump)
 
+# Param classification fixture — exercises the const → string → enum ladder,
+# the confidence score, and enum member values so Go + Rust assert identical
+# per-param typing. All params share the /items cluster; each carries a
+# different distribution to land on a different rung.
+params_corpus = Iriq::Corpus.new
+param_inputs  = []
+observe_param = lambda do |url|
+  param_inputs << url
+  params_corpus.observe(url)
+end
+
+# enum — bounded set, open dominant over closed.
+14.times { observe_param.call("https://foo.com/items?status=open") }
+10.times { observe_param.call("https://foo.com/items?status=closed") }
+# string — varies across many distinct literal words, never bounded.
+%w[one two three four five six seven eight nine ten eleven twelve thirteen
+   fourteen fifteen sixteen seventeen eighteen nineteen twenty alpha beta
+   gamma delta].each { |w| observe_param.call("https://foo.com/items?label=#{w}") }
+# constant — a single repeated value stays a literal (rendered as-is).
+40.times { observe_param.call("https://foo.com/items?fmt=json") }
+# integer — distinct numbers, outside the year/http_status windows.
+(1..24).each { |n| observe_param.call("https://foo.com/items?page=#{n}") }
+# boolean — true dominant over false.
+18.times { observe_param.call("https://foo.com/items?flag=true") }
+6.times  { observe_param.call("https://foo.com/items?flag=false") }
+
+param_expected = params_corpus.params_for("https://foo.com/items").to_h do |row|
+  entry = {
+    "type"        => row[:type].to_s,
+    "confidence"  => row[:confidence],
+    "cardinality" => row[:cardinality],
+  }
+  entry["values"] = row[:values] if row[:values]
+  [row[:name], entry]
+end
+write_fixture("param_summary", {
+  "query"    => "https://foo.com/items",
+  "inputs"   => param_inputs,
+  "expected" => param_expected,
+})
+
 puts "Done."
