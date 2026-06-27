@@ -2,6 +2,8 @@ Iriq
 ======
 [![codecov](https://codecov.io/gh/dpep/iriq/branch/main/graph/badge.svg)](https://codecov.io/gh/dpep/iriq)
 
+IRI Query
+
 **Iriq finds the *shape* of a URL** — the structural template you get when you
 erase the parts that vary and keep the parts that don't. `…/users/123` and
 `…/users/999` are the same shape: `/users/{user_id}`. Feed iriq a pile of messy
@@ -9,8 +11,7 @@ URLs — a log file, a column of links, free-text prose — and it collapses the
 into a small set of stable, deterministic route templates. Fifty thousand
 distinct URLs become twelve shapes.
 
-(If you know URLs, you already know IRIs — an **IRI** is just the bigger family.
-It covers the everyday `https://…` URL, plus URNs like `urn:isbn:0451450523`,
+What's an IRI?  Internationalized Resource Identifiers cover everyday URLs `https://…`, plus URNs like `urn:isbn:0451450523`,
 other schemes like `mailto:`, and internationalized addresses with non-ASCII
 characters like `https://例え.jp/パス`. Formally it's the Unicode superset of
 URI/URL. The name is *IRI Query*: iriq queries an IRI for its structure.)
@@ -84,10 +85,8 @@ $ tail -f access.log | iriq -J                # same, as newline-delimited JSON
 ```
 
 **Every invocation observes into a persistent corpus by default**, so iriq gets
-smarter the more you run it. The corpus-only types — `enum`, `http_status`,
-`year`, `number` — emerge from the *distribution* of values a position has held,
-something no single URL can show. The cluster view and `--stats` report the
-learned type per position:
+smarter the more you run it. The corpus-only types (eg. `enum` / `http_status`)
+emerge from the *distribution* of values observed.
 
 ```sh
 # Feed a stream where ?status only ever holds a couple of words:
@@ -146,9 +145,6 @@ brew install dpep/tools/iriq
 
 # Cargo, from crates.io
 cargo install iriq
-
-# Cargo, from a source checkout
-cargo install --path rust/iriq
 ```
 
 One crate ships both the library and the `iriq` binary. Corpora persist to
@@ -221,8 +217,7 @@ mechanical placeholders (`{integer}` instead of `{user_id}`).
 
 ### Types only the corpus can see
 
-Four types never come from a single URL — they emerge from the *distribution*
-of values a position has held across many observations:
+Four types emerge from the *distribution* of values across many observations:
 
 | Type | Emerges when a position… |
 | --- | --- |
@@ -232,7 +227,7 @@ of values a position has held across many observations:
 | `enum` | holds a small, bounded set of distinct values |
 
 Mechanically, `200` is just an integer. Across ten thousand URLs where that
-slot is always 100–599, it's an HTTP status. That's the corpus earning its keep.
+slot is always 100–599, it's likely an HTTP status.
 
 ## Corpus (streaming + learning)
 
@@ -262,9 +257,7 @@ $ iriq --corpus c.db --reinfer
 Iriq doesn't just classify against a fixed list — it watches the stream and
 *proposes new recognizers* for patterns it keeps seeing. Notice `ghp_…` or
 `cus_…` recurring at a slug position and iriq will suggest a recognizer for it,
-with evidence: coverage, host count, confidence. Proposals are never
-auto-applied — you activate the ones you trust, and they persist with the
-corpus. Human-in-the-loop by design.
+with evidence: coverage, host count, confidence.
 
 ```sh
 # Print proposals (human-readable, or --json)
@@ -356,8 +349,7 @@ Environment variables:
 
 A positional argument that doesn't parse as an IRI but IS an existing file is
 read and extracted from automatically — `iriq ./access.log` and
-`iriq /var/log/foo.log` Just Work. (Bare filenames like `README.md` may still
-parse as a URL; pipe with `cat` to disambiguate.)
+`iriq /var/log/foo.log` Just Work. (pipe with `cat` to disambiguate)
 
 Exit codes: `0` success, `1` usage error, `2` parse error.
 
@@ -376,15 +368,3 @@ Iriq does **not**:
 
 Iriq's focus is the analysis side: classification, normalization, and clustering
 — not a complete URL implementation.
-
-----
-## Contributing
-
-Yes please  :)
-
-1. Fork it
-1. Create your feature branch (`git checkout -b my-feature`)
-1. Ensure the tests pass (`cd rust && cargo test`)
-1. Commit your changes (`git commit -am 'awesome new feature'`)
-1. Push your branch (`git push origin my-feature`)
-1. Create a Pull Request
