@@ -169,6 +169,28 @@ func TestSqliteCapsClusterExamples(t *testing.T) {
 	}
 }
 
+func TestSqliteDedupesClusterExamples(t *testing.T) {
+	sqlite, _ := sqliteCorpusAt(t)
+	defer sqlite.Close()
+	for i := 0; i < 3; i++ {
+		_, _ = sqlite.Observe("https://foo.com/users/1")
+	}
+	_, _ = sqlite.Observe("https://foo.com/users/2")
+
+	cl := sqlite.Clusters()[0]
+	if cl.Count != 4 {
+		t.Errorf("count = %d, want 4", cl.Count)
+	}
+	got := []string{}
+	for _, e := range cl.Examples {
+		got = append(got, e.Canonical())
+	}
+	want := []string{"https://foo.com/users/1", "https://foo.com/users/2"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("examples = %v, want %v", got, want)
+	}
+}
+
 func TestSqliteExportToJSON(t *testing.T) {
 	sqlite, _ := sqliteCorpusAt(t)
 	_, _ = sqlite.Observe("https://foo.com/users/1")

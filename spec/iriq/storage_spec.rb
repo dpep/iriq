@@ -130,6 +130,18 @@ describe Iriq::Storage do
       sqlite.close
     end
 
+    it "dedupes cluster examples by canonical" do
+      sqlite = Iriq::Corpus.open(@path)
+      3.times { sqlite.observe("https://foo.com/users/1") }
+      sqlite.observe("https://foo.com/users/2")
+
+      cluster = sqlite.clusters.first
+      expect(cluster.count).to eq(4)
+      expect(cluster.examples.map(&:canonical))
+        .to eq(%w[https://foo.com/users/1 https://foo.com/users/2])
+      sqlite.close
+    end
+
     it "exports to JSON via Corpus#save(path)" do
       sqlite = Iriq::Corpus.open(@path)
       sqlite.observe("https://foo.com/users/1")

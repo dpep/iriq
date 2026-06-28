@@ -212,6 +212,24 @@ corpus_pair() {
 corpus_pair "JSON storage"   ".json"
 corpus_pair "SQLite storage" ".db"
 
+# Cluster examples dedup — repeated inputs must collapse to a single example in
+# the rendered cluster view (regression: the SQLite backend once stored dupes).
+dedup_stream=$'https://foo.com/users/1\nhttps://foo.com/users/1\nhttps://foo.com/users/1\nhttps://foo.com/users/2\n'
+ruby_dedup="$corpus_dir/ruby-dedup.db"
+go_dedup="$corpus_dir/go-dedup.db"
+echo -n "$dedup_stream" | (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_dedup") > /dev/null
+echo -n "$dedup_stream" | "$GO_BIN" --corpus "$go_dedup" > /dev/null
+ruby_dedup_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_dedup" cluster < /dev/null) )
+go_dedup_out=$( "$GO_BIN" --corpus "$go_dedup" cluster < /dev/null )
+if [[ "$ruby_dedup_out" == "$go_dedup_out" ]]; then
+  pass_count=$((pass_count + 1))
+else
+  fail_count=$((fail_count + 1))
+  echo
+  echo "MISMATCH: cluster examples dedup"
+  diff <(echo "$ruby_dedup_out") <(echo "$go_dedup_out") | sed 's/^/    /'
+fi
+
 # --reinfer parity. After observing the same stream, both CLIs should
 # produce identical --reinfer output, and --stats afterward should still
 # match (idempotent replay).

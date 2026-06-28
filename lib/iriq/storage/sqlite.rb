@@ -280,12 +280,18 @@ module Iriq
           ON CONFLICT(key) DO UPDATE SET count = count + 1
         SQL
 
-        # Examples — capped at Cluster::MAX_EXAMPLES.
+        # Examples — capped at Cluster::MAX_EXAMPLES, deduped by canonical
+        # (mirrors Cluster#add so the SQLite view matches the in-memory one).
+        canonical = identifier.canonical
         examples_count = @db.get_first_value(
           "SELECT COUNT(*) FROM cluster_examples WHERE cluster_key = ?", [key],
         )
-        if examples_count < Cluster::MAX_EXAMPLES
-          @db.execute(<<~SQL, [key, examples_count, identifier.canonical])
+        already_present = @db.get_first_value(
+          "SELECT 1 FROM cluster_examples WHERE cluster_key = ? AND canonical = ?",
+          [key, canonical],
+        )
+        if examples_count < Cluster::MAX_EXAMPLES && already_present.nil?
+          @db.execute(<<~SQL, [key, examples_count, canonical])
             INSERT INTO cluster_examples (cluster_key, position, canonical)
             VALUES (?, ?, ?)
           SQL

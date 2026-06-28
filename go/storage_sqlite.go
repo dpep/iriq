@@ -453,12 +453,20 @@ func (s *SqliteStorage) AddToCluster(key, host, scheme, shape string, iri *Ident
 		ON CONFLICT(key) DO UPDATE SET count = count + 1
 	`, key, host, scheme, shape)
 
+	// Examples — capped at MaxClusterExamples, deduped by canonical
+	// (mirrors Cluster.Add so the SQLite view matches the in-memory one).
+	canonical := iri.Canonical()
 	var examplesCount int
 	_ = s.ex().QueryRow("SELECT COUNT(*) FROM cluster_examples WHERE cluster_key = ?", key).Scan(&examplesCount)
-	if examplesCount < MaxClusterExamples {
+	var exists int
+	_ = s.ex().QueryRow(
+		"SELECT COUNT(*) FROM cluster_examples WHERE cluster_key = ? AND canonical = ?",
+		key, canonical,
+	).Scan(&exists)
+	if examplesCount < MaxClusterExamples && exists == 0 {
 		_, _ = s.ex().Exec(
 			"INSERT INTO cluster_examples (cluster_key, position, canonical) VALUES (?, ?, ?)",
-			key, examplesCount, iri.Canonical(),
+			key, examplesCount, canonical,
 		)
 	}
 

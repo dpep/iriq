@@ -169,6 +169,24 @@ corpus_pair() {
 corpus_pair "JSON storage"   ".json"
 corpus_pair "SQLite storage" ".db"
 
+# Cluster examples dedup — repeated inputs must collapse to a single example in
+# the rendered cluster view (regression: the SQLite backend once stored dupes).
+dedup_stream=$'https://foo.com/users/1\nhttps://foo.com/users/1\nhttps://foo.com/users/1\nhttps://foo.com/users/2\n'
+go_dedup="$corpus_dir/go-dedup.db"
+rust_dedup="$corpus_dir/rust-dedup.db"
+echo -n "$dedup_stream" | "$GO_BIN" --corpus "$go_dedup" >/dev/null
+echo -n "$dedup_stream" | "$RUST_BIN" --corpus "$rust_dedup" >/dev/null
+g=$( "$GO_BIN" --corpus "$go_dedup" cluster < /dev/null )
+r=$( "$RUST_BIN" --corpus "$rust_dedup" cluster < /dev/null )
+if [[ "$g" == "$r" ]]; then
+  pass=$((pass+1))
+else
+  fail=$((fail+1))
+  echo
+  echo "MISMATCH: cluster examples dedup"
+  diff <(echo "$g") <(echo "$r") | sed 's/^/    /'
+fi
+
 # --reinfer parity
 reinfer_pair() {
   local label="$1" ext="$2"
