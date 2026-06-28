@@ -1,8 +1,6 @@
-Iriq
-======
-[![codecov](https://codecov.io/gh/dpep/iriq/branch/main/graph/badge.svg)](https://codecov.io/gh/dpep/iriq)
+# Iriq — IRI Query
 
-IRI Query
+[![codecov](https://codecov.io/gh/dpep/iriq/branch/main/graph/badge.svg)](https://codecov.io/gh/dpep/iriq)
 
 **Iriq finds the *shape* of a URL** — the structural template you get when you
 erase the parts that vary and keep the parts that don't. `…/users/123` and
@@ -11,10 +9,10 @@ URLs — a log file, a column of links, free-text prose — and it collapses the
 into a small set of stable, deterministic route templates. Fifty thousand
 distinct URLs become twelve shapes.
 
-What's an IRI?  Internationalized Resource Identifiers cover everyday URLs `https://…`, plus URNs like `urn:isbn:0451450523`,
+What's an IRI? Internationalized Resource Identifiers cover everyday URLs `https://…`, plus URNs like `urn:isbn:0451450523`,
 other schemes like `mailto:`, and internationalized addresses with non-ASCII
 characters like `https://例え.jp/パス`. Formally it's the Unicode superset of
-URI/URL. The name is *IRI Query*: iriq queries an IRI for its structure.)
+URI/URL. The name is *IRI Query*: iriq queries an IRI for its structure.
 
 Everything iriq does — parsing, normalizing, classifying path and query
 components, clustering, learning new patterns — exists to derive, render, or
@@ -85,7 +83,7 @@ $ tail -f access.log | iriq -J                # same, as newline-delimited JSON
 ```
 
 **Every invocation observes into a persistent corpus by default**, so iriq gets
-smarter the more you run it. The corpus-only types (eg. `enum` / `http_status`)
+smarter the more you run it. The corpus-only types (e.g. `enum` / `http_status`)
 emerge from the *distribution* of values observed.
 
 ```sh
@@ -149,31 +147,6 @@ cargo install iriq
 
 One crate ships both the library and the `iriq` binary. Corpora persist to
 SQLite (bundled, WAL) out of the box — nothing to flag, install, or rebuild.
-
-## Use it as a Rust library
-
-```sh
-cargo add iriq
-```
-
-```rust
-use iriq::{parse, normalize, Corpus};
-
-let iri = parse("https://foo.com/users/123")?;
-iri.host;             // "foo.com"
-iri.path_segments;    // ["users", "123"]
-iri.canonical();      // "https://foo.com/users/123"
-
-normalize("https://foo.com/users/123")?;   // "https://foo.com/users/{user_id}"
-
-// Streaming clustering against a persistent corpus.
-let mut corpus = Corpus::open("c.db")?;
-corpus.observe("https://foo.com/users/1")?;
-corpus.save("c.db")?;
-```
-
-Full API on [docs.rs/iriq](https://docs.rs/iriq); see the
-[crate README](rust/iriq/README.md) for the library tour.
 
 ## Segment classification
 
@@ -352,6 +325,31 @@ read and extracted from automatically — `iriq ./access.log` and
 `iriq /var/log/foo.log` Just Work. (pipe with `cat` to disambiguate)
 
 Exit codes: `0` success, `1` usage error, `2` parse error.
+
+## Rust library
+
+```sh
+cargo add iriq
+```
+
+```rust
+use iriq::{parse, normalize, Corpus};
+
+let iri = parse("https://foo.com/users/123")?;
+iri.host;             // "foo.com"
+iri.path_segments;    // ["users", "123"]
+iri.canonical();      // "https://foo.com/users/123"
+
+normalize("https://foo.com/users/123")?;   // "https://foo.com/users/{user_id}"
+
+// Streaming clustering against a persistent corpus.
+let mut corpus = Corpus::open("c.db")?;
+corpus.observe("https://foo.com/users/1")?;
+corpus.save("c.db")?;
+```
+
+Full API on [docs.rs/iriq](https://docs.rs/iriq); see the
+[crate README](rust/iriq/README.md) for the library tour.
 
 ## Limitations (intentional)
 
