@@ -15,3 +15,16 @@ updates:
     pull-request-branch-name:
       separator: "-"
     versioning-strategy: lockfile-only
+  - package-ecosystem: "cargo"
+    directory: "/rust"
+    schedule:
+      interval: "weekly"
+    pull-request-branch-name:
+      separator: "-"
+    versioning-strategy: lockfile-only
+  - package-ecosystem: "gomod"
+    directory: "/go"
+    schedule:
+      interval: "weekly"
+    pull-request-branch-name:
+      separator: "-"
