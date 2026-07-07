@@ -320,7 +320,6 @@ completion_pair() {
 
 completion_pair "bash"
 completion_pair "zsh"
-completion_pair "fish"
 
 # Auto-activation parity. After observing the same PAT-shaped stream and
 # activating the proposal in both runtimes, classify("ghp_xyz") should

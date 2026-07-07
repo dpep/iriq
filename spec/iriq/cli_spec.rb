@@ -78,7 +78,7 @@ describe Iriq::CLI do
   end
 
   describe "completion" do
-    %w[bash zsh fish].each do |shell|
+    %w[bash zsh].each do |shell|
       it "emits the bundled #{shell} script" do
         expect(run("completion", shell)).to eq(0)
         expect(stdout.string).to eq(File.read(Iriq::CLI::COMPLETION_FILES[shell]))
