@@ -50,8 +50,8 @@ no schema changes.
 - **Public API surface:** narrow on purpose. The four `Iriq.*` module methods
   and the CLI are the contract; everything else may move freely. Dev speed
   beats API stability for now.
-- **Ruby ↔ Go parity:** still the goal. The current discipline (Ruby-first,
-  fixture regen, Go-mirror, parity test) stays in force as the *acceptance
+- **Ruby ↔ Rust parity:** still the goal. The current discipline (Ruby-first,
+  fixture regen, Rust-mirror, parity test) stays in force as the *acceptance
   gate*; ordering within a single feature commit is implementer's call.
 - **Performance:** no hard target. Don't be wasteful. Watch out for obvious
   regressions (per-segment allocation in hot paths, redundant classify calls,
@@ -60,7 +60,7 @@ no schema changes.
   external recognizer registry is a small follow-up, not a redesign.
 - **Calibration data:** we generate and check in our own. See task #3.
 - **Commit discipline:** one feature, one commit, immediate push. Tests must
-  pass: `bundle exec rspec && go test ./... && script/cli_parity.sh`.
+  pass: `bundle exec rspec && make check && script/cli_parity.sh`.
 
 ## Phase 1 — Year 1: structural foundation
 
@@ -171,7 +171,7 @@ Speculative; revisit after Phase 2.
 
 ## Risks tracked
 
-- **Parity tax compounds.** Every refactor is 2× surface. If a refactor's Go
+- **Parity tax compounds.** Every refactor is 2× surface. If a refactor's Rust
   port slips a release, mark it explicitly in CHANGELOG and treat it as tech
   debt — don't let it sit.
 - **Confidence calibration is theater without truth data.** Task #3 ships

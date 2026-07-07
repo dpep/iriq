@@ -58,15 +58,18 @@ jobs:
         if: always()
 
   parity:
-    name: Rust ↔ Go parity
+    name: Ruby ↔ Rust parity
     runs-on: ubuntu-latest
+    env:
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - uses: ruby/setup-ruby@v1
         with:
-          go-version: "1.23"
-          cache: false
+          ruby-version: "3.4"
+          bundler-cache: true
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -74,13 +77,23 @@ jobs:
         with:
           workspaces: rust
 
-      - name: build Go binary (with sqlite)
-        working-directory: go
-        run: go build -o ../bin/iriq ./cmd/iriq
+      # Regenerate fixtures from Ruby (the reference implementation), then
+      # verify the committed copies match. Any drift fails the job before
+      # the Rust fixture tests even run.
+      - name: regenerate fixtures
+        run: bundle exec ruby script/generate_fixtures.rb
+
+      - name: assert fixtures unchanged
+        run: |
+          if ! git diff --quiet spec/fixtures; then
+            echo "::error::Fixtures are stale — run script/generate_fixtures.rb and commit."
+            git --no-pager diff spec/fixtures
+            exit 1
+          fi
 
       - name: build Rust binary (release, with sqlite)
         working-directory: rust
         run: cargo build --release --bin iriq
 
       - name: CLI parity
-        run: script/rust_parity.sh
+        run: script/cli_parity.sh

@@ -11,7 +11,7 @@ near-shape clustering, and Phase 3 productize items).
 
 For the inner details, read the source: `lib/iriq/{recognizer,position,
 shape,evidence,event,reducer,recognizer_proposal,synthesized_recognizer,
-cross_host_shape,corpus}.rb` and their Go counterparts at the repo root.
+cross_host_shape,corpus}.rb` and their Rust counterparts under `rust/iriq/src/`.
 
 ## Core principle
 
@@ -170,7 +170,7 @@ re-reads materialized views; it does not require re-running the pipeline.
 - `Storage::*` backends (Memory, Json, Sqlite). Internals change to persist
   events rather than ad-hoc counters, but the file-extension routing API
   (`Corpus.open(path)`) stays.
-- Public CLI surface (`exe/iriq`, the Go `cmd/iriq` binary).
+- Public CLI surface (`exe/iriq`, the Rust `iriq` binary).
 - The four `Iriq.*` module methods: `parse`, `normalize`, `explain`,
   `extract`.
 
