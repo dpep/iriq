@@ -321,7 +321,7 @@ pub fn file_kind_distribution(stats: &PositionStats) -> HashMap<FileKind, f64> {
     }
     let mut out = HashMap::new();
     for (k, n) in counts {
-        // Unknown values are bucketed separately in Go using FileKind("unknown");
+        // Unknown values are bucketed separately in Ruby under :unknown;
         // here we filter to known kinds. (Phase 1 omitted this nuance; phase 2 keeps it.)
         if let Some(kind) = k {
             out.insert(kind, round_frac((n as f64) / (total as f64)));

@@ -1,6 +1,6 @@
 // Loads the golden JSON fixtures under spec/fixtures/ and asserts that the
-// Rust implementation produces the same outputs that the Ruby and Go
-// implementations produce.
+// Rust implementation produces the same outputs that the Ruby reference
+// implementation produces.
 
 use serde::Deserialize;
 use std::collections::HashMap;

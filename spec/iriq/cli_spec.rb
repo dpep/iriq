@@ -170,7 +170,7 @@ describe Iriq::CLI do
 
     it "orders multi-section JSON keys consistently regardless of flag order" do
       # Fixed emission order (parse, canonical, normalize) — not the order the
-      # flags were typed — so the Go port can pin the same order for parity.
+      # flags were typed — so the Rust port can pin the same order for parity.
       expect(run("-nc", "--json", "foo.com/users/123")).to eq(0)
       expect(JSON.parse(stdout.string).keys).to eq(%w[canonical normalize])
       stdout.truncate(stdout.rewind)

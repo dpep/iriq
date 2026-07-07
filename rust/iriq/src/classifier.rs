@@ -1,5 +1,5 @@
 // Heuristic classifier for individual path segments and query values.
-// Mirrors Go's SegmentClassifier.
+// Mirrors Ruby's SegmentClassifier.
 
 use crate::registrable_domain::IPV4_RE;
 use once_cell::sync::Lazy;

@@ -294,6 +294,7 @@ an ephemeral corpus.
 | `-p, --parse`       | Show parsed fields                                      |
 | `-n, --normalize`   | Show the shape-normalized form                          |
 | `-c, --canonical`   | Show the canonical form (no shape normalization)        |
+| `-e, --explain`     | Annotated trace — per-segment notes about why each placeholder / canonical value was chosen |
 | `-j, --json`        | Emit JSON                                               |
 | `-J, --ndjson`      | Newline-delimited JSON (one object per line); implies `--json` |
 | `-N, --no-hints`    | Use `{integer}` etc. instead of `{user_id}`             |

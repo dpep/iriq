@@ -1,6 +1,6 @@
-// Built-in English singularizer. Rules adapted from ActiveSupport defaults
-// via the Go port. Mirrors the same precedence and irregular/uncountable
-// lists so output is bit-identical across runtimes.
+// Built-in English singularizer. Rules adapted from ActiveSupport defaults.
+// Mirrors Ruby's precedence and irregular/uncountable lists so output is
+// bit-identical across runtimes.
 
 use once_cell::sync::Lazy;
 use regex::Regex;

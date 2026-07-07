@@ -37,7 +37,7 @@ impl<'a> Default for PathShape<'a> {
     }
 }
 
-/// Convenience matching Go's PathShapeFor.
+/// Convenience matching Ruby's PathShape.for.
 pub fn path_shape_for(segments: &[String], hints: bool) -> String {
     let mut ps = PathShape::new();
     ps.hints = hints;

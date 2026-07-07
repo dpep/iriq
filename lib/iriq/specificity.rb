@@ -11,9 +11,9 @@ module Iriq
   # integer could plausibly be a year, an HTTP status, or an ID, so
   # `:integer` claims only TYPED.
   #
-  # Calibration corpus tests in spec/iriq/calibration_spec.rb / Go's
-  # calibration_test.go are the source of truth for whether these
-  # values are well-chosen — adjust them and re-run to validate.
+  # Calibration corpus tests in spec/iriq/calibration_spec.rb are the
+  # source of truth for whether these values are well-chosen — adjust
+  # them and re-run to validate.
   module Specificity
     # Unambiguous semantic shapes — the regex effectively can't fire by
     # accident. (UUID, JWT, email with @, URL with ://, color hex.)

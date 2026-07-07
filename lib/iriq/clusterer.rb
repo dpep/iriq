@@ -47,17 +47,6 @@ module Iriq
       end
     end
 
-    def dump
-      { "clusters" => clusters.each_with_object({}) { |c, h| h[c.key] = c.dump } }
-    end
-
-    def self.from_dump(h, classifier: SegmentClassifier::DEFAULT)
-      c = new(classifier: classifier)
-      restored = h["clusters"].transform_values { |cdump| Cluster.from_dump(cdump) }
-      c.instance_variable_get(:@storage).instance_variable_set(:@clusters, restored)
-      c
-    end
-
     private
 
     def coerce(input)

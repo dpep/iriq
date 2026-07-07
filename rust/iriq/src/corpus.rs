@@ -169,7 +169,7 @@ impl Corpus {
         // Synthesized recognizer needs an explicit type. The proposal
         // currently suggests a type name (e.g. "ghp"); we don't have
         // dynamic registration of new types, so we fall back to
-        // TypeOpaqueID for now and let the prefix-based recognizer
+        // SegmentType::OpaqueId for now and let the prefix-based recognizer
         // claim those values with higher specificity.
         let ty = segment_type_from_str(&p.suggested_type).unwrap_or(SegmentType::OpaqueId);
         let r = SynthesizedRecognizer::from_prefix(p.prefix.clone(), ty);

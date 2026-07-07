@@ -15,7 +15,7 @@ impl CrossHostShape {
 }
 
 /// Lists route shapes (the path-only form, stripped of host) that recur
-/// across multiple hosts. Mirrors Go's Corpus.CrossHostShapes.
+/// across multiple hosts. Mirrors Ruby's Corpus#cross_host_shapes.
 pub fn cross_host_shapes(cp: &Corpus, min_hosts: usize) -> Vec<CrossHostShape> {
     let min = if min_hosts == 0 { 2 } else { min_hosts };
     let mut by_shape: HashMap<String, (Vec<String>, usize)> = HashMap::new();

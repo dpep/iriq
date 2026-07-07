@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
-/// Insertion-ordered string → string map. Mirrors Go's OrderedMap which in
-/// turn mirrors Ruby Hash ordering for query parameters and other fields
-/// where users see the declared order.
+/// Insertion-ordered string → string map. Mirrors Ruby Hash ordering for
+/// query parameters and other fields where users see the declared order.
 #[derive(Debug, Clone, Default)]
 pub struct OrderedMap {
     keys: Vec<String>,

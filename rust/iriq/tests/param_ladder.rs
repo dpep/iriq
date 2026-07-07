@@ -1,6 +1,6 @@
 //! The query-param confidence ladder: constant → string → enum, plus the
 //! confidence score and straggler-robust enum detection. Mirrors the Ruby
-//! corpus_spec ladder examples and the Go corpus_test cases.
+//! corpus_spec ladder examples.
 
 use iriq::{Corpus, SegmentType};
 

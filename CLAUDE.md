@@ -49,8 +49,9 @@ Notes on this layout:
 
 - One version tag (`vX.Y.Z`) serves both runtimes — Ruby's gemspec and Rust's
   `Cargo.toml` use the same tag stream.
-- The gemspec ships only Ruby + `completions/`, excluding `rust/`:
-  `git ls-files * ':!:spec' ':!:script' ':!:rust'`.
+- The gemspec ships only the gem surface (lib/, exe/, completions/, README,
+  LICENSE, CHANGELOG, gemspec):
+  `git ls-files lib exe completions README.md LICENSE.txt CHANGELOG.md iriq.gemspec`.
 - Completion scripts exist in two places (gem root `completions/` and inlined
   in the Rust CLI) — keep them in sync like fixtures.
 
@@ -66,7 +67,7 @@ make build                      # → ./rust/target/release/iriq
 make install                    # cargo install into ~/.cargo/bin
 make test                       # cargo test --workspace
 
-# Via Homebrew (builds the Rust CLI from main)
+# Via Homebrew (builds the Rust CLI from the tagged release tarball)
 brew install dpep/tools/iriq
 
 # Via crates.io
@@ -103,7 +104,7 @@ When changing behavior:
 ## Tests
 
 ```sh
-bundle exec rspec                                # Ruby suite (305+ examples)
+bundle exec rspec                                # Ruby suite
 cd rust && cargo test --workspace
 cd rust && cargo fmt --check                      # formatting (CI-gated)
 cd rust && cargo clippy --workspace --all-targets -- -D warnings
@@ -131,15 +132,16 @@ drift:
 ### Keep Homebrew in sync — bump on EVERY version change
 
 The tap (`~/code/lib/homebrew-tools`) ships a single `Formula/iriq.rb` that
-builds the Rust CLI (`cargo install --path rust/iriq`) from `branch: "main"`.
-SQLite is on by default (the `iriq` crate's `default` feature set), so there is
-no longer a separate `iriq-sqlite` formula.
+builds the Rust CLI from a tagged release tarball
+(`url "https://github.com/dpep/iriq/archive/refs/tags/vX.Y.Z.tar.gz"` +
+`sha256`) via `cargo install` with `std_cargo_args(path: "rust/iriq")`, and
+generates bash/zsh completions from the built binary. SQLite is on by default
+(the `iriq` crate's `default` feature set), so there is no separate
+`iriq-sqlite` formula.
 
-The formula pins a static `version "X.Y.Z"` label. Because the build tracks
-`main` rather than a tagged tarball, `brew upgrade` only rebuilds when that
-label changes. So on every bump here, update the `version` string in
-`Formula/iriq.rb` to match `version.rb`, then commit + push the tap. Leaving it
-stale means brew users never get the new code even though it's already on `main`.
+On every release: update the formula's `url` to the new tag, refresh the
+`sha256` (e.g. `curl -sL <tarball-url> | shasum -a 256`), then commit + push
+the tap. Leaving it stale means brew users keep installing the old version.
 
 ## Corpus storage backends
 

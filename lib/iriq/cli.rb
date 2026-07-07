@@ -266,7 +266,7 @@ module Iriq
     end
 
     # Platform-aware default. XDG-honoring on Linux + BSD, Apple-style on
-    # macOS, %LOCALAPPDATA% on Windows. Same logic in Go + Rust so all three
+    # macOS, %LOCALAPPDATA% on Windows. Same logic in Rust so both
     # runtimes share the same default.db.
     def default_corpus_path
       base = if (xdg = ENV["XDG_DATA_HOME"].to_s) && !xdg.empty?
@@ -783,7 +783,7 @@ module Iriq
       end
     end
 
-    # Two-decimal confidence, e.g. 0.87. Matches the Go/Rust CLI formatting.
+    # Two-decimal confidence, e.g. 0.87. Matches the Rust CLI formatting.
     def format_conf(conf)
       format("%.2f", conf)
     end
@@ -835,9 +835,8 @@ module Iriq
     end
 
     def top(hash)
-      # Lex tie-break on equal counts — Ruby Hash insertion order would
-      # otherwise diverge from Go's map iteration (which has no insertion
-      # order). Keeps Ruby ↔ Go --stats parity stable.
+      # Lex tie-break on equal counts — keeps --stats output deterministic
+      # and Ruby ↔ Rust parity stable regardless of insertion order.
       hash.sort_by { |k, n| [-n, k] }.first(TOP_N_STATS).to_h
     end
   end

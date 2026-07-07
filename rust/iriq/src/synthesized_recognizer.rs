@@ -1,6 +1,6 @@
 // Recognizer synthesized at runtime from a RecognizerProposal.
 //
-// Mirrors Go's SynthesizedRecognizer / Ruby's SynthesizedRecognizer.
+// Mirrors Ruby's SynthesizedRecognizer.
 // Phase-2 spike scope: identify prefix-matched values and assert a type.
 
 use crate::classifier::{Recognizer, SegmentType, Verdict};

@@ -1,4 +1,4 @@
-// SQLite-backed corpus storage. Mirrors Go's storage_sqlite.go schema
+// SQLite-backed corpus storage. Mirrors Ruby's storage/sqlite.rb schema
 // byte-for-byte so a corpus created by either runtime opens cleanly in
 // the other.
 
