@@ -83,10 +83,13 @@ jobs:
       - name: regenerate fixtures
         run: bundle exec ruby script/generate_fixtures.rb
 
+      - name: regenerate calibration corpus
+        run: bundle exec ruby script/build_calibration.rb
+
       - name: assert fixtures unchanged
         run: |
           if ! git diff --quiet spec/fixtures; then
-            echo "::error::Fixtures are stale — run script/generate_fixtures.rb and commit."
+            echo "::error::Fixtures are stale — run script/generate_fixtures.rb + script/build_calibration.rb and commit."
             git --no-pager diff spec/fixtures
             exit 1
           fi
