@@ -17,11 +17,16 @@ use std::process::ExitCode;
 const LARGE_BATCH_THRESHOLD: usize = 10;
 const TOP_N_STATS: usize = 10;
 
+// Byte-for-byte copy of the Ruby CLI's USAGE heredoc (lib/iriq/cli.rb) —
+// parity-tested by script/cli_parity.sh's "help" scenario.
 const USAGE: &str = r#"iriq — find a URL's shape: the route template behind it (e.g. /users/{id}).
 
 Usage: iriq [options] <input>
        iriq [options] < text
        iriq cluster [options] [file]
+
+<input> may be an IRI, a file path (extracted automatically), or piped
+text via stdin.
 
 Sections (combine freely):
   -n, --normalize       Shape — variable parts become placeholders
@@ -38,22 +43,36 @@ Corpus + stats:
                         Same as IRIQ_NO_CORPUS=1 in the environment.
       --reset           Delete the corpus database (default path or the
                         one resolved via --corpus / IRIQ_CORPUS) and exit.
-      --host MODE       Host-keying strategy: full (default), reg / registrable
-                        strips subdomains, none ignores host entirely.
+      --host MODE       Host-keying strategy for clustering:
+                        full (default), registrable (or reg) strips
+                        subdomains, none ignores host entirely.
       --stats           Print rolling aggregates
-      --reinfer         Replay the source-IRI log through current classifier
-                        + reducers; rebuilds materialized views.
+      --reinfer         Replay the source-IRI log through the current
+                        classifier + reducers; rebuilds materialized
+                        views from scratch.
       --propose-recognizers
-                        Scan observed values for shape patterns that recur
-                        enough to suggest a new Recognizer.
+                        Scan observed values for shape patterns that
+                        recur enough to suggest a new Recognizer.
+                        Combine with --json for structured output.
       --cross-host-shapes
-                        List route shapes that recur across multiple hosts.
-      --activate-above F With --propose-recognizers, promote every proposal
-                        at or above CONFIDENCE F into a live Recognizer.
+                        List route shapes that recur across
+                        multiple hosts. Combine with --min-hosts.
+      --activate-above F  With --propose-recognizers, promote every
+                        proposal at or above CONFIDENCE F into a
+                        live Recognizer on the corpus, then
+                        reinfer. Confidence integrates coverage
+                        and cross-host corroboration.
 
 Environment:
       IRIQ_CORPUS=PATH    Set the corpus path (overrides the default).
       IRIQ_NO_CORPUS=1    Disable the default corpus (equivalent to -C).
+
+Thresholds (apply to --propose-recognizers / --cross-host-shapes):
+      --min-observations N  proposal noise floor (default 20)
+      --min-coverage F      proposal coverage floor (default 0.7)
+      --min-hosts N         proposal: minimum hosts (default 1);
+                            cross-host-shapes: minimum hosts to
+                            list (default 2)
 
 Other:
   -h, --help            Show this message
@@ -64,8 +83,16 @@ Other:
   -V, --version         Print version
 
 Subcommands:
-  cluster [file]        Force cluster view (default for >=10 IRIs anyway)
+  cluster [file]        Force cluster view (default for ≥10 IRIs anyway)
   completion <shell>    Print shell completion script (bash | zsh)
+
+Examples:
+  iriq foo.com/users/456
+  iriq -n https://foo.com/users/123
+  iriq ./access.log                     # auto-detect file → extract URLs
+  cat README.md | iriq -n               # one normalized URL per line
+  tail -f access.log | iriq -J          # live stream → NDJSON per IRI
+  cat README.md | iriq --corpus c.json
 "#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -394,7 +421,13 @@ fn parse_options(argv: &[String]) -> Result<(Vec<String>, Opts), String> {
                 let (name, val) = (&a[..eq], &a[eq + 1..]);
                 match name {
                     "--corpus" => opts.corpus = val.to_string(),
-                    "--host" => opts.host_strategy = parse_host_strategy(val)?,
+                    // Ruby's OptionParser reports the whole `--host=bogus`
+                    // token for the = form (vs. the block's message for the
+                    // space form below) — mirror that quirk for parity.
+                    "--host" => {
+                        opts.host_strategy = parse_host_strategy(val)
+                            .map_err(|_| format!("invalid argument: {}", a))?
+                    }
                     "--activate-above" => {
                         opts.activate_above = val
                             .parse()
@@ -462,8 +495,11 @@ fn parse_options(argv: &[String]) -> Result<(Vec<String>, Opts), String> {
             }
             "--host" => {
                 i += 1;
+                // Ruby's OptionParser prefixes the raised InvalidArgument
+                // message with "invalid argument: --host " — mirror it.
                 opts.host_strategy =
-                    parse_host_strategy(argv.get(i).ok_or("--host requires a value")?.as_str())?;
+                    parse_host_strategy(argv.get(i).ok_or("--host requires a value")?.as_str())
+                        .map_err(|e| format!("invalid argument: --host {}", e))?;
             }
             "--min-hosts" => {
                 i += 1;

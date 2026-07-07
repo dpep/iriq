@@ -91,6 +91,13 @@ run_pair_json() {
   fi
 }
 
+# Usage / help — the full USAGE text must match byte-for-byte (the Rust
+# CLI inlines a copy of Ruby's USAGE heredoc; keep them in sync).
+run_pair "help" "" --help
+# Bare invocation. The harness always pipes stdin, so this exercises the
+# empty-batch path (no output) rather than the tty usage path.
+run_pair "usage no args" ""
+
 # Single-input forms
 run_pair "version"           "" --version
 run_pair "summary URL"       "" "https://foo.com/users/123"
@@ -114,6 +121,18 @@ run_pair "summary unicode"   "" "https://例え.テスト/こんにちは"
 run_pair "json error parse"  "" --json "just-some-token"
 run_pair "json error shell"  "" completion tcsh --json
 run_pair "json error missing-corpus" "" --propose-recognizers --json
+run_pair "json error host bogus" "" --host bogus --json "foo.com/x"
+# Human (non-JSON) error paths — the plain "iriq: ..." stderr lines must
+# also match, not just the --json envelopes above.
+run_pair "human error parse"          "" "just-some-token"
+run_pair "human error unknown option" "" --bogus "foo.com/x"
+run_pair "human error unknown short"  "" -z "foo.com/x"
+run_pair "human error shell"          "" completion tcsh
+run_pair "human error missing-corpus" "" --propose-recognizers
+# Ruby's OptionParser reports the space and = forms differently — both quirks
+# are mirrored in the Rust CLI.
+run_pair "human error host bogus"     "" --host bogus "foo.com/x"
+run_pair "human error host=bogus"     "" --host=bogus "foo.com/x"
 run_pair "normalize date path"   "" -n "https://foo.com/events/20240115/details"
 run_pair "normalize date param"  "" -n "https://foo.com/events?since=2024/01/15&page=5"
 run_pair "normalize network params" "" -n "https://foo.com/admin?ip=192.168.1.1&email=alice@example.com&redirect=https://other.com/x"
@@ -185,6 +204,18 @@ corpus_dir="$(mktemp -d)"
 trap "rm -rf '$corpus_dir'" EXIT
 corpus_stream=$'https://foo.com/users/1\nhttps://foo.com/users/2\nhttps://foo.com/users/3\nhttps://bar.com/x\n'
 
+# File-arg auto-detection: a positional arg that is an existing file (and not
+# a parseable IRI) is read and extracted, same as piped text. Also the `-`
+# stdin sentinel: `cluster -` reads stdin; a bare `-n -` positional is NOT a
+# file and falls through to summary mode (a parse error in both runtimes).
+url_file="$corpus_dir/urls.txt"
+printf 'https://foo.com/users/1\nhttps://foo.com/users/2\nhttps://foo.com/posts/abc\n' > "$url_file"
+run_pair "file arg url list" "" "$url_file"
+run_pair "file arg cluster"  "" cluster "$url_file"
+run_pair "file arg -n"       "" -n "$url_file"
+run_pair "stdin sentinel cluster -" $'https://foo.com/users/1\nhttps://foo.com/users/2\n' cluster -
+run_pair "stdin sentinel -n -" $'https://foo.com/users/1\n' -n -
+
 corpus_pair() {
   local label="$1" ext="$2"
   local ruby_path="$corpus_dir/ruby$ext"
@@ -208,6 +239,37 @@ corpus_pair() {
 
 corpus_pair "JSON storage"   ".json"
 corpus_pair "SQLite storage" ".db"
+
+# --reset parity. Seed a corpus, reset it, and compare the stderr notice.
+# Each side seeds + resets the same path in turn so the message (which
+# embeds the path) is identical. --json does not change --reset output.
+reset_pair() {
+  local label="$1"
+  shift
+  local path="$corpus_dir/reset.db"
+  local ruby_out rust_out
+  rm -f "$path" "$path-wal" "$path-shm" "$path.tmp"
+  echo -n "$corpus_stream" | (cd "$REPO_ROOT" && $RUBY --corpus "$path") > /dev/null
+  ruby_out=$( (cd "$REPO_ROOT" && $RUBY --reset --corpus "$path" "$@" < /dev/null) 2>&1 || true )
+  rm -f "$path" "$path-wal" "$path-shm" "$path.tmp"
+  echo -n "$corpus_stream" | "$RUST_BIN" --corpus "$path" > /dev/null
+  rust_out=$( "$RUST_BIN" --reset --corpus "$path" "$@" < /dev/null 2>&1 || true )
+  if [[ "$ruby_out" == "$rust_out" ]]; then
+    pass_count=$((pass_count + 1))
+  else
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH: reset $label"
+    diff <(echo "$ruby_out") <(echo "$rust_out") | sed 's/^/    /' || true
+  fi
+}
+
+reset_pair "seeded (human)"
+reset_pair "seeded (--json)" --json
+# The "no corpus to reset" branch — the path never existed. --reset does not
+# create the file, so both invocations see the same missing path.
+run_pair "reset nonexistent"      "" --reset --corpus "$corpus_dir/never-created.db"
+run_pair "reset nonexistent json" "" --reset --json --corpus "$corpus_dir/never-created.db"
 
 # Cluster examples dedup — repeated inputs must collapse to a single example in
 # the rendered cluster view (regression: the SQLite backend once stored dupes).
@@ -285,6 +347,8 @@ reinfer_pair "SQLite storage" ".db"
 # triggers the PrefixUnderscoreId strategy ≥20 times.
 propose_pair() {
   local label="$1" ext="$2"
+  shift 2
+  local extra=("$@")
   local ruby_path="$corpus_dir/ruby-propose$ext"
   local rust_path="$corpus_dir/rust-propose$ext"
   rm -f "$ruby_path" "$rust_path"
@@ -295,8 +359,8 @@ propose_pair() {
   echo -n "$propose_stream" | (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path") > /dev/null
   echo -n "$propose_stream" | "$RUST_BIN" --corpus "$rust_path" > /dev/null
   local ruby_out rust_out
-  ruby_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" --propose-recognizers < /dev/null) )
-  rust_out=$(   "$RUST_BIN" --corpus "$rust_path" --propose-recognizers < /dev/null )
+  ruby_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" --propose-recognizers "${extra[@]}" < /dev/null) )
+  rust_out=$(   "$RUST_BIN" --corpus "$rust_path" --propose-recognizers "${extra[@]}" < /dev/null )
   if [[ "$ruby_out" != "$rust_out" ]]; then
     fail_count=$((fail_count + 1))
     echo
@@ -304,8 +368,8 @@ propose_pair() {
     diff <(echo "$ruby_out") <(echo "$rust_out") | sed 's/^/    /' || true
     return
   fi
-  ruby_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" --propose-recognizers --json < /dev/null) )
-  rust_out=$(   "$RUST_BIN" --corpus "$rust_path" --propose-recognizers --json < /dev/null )
+  ruby_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" --propose-recognizers "${extra[@]}" --json < /dev/null) )
+  rust_out=$(   "$RUST_BIN" --corpus "$rust_path" --propose-recognizers "${extra[@]}" --json < /dev/null )
   if [[ "$ruby_out" == "$rust_out" ]]; then
     pass_count=$((pass_count + 1))
   else
@@ -318,6 +382,10 @@ propose_pair() {
 
 propose_pair "JSON storage"   ".json"
 propose_pair "SQLite storage" ".db"
+# Non-default thresholds must flow through identically: looser floors keep
+# the proposal; a min-hosts floor above the corpus (single host) drops it.
+propose_pair "JSON + loose thresholds" ".json" --min-observations 10 --min-coverage 0.5 --min-hosts 1
+propose_pair "SQLite + min-hosts filter" ".db" --min-hosts 2
 
 # Completion-subcommand parity. Both runtimes embed the same files; the
 # parity test ensures we don't ship divergent scripts.
@@ -381,6 +449,8 @@ activate_pair() {
 # share the same shape; both runtimes should report identical output.
 cross_host_pair() {
   local label="$1" ext="$2"
+  shift 2
+  local extra=("$@")
   local ruby_path="$corpus_dir/ruby-xh$ext"
   local rust_path="$corpus_dir/rust-xh$ext"
   rm -f "$ruby_path" "$rust_path"
@@ -388,8 +458,8 @@ cross_host_pair() {
   echo -n "$xh_stream" | (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path") > /dev/null
   echo -n "$xh_stream" | "$RUST_BIN" --corpus "$rust_path" > /dev/null
   local ruby_out rust_out
-  ruby_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" --cross-host-shapes < /dev/null) )
-  rust_out=$(   "$RUST_BIN" --corpus "$rust_path" --cross-host-shapes < /dev/null )
+  ruby_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" --cross-host-shapes "${extra[@]}" < /dev/null) )
+  rust_out=$(   "$RUST_BIN" --corpus "$rust_path" --cross-host-shapes "${extra[@]}" < /dev/null )
   if [[ "$ruby_out" != "$rust_out" ]]; then
     fail_count=$((fail_count + 1))
     echo
@@ -397,8 +467,8 @@ cross_host_pair() {
     diff <(echo "$ruby_out") <(echo "$rust_out") | sed 's/^/    /' || true
     return
   fi
-  ruby_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" --cross-host-shapes --json < /dev/null) )
-  rust_out=$(   "$RUST_BIN" --corpus "$rust_path" --cross-host-shapes --json < /dev/null )
+  ruby_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" --cross-host-shapes "${extra[@]}" --json < /dev/null) )
+  rust_out=$(   "$RUST_BIN" --corpus "$rust_path" --cross-host-shapes "${extra[@]}" --json < /dev/null )
   if [[ "$ruby_out" == "$rust_out" ]]; then
     pass_count=$((pass_count + 1))
   else
@@ -411,16 +481,20 @@ cross_host_pair() {
 
 cross_host_pair "JSON storage"   ".json"
 cross_host_pair "SQLite storage" ".db"
+# --min-hosts above the default (2): /users/{id} spans 3 hosts and stays;
+# /posts/{x} spans only 2 and drops out.
+cross_host_pair "JSON min-hosts=3" ".json" --min-hosts 3
 
-# --host=reg should cluster subdomain-heavy hosts under their registrable apex.
+# --host MODE should key clusters identically in both runtimes: full keeps
+# subdomains, reg / registrable collapse to the apex, none ignores host.
 host_strategy_pair() {
-  local label="$1"
+  local label="$1" mode="$2"
   local rstream=$'https://api.foo.com/users/1\nhttps://app.foo.com/users/2\nhttps://blog.example.co.uk/posts/3\nhttps://news.example.co.uk/posts/4\n'
-  local ruby_path="$corpus_dir/ruby-host.json"
-  local rust_path="$corpus_dir/rust-host.json"
+  local ruby_path="$corpus_dir/ruby-host-$mode.json"
+  local rust_path="$corpus_dir/rust-host-$mode.json"
   rm -f "$ruby_path" "$rust_path"
-  echo -n "$rstream" | (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" --host=reg) > /dev/null
-  echo -n "$rstream" | "$RUST_BIN" --corpus "$rust_path" --host=reg > /dev/null
+  echo -n "$rstream" | (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" --host="$mode") > /dev/null
+  echo -n "$rstream" | "$RUST_BIN" --corpus "$rust_path" --host="$mode" > /dev/null
   local ruby_out rust_out
   ruby_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" --stats --json < /dev/null) )
   rust_out=$( "$RUST_BIN" --corpus "$rust_path" --stats --json < /dev/null )
@@ -433,7 +507,40 @@ host_strategy_pair() {
     diff <(echo "$ruby_out") <(echo "$rust_out") | sed 's/^/    /' || true
   fi
 }
-host_strategy_pair "--host=reg collapses subdomains"
+host_strategy_pair "--host=reg collapses subdomains"         reg
+host_strategy_pair "--host=registrable collapses subdomains" registrable
+host_strategy_pair "--host=full keeps subdomains"            full
+host_strategy_pair "--host=none ignores host"                none
+
+# Default-corpus resolution via IRIQ_CORPUS. The harness globally exports
+# IRIQ_NO_CORPUS=1; these scenarios undo it per invocation and point
+# IRIQ_CORPUS at a tempfile, so the real default corpus path is never
+# touched. First run on a fresh path prints the "created corpus at ..."
+# stderr notice; a second run on the existing file must not.
+env_corpus_pair() {
+  local label="$1" fresh="$2"
+  local path="$corpus_dir/env-default.db"
+  local input="https://foo.com/users/1"
+  local ruby_out rust_out
+  if [[ "$fresh" == "fresh" ]]; then
+    rm -f "$path" "$path-wal" "$path-shm" "$path.tmp"
+  fi
+  ruby_out=$(echo -n "$input" | (cd "$REPO_ROOT" && env -u IRIQ_NO_CORPUS IRIQ_CORPUS="$path" $RUBY -n) 2>&1 || true)
+  if [[ "$fresh" == "fresh" ]]; then
+    rm -f "$path" "$path-wal" "$path-shm" "$path.tmp"
+  fi
+  rust_out=$(echo -n "$input" | env -u IRIQ_NO_CORPUS IRIQ_CORPUS="$path" "$RUST_BIN" -n 2>&1 || true)
+  if [[ "$ruby_out" == "$rust_out" ]]; then
+    pass_count=$((pass_count + 1))
+  else
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH: $label"
+    diff <(echo "$ruby_out") <(echo "$rust_out") | sed 's/^/    /' || true
+  fi
+}
+env_corpus_pair "IRIQ_CORPUS first run announces creation" fresh
+env_corpus_pair "IRIQ_CORPUS second run is quiet"          existing
 
 echo
 echo "Passed: $pass_count"
