@@ -109,6 +109,10 @@ run_pair "canonical -c"      "" -c "foo.com/users/123"
 run_pair "canonical -c json" "" -c --json "HTTP://Foo.COM:80/Users/123#frag"
 run_pair "canonical+normalize -cn" "" -cn "https://foo.com/users/123"
 run_pair "parse -p json"     "" -p --json "https://foo.com/users/123/orders/456"
+# Human parse dump renders query_params via Ruby Hash#inspect: insertion
+# order, spaced arrows, nil for a valueless param ("?flag") vs "" ("?flag=").
+run_pair "parse -p human params" "" -p "https://foo.com/x?flag&a=1&b="
+run_pair "parse -p json params"  "" -p --json "https://foo.com/x?flag&a=1&b="
 # Multi-section JSON: object key order must match across runtimes. Ruby
 # emits a fixed insertion order (parse, canonical, normalize) and Rust pins
 # the same. The & in the query also exercises the no-HTML-escape path.
@@ -550,6 +554,66 @@ env_corpus_pair() {
 }
 env_corpus_pair "IRIQ_CORPUS first run announces creation" fresh
 env_corpus_pair "IRIQ_CORPUS second run is quiet"          existing
+
+# Seeded messy-corpus sweep. The curated scenarios above use hand-picked
+# inputs; this one pipes ~300 lines of deterministically corrupted URLs
+# (fixed seed — the file is byte-identical on every run) through both
+# binaries under several flag combos. Extends parity coverage from curated
+# cases to bulk semi-random/hostile input.
+messy_file="$corpus_dir/messy.txt"
+(cd "$REPO_ROOT" && bundle exec ruby -r./spec/support/iri_generator -e '
+  rng = Random.new(4242)
+  inj = [" ", "{", "}", "|", "%00", "%zz", "%25", " ", "　",
+         "”", "é", "例", "\u{1F980}", "\t", "..", "//",
+         "?", "#", ":", "@"]
+  IriGenerator.urls(count: 150, seed: 4242).each do |url|
+    m = url.dup
+    rng.rand(1..2).times do
+      case rng.rand(5)
+      when 0 then m = m[0, rng.rand(1..m.length)]                              # truncate
+      when 1 then p = rng.rand(m.length + 1)
+                  m = m[0, p] + inj.sample(random: rng) + m[p..]               # inject
+      when 2 then m = m.gsub("%", "%25")                                      # double-encode
+      when 3 then m = inj.sample(random: rng) + m                             # prepend
+      else        m += inj.sample(random: rng)                                # append
+      end
+    end
+    puts url
+    puts m
+  end
+') > "$messy_file"
+
+# jq=1 compares through `jq -S` (same convention as run_pair_json): the
+# cluster views' per-segment values maps have runtime-specific key order.
+messy_pair() {
+  local jq_mode="$1" label="$2"
+  shift 2
+  if [[ "$jq_mode" == "1" ]] && ! command -v jq >/dev/null 2>&1; then
+    return 0
+  fi
+  local ruby_out rust_out
+  if [[ "$jq_mode" == "1" ]]; then
+    local norm='walk(if type == "number" then . + 0 else . end)'
+    ruby_out=$( (cd "$REPO_ROOT" && $RUBY "$@" < "$messy_file") 2>&1 | jq -S "$norm" 2>&1 || true )
+    rust_out=$( "$RUST_BIN" "$@" < "$messy_file" 2>&1 | jq -S "$norm" 2>&1 || true )
+  else
+    ruby_out=$( (cd "$REPO_ROOT" && $RUBY "$@" < "$messy_file") 2>&1 || true )
+    rust_out=$( "$RUST_BIN" "$@" < "$messy_file" 2>&1 || true )
+  fi
+  if [[ "$ruby_out" == "$rust_out" ]]; then
+    pass_count=$((pass_count + 1))
+  else
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH: messy corpus $label"
+    diff <(echo "$ruby_out") <(echo "$rust_out") | sed 's/^/    /' || true
+  fi
+}
+
+messy_pair 0 "url list (summary)"
+messy_pair 0 "-n"           -n
+messy_pair 0 "-pcn --json"  -pcn --json
+messy_pair 1 "--ndjson"     --ndjson
 
 echo
 echo "Passed: $pass_count"

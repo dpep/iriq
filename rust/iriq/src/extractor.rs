@@ -23,10 +23,18 @@ impl Extractor {
             &CANDIDATE_RE
         };
         let mut out = Vec::new();
-        for m in pattern.find_iter(text) {
+        let mut at = 0;
+        while let Some(m) = pattern.find_at(text, at) {
             if !left_boundary_ok(text, m.start(), self.scheme_less) {
+                // Ruby implements this guard as a regex lookbehind, so a
+                // blocked candidate just advances the scan by one char —
+                // later candidates INSIDE the blocked match must still be
+                // found (e.g. "xhttps://a.com/exa%zz.com/y" yields zz.com/y).
+                let step = text[m.start()..].chars().next().map_or(1, char::len_utf8);
+                at = m.start() + step;
                 continue;
             }
+            at = m.end();
             let candidate = m.as_str();
             let trimmed = trim_candidate(candidate);
             if trimmed.is_empty() {
@@ -78,7 +86,10 @@ fn url_chars_class() -> String {
         }
         escaped.push(c);
     }
-    format!(r#"[^\s<>"'`,{}]+"#, escaped)
+    // Ruby's \s is ASCII-only; the regex crate's is Unicode-aware. Spell out
+    // the ASCII whitespace class so Unicode whitespace (U+00A0, U+3000, …)
+    // stays inside a URL match, matching the Ruby reference.
+    format!(r#"[^ \t\r\n\x0B\x0C<>"'`,{}]+"#, escaped)
 }
 
 static CANDIDATE_RE: Lazy<Regex> = Lazy::new(|| {
@@ -134,8 +145,10 @@ fn left_boundary_ok(text: &str, start: usize, schemeless: bool) -> bool {
     true
 }
 
+// Mirrors Ruby's `(?<![\w/])` lookbehind: Ruby's \w is ASCII-only, so a
+// preceding non-ASCII letter/digit does NOT block a match.
 fn is_word(c: char) -> bool {
-    c == '_' || c.is_alphabetic() || c.is_numeric() || matches!(c, '\u{0300}'..='\u{036F}')
+    c == '_' || c.is_ascii_alphanumeric()
 }
 
 fn trim_candidate(candidate: &str) -> String {

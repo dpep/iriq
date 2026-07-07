@@ -6,12 +6,18 @@ use regex::Regex;
 use std::collections::HashMap;
 
 static SCHEME_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^([a-zA-Z][a-zA-Z0-9+\-.]*):").unwrap());
+// Ruby's \s and \d are ASCII-only; the regex crate's are Unicode-aware. Spell
+// out the ASCII classes so Unicode whitespace stays legal in hosts and
+// Unicode digits are never treated as a port, matching the Ruby reference.
 static HOSTISH_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^(?P<host>[^/?#\s:]+\.[^/?#\s:]+|localhost)(?::(?P<port>\d+))?(?P<rest>[/?#].*)?$")
-        .unwrap()
+    Regex::new(
+        r"^(?P<host>[^/?#: \t\r\n\x0B\x0C]+\.[^/?#: \t\r\n\x0B\x0C]+|localhost)(?::(?P<port>[0-9]+))?(?P<rest>[/?#].*)?$",
+    )
+    .unwrap()
 });
-static AUTH_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^(?P<host>[^/?#]+?)(?::(?P<port>\d+))?(?P<rest>[/?#].*)?$").unwrap());
+static AUTH_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^(?P<host>[^/?#]+?)(?::(?P<port>[0-9]+))?(?P<rest>[/?#].*)?$").unwrap()
+});
 
 static DEFAULT_PORTS: Lazy<HashMap<&'static str, u64>> = Lazy::new(|| {
     HashMap::from([
@@ -23,8 +29,15 @@ static DEFAULT_PORTS: Lazy<HashMap<&'static str, u64>> = Lazy::new(|| {
     ])
 });
 
+/// Ruby String#strip semantics: ASCII whitespace plus NUL on both ends.
+/// Rust's str::trim would also strip Unicode whitespace (e.g. U+3000),
+/// which Ruby does not.
+fn ruby_strip(s: &str) -> &str {
+    s.trim_matches([' ', '\t', '\r', '\n', '\x0B', '\x0C', '\0'])
+}
+
 pub fn parse(input: &str) -> Result<Identifier, ParseError> {
-    let stripped = input.trim();
+    let stripped = ruby_strip(input);
     if stripped.is_empty() {
         return Err(ParseError::new("input is empty"));
     }
@@ -35,6 +48,10 @@ pub fn parse(input: &str) -> Result<Identifier, ParseError> {
         return match scheme.as_str() {
             "urn" => parse_urn(input, rest),
             _ if rest.starts_with("//") => parse_authority_url(input, &scheme, &rest[2..]),
+            // A bare scheme with no content ("mailto:") carries no
+            // identifier — and would canonicalize to "urn:", which itself
+            // fails to parse — so reject it (mirrors the Ruby reference).
+            _ if rest.is_empty() => Err(ParseError::new("opaque scheme missing content")),
             _ => Ok(Identifier {
                 original: input.to_string(),
                 scheme,
@@ -88,15 +105,21 @@ fn parse_authority_url(
         .captures(remainder)
         .or_else(|| AUTH_RE.captures(remainder))
         .ok_or_else(|| ParseError::new(format!("cannot parse authority from {:?}", original)))?;
-    let host = caps.name("host").unwrap().as_str().to_ascii_lowercase();
-    // Mirrors Ruby's `to_i` leniency: any digit run is accepted (the parser
-    // is deliberately forgiving of log garbage like out-of-range ports).
-    // Digit runs beyond u64 saturate — indistinguishable in practice.
-    let mut port: Option<u64> = caps
-        .name("port")
-        .map(|p| p.as_str().parse::<u64>().unwrap_or(u64::MAX));
-    if let (Some(n), Some(&default)) = (port, DEFAULT_PORTS.get(scheme)) {
-        if default == n {
+    // Ruby downcases with full Unicode case mapping, not just ASCII.
+    let host = caps.name("host").unwrap().as_str().to_lowercase();
+    // Ruby's port.to_i is arbitrary-precision, so any digit run is accepted
+    // (":0" and ":99999" included). u64 covers every realistic case;
+    // KNOWN-GAP: a 20+-digit port would overflow here where Ruby accepts it.
+    let mut port: Option<u64> = None;
+    if let Some(p) = caps.name("port") {
+        let n = p
+            .as_str()
+            .parse::<u64>()
+            .map_err(|_| ParseError::new(format!("invalid port in {:?}", original)))?;
+        port = Some(n);
+    }
+    if let (Some(p), Some(&default)) = (port, DEFAULT_PORTS.get(scheme)) {
+        if default == p {
             port = None;
         }
     }
@@ -164,9 +187,10 @@ fn parse_query(query: &str) -> OrderedMap {
         return out;
     }
     for pair in query.split('&') {
+        // Ruby's split("=", 2): "?flag" yields nil, "?flag=" yields "".
         let (k, v) = match pair.find('=') {
-            Some(i) => (&pair[..i], &pair[i + 1..]),
-            None => (pair, ""),
+            Some(i) => (&pair[..i], Some(pair[i + 1..].to_string())),
+            None => (pair, None),
         };
         if k.is_empty() {
             continue;

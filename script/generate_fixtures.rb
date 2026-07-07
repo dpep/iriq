@@ -38,6 +38,13 @@ PARSER_INPUTS = [
   "https://foo.com:8443/x?a=1&b=2#top",
   "https://127.0.0.1:8080/x",
   "https://россия.рф/о-нас",
+  # Lenient-parser edges locked by the property suite: port 0 and
+  # out-of-range ports survive verbatim, Unicode hosts downcase with full
+  # (not ASCII-only) case mapping.
+  "https://foo.com:0/x",
+  "https://foo.com:99999/x",
+  "https://EXÄMPLE.com/x",
+  "https://РОССИЯ.рф/x",
 ].freeze
 
 CLASSIFIER_INPUTS = [
@@ -145,6 +152,10 @@ EXTRACTOR_INPUTS = [
   "user@host:port/path",
   "rsync user@host.com:/var/log/ to backup",
   "see ./README.md and /usr/local/bin",
+  # The left-boundary guard is a lookbehind: a candidate blocked by a
+  # preceding "/" only bumps the scan by one char, so the scheme-less
+  # candidate nested inside it (zzmple.com/…) is still found.
+  "//https://app.exa%zzmple.com/workspaces/poplar",
 ].freeze
 
 def identifier_hash(iri)

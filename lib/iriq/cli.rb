@@ -745,7 +745,10 @@ module Iriq
     end
 
     def emit_clusters(clusters, opts)
-      sorted = clusters.sort_by { |c| -c.count }
+      # Stable sort: equal-count clusters keep first-seen order. Ruby's
+      # sort_by is unstable, so ties need the explicit index tie-break to
+      # match the Rust CLI's (stable) sort.
+      sorted = clusters.sort_by.with_index { |c, i| [-c.count, i] }
 
       if opts[:json]
         emit_json(sorted.map(&:to_h), opts)

@@ -44,7 +44,11 @@ module Iriq
           parse_authority_url(input, scheme, rest[2..])
         else
           # opaque scheme like mailto:foo@bar — keep nss, mark as urn-ish so we
-          # don't pretend we know its host/path layout.
+          # don't pretend we know its host/path layout. A bare scheme with no
+          # content ("mailto:") carries no identifier — and would canonicalize
+          # to "urn:", which itself fails to parse — so reject it.
+          raise ParseError, "opaque scheme missing content" if rest.empty?
+
           Identifier.new(original: input, scheme: scheme, nss: rest, kind: :urn)
         end
       else

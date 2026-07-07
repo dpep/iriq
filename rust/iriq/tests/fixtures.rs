@@ -73,9 +73,7 @@ fn fixture_parser() {
             "{:?} host",
             c.input
         );
-        let want_port = c.identifier.port;
-        let got_port = iri.port;
-        assert_eq!(got_port, want_port, "{:?} port", c.input);
+        assert_eq!(iri.port, c.identifier.port, "{:?} port", c.input);
         assert_eq!(
             iri.path_segments, c.identifier.path_segments,
             "{:?} segments",

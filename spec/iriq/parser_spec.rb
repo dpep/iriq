@@ -89,5 +89,9 @@ describe Iriq::Parser do
     it "raises ParseError on inputs that look like neither a URL nor a host" do
       expect { described_class.parse("just-some-token") }.to raise_error(Iriq::ParseError)
     end
+
+    it "raises ParseError on an opaque scheme with no content" do
+      expect { described_class.parse("mailto:") }.to raise_error(Iriq::ParseError)
+    end
   end
 end

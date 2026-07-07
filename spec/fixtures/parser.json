@@ -317,6 +317,74 @@
         "nss": null,
         "canonical": "https://россия.рф/о-нас"
       }
+    },
+    {
+      "input": "https://foo.com:0/x",
+      "identifier": {
+        "original": "https://foo.com:0/x",
+        "kind": "url",
+        "scheme": "https",
+        "host": "foo.com",
+        "port": 0,
+        "path_segments": [
+          "x"
+        ],
+        "query_params": {},
+        "fragment": null,
+        "nss": null,
+        "canonical": "https://foo.com:0/x"
+      }
+    },
+    {
+      "input": "https://foo.com:99999/x",
+      "identifier": {
+        "original": "https://foo.com:99999/x",
+        "kind": "url",
+        "scheme": "https",
+        "host": "foo.com",
+        "port": 99999,
+        "path_segments": [
+          "x"
+        ],
+        "query_params": {},
+        "fragment": null,
+        "nss": null,
+        "canonical": "https://foo.com:99999/x"
+      }
+    },
+    {
+      "input": "https://EXÄMPLE.com/x",
+      "identifier": {
+        "original": "https://EXÄMPLE.com/x",
+        "kind": "url",
+        "scheme": "https",
+        "host": "exämple.com",
+        "port": null,
+        "path_segments": [
+          "x"
+        ],
+        "query_params": {},
+        "fragment": null,
+        "nss": null,
+        "canonical": "https://exämple.com/x"
+      }
+    },
+    {
+      "input": "https://РОССИЯ.рф/x",
+      "identifier": {
+        "original": "https://РОССИЯ.рф/x",
+        "kind": "url",
+        "scheme": "https",
+        "host": "россия.рф",
+        "port": null,
+        "path_segments": [
+          "x"
+        ],
+        "query_params": {},
+        "fragment": null,
+        "nss": null,
+        "canonical": "https://россия.рф/x"
+      }
     }
   ]
 }

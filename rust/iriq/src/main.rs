@@ -687,8 +687,10 @@ fn identifier_json(iri: &Identifier) -> Value {
     }
     if !iri.query_params.is_empty() {
         let mut qp = serde_json::Map::new();
-        for (k, v) in iri.query_params.iter() {
-            qp.insert(k.to_string(), Value::String(v.to_string()));
+        for (k, v) in iri.query_params.iter_raw() {
+            // Ruby: "?flag" is nil (JSON null), "?flag=" is "".
+            let val = v.map_or(Value::Null, |v| Value::String(v.to_string()));
+            qp.insert(k.to_string(), val);
         }
         o.insert("query_params".to_string(), Value::Object(qp));
     }
@@ -757,18 +759,17 @@ fn emit_parse_human<W: Write>(stdout: &mut W, iri: &Identifier) {
         );
     }
     if !iri.query_params.is_empty() {
-        let mut keys = iri.query_params.keys();
-        keys.sort();
-        let m: HashMap<String, String> = keys
-            .into_iter()
-            .map(|k| {
-                (
-                    k.clone(),
-                    iri.query_params.get(&k).unwrap_or("").to_string(),
-                )
+        // Ruby renders the Hash via #inspect: insertion order, spaced
+        // arrows (Ruby 3.4+ style), and nil for valueless params.
+        let parts: Vec<String> = iri
+            .query_params
+            .iter_raw()
+            .map(|(k, v)| match v {
+                Some(v) => format!("{:?} => {:?}", k, v),
+                None => format!("{:?} => nil", k),
             })
             .collect();
-        let _ = writeln!(stdout, "query_params:  {}", inspect_string_map_ordered(&m));
+        let _ = writeln!(stdout, "query_params:  {{{}}}", parts.join(", "));
     }
     if !iri.fragment.is_empty() {
         let _ = writeln!(stdout, "fragment:      {}", iri.fragment);
@@ -785,16 +786,6 @@ fn inspect_strings(ss: &[String]) -> String {
     }
     let parts: Vec<String> = ss.iter().map(|s| format!("{:?}", s)).collect();
     format!("[{}]", parts.join(", "))
-}
-
-fn inspect_string_map_ordered(m: &HashMap<String, String>) -> String {
-    let mut keys: Vec<&String> = m.keys().collect();
-    keys.sort();
-    let parts: Vec<String> = keys
-        .iter()
-        .map(|k| format!("{:?}=>{:?}", k, m.get(*k).unwrap()))
-        .collect();
-    format!("{{{}}}", parts.join(", "))
 }
 
 fn emit_explain_human<W: Write>(stdout: &mut W, tr: &TraceResult) {
