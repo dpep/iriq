@@ -93,7 +93,8 @@ module Iriq
       return unless identifier.query_params
       identifier.query_params.each do |name, value|
         stats = @param_stats[name] ||= PositionStats.new(max_values: @max_values)
-        stats.observe(value.to_s, classifier.classify(value.to_s))
+        value_s = value.to_s
+        stats.observe(value_s, classifier.classify(value_s))
       end
     end
 

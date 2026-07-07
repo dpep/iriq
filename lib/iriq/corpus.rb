@@ -232,8 +232,9 @@ module Iriq
     def events_for(input)
       iri = coerce(input)
       hinted_entries = SegmentHints.derive(iri.path_segments, @classifier)
-      raw_shape    = PathShape.new(classifier: @classifier, hints: false).from_entries(hinted_entries)
-      hinted_shape = PathShape.new(classifier: @classifier, hints: true).from_entries(hinted_entries)
+      shape        = Shape.from_entries(hinted_entries)
+      raw_shape    = shape.render(hints: false)
+      hinted_shape = shape.render(hints: true)
       keying_host  = effective_host(iri.host)
 
       events = [

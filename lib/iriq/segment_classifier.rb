@@ -264,7 +264,7 @@ module Iriq
       # Scored ensemble over the live Recognizer list — built-ins +
       # anything Corpus#activate_proposal has registered for this
       # classifier instance.
-      if (v = Recognizer.ensemble(segment, *@recognizers))
+      if (v = Recognizer.ensemble(segment, @recognizers))
         return v[:type]
       end
 

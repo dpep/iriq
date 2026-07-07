@@ -598,7 +598,7 @@ pub struct SegmentClassifier {
 
 struct ClassifierState {
     cache: HashMap<String, SegmentType>,
-    recognizers: Vec<std::sync::Arc<dyn Recognizer>>,
+    recognizers: std::sync::Arc<Vec<std::sync::Arc<dyn Recognizer>>>,
 }
 
 impl SegmentClassifier {
@@ -611,7 +611,7 @@ impl SegmentClassifier {
         Self {
             state: Mutex::new(ClassifierState {
                 cache: HashMap::new(),
-                recognizers,
+                recognizers: std::sync::Arc::new(recognizers),
             }),
         }
     }
@@ -620,7 +620,9 @@ impl SegmentClassifier {
         if segment.is_empty() {
             return SegmentType::Literal;
         }
-        {
+        // One lock for the cache check; on a miss, clone the outer Arc (not
+        // the Vec) and compute without holding the lock.
+        let recognizers = {
             let mut st = self.state.lock().unwrap();
             if let Some(&v) = st.cache.get(segment) {
                 return v;
@@ -628,10 +630,7 @@ impl SegmentClassifier {
             if st.cache.len() >= CACHE_MAX {
                 st.cache.clear();
             }
-        }
-        let recognizers = {
-            let st = self.state.lock().unwrap();
-            st.recognizers.clone()
+            std::sync::Arc::clone(&st.recognizers)
         };
         let t = compute_classification(segment, &recognizers);
         let mut st = self.state.lock().unwrap();
@@ -645,7 +644,9 @@ impl SegmentClassifier {
 
     pub fn register_recognizer(&self, r: std::sync::Arc<dyn Recognizer>) {
         let mut st = self.state.lock().unwrap();
-        st.recognizers.push(r);
+        let mut recognizers = st.recognizers.as_ref().clone();
+        recognizers.push(r);
+        st.recognizers = std::sync::Arc::new(recognizers);
         st.cache.clear();
     }
 

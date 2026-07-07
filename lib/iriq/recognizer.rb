@@ -32,7 +32,7 @@ module Iriq
     # mutually-exclusive on shape, so the ensemble is effectively a
     # short-circuit OR. As more Recognizers carve out of SegmentClassifier
     # they'll join the pool and the scoring becomes load-bearing.
-    def self.ensemble(segment, *recognizers)
+    def self.ensemble(segment, recognizers)
       best = nil
       best_score = -1.0
       recognizers.each do |r|

@@ -25,16 +25,16 @@ describe Iriq::Recognizer do
     end
 
     it "returns nil when no recognizer fires" do
-      expect(Iriq::Recognizer.ensemble("nope", high, low)).to be_nil
+      expect(Iriq::Recognizer.ensemble("nope", [high, low])).to be_nil
     end
 
     it "returns the only firing verdict" do
-      v = Iriq::Recognizer.ensemble("match", high, never_fires)
+      v = Iriq::Recognizer.ensemble("match", [high, never_fires])
       expect(v[:type]).to eq(:high_type)
     end
 
     it "picks the highest specificity × confidence" do
-      v = Iriq::Recognizer.ensemble("match", low, high)
+      v = Iriq::Recognizer.ensemble("match", [low, high])
       expect(v[:type]).to eq(:high_type)
     end
 
@@ -46,8 +46,8 @@ describe Iriq::Recognizer do
         def try(_) = { type: :b, confidence: 1.0, specificity: 0.5 }
       end.new
 
-      expect(Iriq::Recognizer.ensemble("x", tie_a, tie_b)[:type]).to eq(:a)
-      expect(Iriq::Recognizer.ensemble("x", tie_b, tie_a)[:type]).to eq(:b)
+      expect(Iriq::Recognizer.ensemble("x", [tie_a, tie_b])[:type]).to eq(:a)
+      expect(Iriq::Recognizer.ensemble("x", [tie_b, tie_a])[:type]).to eq(:b)
     end
   end
 end
