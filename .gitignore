@@ -3,3 +3,6 @@ coverage
 
 # Rust build output
 /rust/target/
+
+# Claude Code local state (worktrees, session files)
+/.claude/

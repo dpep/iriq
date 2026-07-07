@@ -1,4 +1,4 @@
-use crate::classifier::{canonical_date, segment_type_from_str, SegmentClassifier, SegmentType};
+use crate::classifier::{canonical_date, segment_type_from_name, SegmentClassifier, SegmentType};
 use crate::cluster::ParamSummary;
 use crate::cluster::{placeholder_for, Cluster};
 use crate::clusterer::cluster_key_for_host;
@@ -166,12 +166,9 @@ impl Corpus {
         &mut self,
         p: &RecognizerProposal,
     ) -> Result<SynthesizedRecognizer, ParseError> {
-        // Synthesized recognizer needs an explicit type. The proposal
-        // currently suggests a type name (e.g. "ghp"); we don't have
-        // dynamic registration of new types, so we fall back to
-        // SegmentType::OpaqueId for now and let the prefix-based recognizer
-        // claim those values with higher specificity.
-        let ty = segment_type_from_str(&p.suggested_type).unwrap_or(SegmentType::OpaqueId);
+        // The proposal suggests a type name (e.g. "ghp"). Unknown names
+        // become dynamic Custom types, matching Ruby's symbol semantics.
+        let ty = segment_type_from_name(&p.suggested_type);
         let r = SynthesizedRecognizer::from_prefix(p.prefix.clone(), ty);
         self.ensure_per_corpus_classifier();
         self.classifier

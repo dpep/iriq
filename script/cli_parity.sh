@@ -409,15 +409,12 @@ completion_pair "zsh"
 
 # Auto-activation parity. After observing the same PAT-shaped stream and
 # activating the proposal in both runtimes, classify("ghp_xyz") should
-# return :ghp in both — verify via --stats post-reinfer and reinfer
-# output. We use --activate-above to drive the activation through the
-# CLI and assert the output lines match.
-#
-# KNOWN DIVERGENCE (skipped below): Ruby activates a proposal under its
-# dynamic suggested type (`activated: ghp (ghp_)`); Rust's SegmentType is
-# a closed enum, so it falls back to opaque_id (see the "for now" note in
-# rust/iriq/src/corpus.rs activate_proposal). Re-enable these scenarios
-# once Rust supports dynamic synthesized types.
+# return :ghp in both (Rust interns it as a dynamic Custom type). We use
+# --activate-above to drive the activation through the CLI, assert the
+# "activated:" lines match, then re-open each corpus and assert the
+# activated recognizer survives persistence: normalizing a fresh
+# PAT-shaped URL through the corpus must render the {ghp} placeholder
+# identically in both runtimes.
 activate_pair() {
   local label="$1" ext="$2"
   local ruby_path="$corpus_dir/ruby-act$ext"
@@ -432,18 +429,30 @@ activate_pair() {
   local ruby_out rust_out
   ruby_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" --propose-recognizers --activate-above 0.9 < /dev/null) )
   rust_out=$(   "$RUST_BIN" --corpus "$rust_path" --propose-recognizers --activate-above 0.9 < /dev/null )
-  if [[ "$ruby_out" == "$rust_out" ]]; then
-    pass_count=$((pass_count + 1))
-  else
+  if [[ "$ruby_out" != "$rust_out" ]]; then
     fail_count=$((fail_count + 1))
     echo
     echo "MISMATCH: activate-above $label"
     diff <(echo "$ruby_out") <(echo "$rust_out") | sed 's/^/    /' || true
+    return
+  fi
+  # Reopen: the activated recognizer must be re-applied from storage and
+  # drive normalize output ({ghp} placeholder) identically.
+  ruby_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" -n "https://api.github.com/auth/ghp_zzzz9999xyzzy") )
+  rust_out=$(   "$RUST_BIN" --corpus "$rust_path" -n "https://api.github.com/auth/ghp_zzzz9999xyzzy" )
+  if [[ "$ruby_out" == "$rust_out" ]] && echo "$ruby_out" | grep -q '{ghp}'; then
+    pass_count=$((pass_count + 1))
+  else
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH: activate-above reopen $label"
+    diff <(echo "$ruby_out") <(echo "$rust_out") | sed 's/^/    /' || true
+    echo "$ruby_out" | grep -q '{ghp}' || echo "    (ruby output lacks {ghp} placeholder)"
   fi
 }
 
-# activate_pair "JSON storage"   ".json"
-# activate_pair "SQLite storage" ".db"
+activate_pair "JSON storage"   ".json"
+activate_pair "SQLite storage" ".db"
 
 # --cross-host-shapes parity. Stream IRIs across multiple hosts that
 # share the same shape; both runtimes should report identical output.

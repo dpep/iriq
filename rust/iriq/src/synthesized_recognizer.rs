@@ -27,7 +27,7 @@ impl SynthesizedRecognizer {
         let obj = value.as_object()?;
         let prefix = obj.get("prefix").and_then(|v| v.as_str())?;
         let ty_str = obj.get("type").and_then(|v| v.as_str())?;
-        let ty = crate::classifier::segment_type_from_str(ty_str)?;
+        let ty = crate::classifier::segment_type_from_name(ty_str);
         let specificity = obj
             .get("specificity")
             .and_then(|v| v.as_f64())

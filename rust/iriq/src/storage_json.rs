@@ -447,9 +447,8 @@ fn parse_position_stats(obj: &Map<String, Value>) -> PositionStats {
     if let Some(tc) = obj.get("type_counts").and_then(|v| v.as_object()) {
         for (k, v) in tc {
             if let Some(n) = v.as_u64() {
-                if let Some(ty) = parse_segment_type(k) {
-                    ps.type_counts.insert(ty, n as usize);
-                }
+                ps.type_counts
+                    .insert(crate::classifier::segment_type_from_name(k), n as usize);
             }
         }
     }
@@ -487,40 +486,4 @@ fn parse_position_stats(obj: &Map<String, Value>) -> PositionStats {
         }
     }
     ps
-}
-
-fn parse_segment_type(s: &str) -> Option<SegmentType> {
-    use SegmentType::*;
-    Some(match s {
-        "literal" => Literal,
-        "integer" => Integer,
-        "float" => Float,
-        "number" => Number,
-        "uuid" => Uuid,
-        "date" => Date,
-        "timestamp" => Timestamp,
-        "hash" => Hash,
-        "slug" => Slug,
-        "ipv4" => Ipv4,
-        "ipv6" => Ipv6,
-        "url" => Url,
-        "email" => Email,
-        "boolean" => Boolean,
-        "version" => Version,
-        "locale" => Locale,
-        "currency" => Currency,
-        "phone" => Phone,
-        "jwt" => Jwt,
-        "mime" => Mime,
-        "file" => File,
-        "color" => Color,
-        "coordinate" => Coordinate,
-        "country" => Country,
-        "base64" => Base64,
-        "year" => Year,
-        "http_status" => HttpStatus,
-        "enum" => Enum,
-        "opaque_id" => OpaqueId,
-        _ => return None,
-    })
 }

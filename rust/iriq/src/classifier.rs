@@ -7,8 +7,7 @@ use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SegmentType {
     Literal,
     Integer,
@@ -46,6 +45,11 @@ pub enum SegmentType {
     /// single value.
     String,
     OpaqueId,
+    /// Dynamic type synthesized at runtime (e.g. an activated recognizer
+    /// proposal like `ghp`). Ruby models types as symbols, so any name is
+    /// valid; the name is interned once (see segment_type_from_name) so the
+    /// enum stays Copy and as_str() keeps returning &'static str.
+    Custom(&'static str),
 }
 
 impl SegmentType {
@@ -82,6 +86,7 @@ impl SegmentType {
             Enum => "enum",
             String => "string",
             OpaqueId => "opaque_id",
+            Custom(name) => name,
         }
     }
 }
@@ -89,6 +94,15 @@ impl SegmentType {
 impl std::fmt::Display for SegmentType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+// Serialize as the bare type-name string (what the previous
+// rename_all = "snake_case" derive produced for the unit variants) so
+// Custom types emit "ghp", not a {"custom": "ghp"} wrapper.
+impl serde::Serialize for SegmentType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
     }
 }
 
@@ -486,6 +500,30 @@ pub fn segment_type_from_str(s: &str) -> Option<SegmentType> {
         "opaque_id" => OpaqueId,
         _ => return None,
     })
+}
+
+static CUSTOM_TYPE_NAMES: Lazy<Mutex<HashSet<&'static str>>> =
+    Lazy::new(|| Mutex::new(HashSet::new()));
+
+/// Total version of segment_type_from_str. Ruby models types as symbols, so
+/// any name is a valid type; unknown names (activated recognizer proposals
+/// like "ghp") become Custom variants backed by a leak-once interned string.
+/// The leak is bounded by the number of distinct custom type names seen in a
+/// process, which is tiny in practice.
+pub fn segment_type_from_name(s: &str) -> SegmentType {
+    if let Some(t) = segment_type_from_str(s) {
+        return t;
+    }
+    let mut names = CUSTOM_TYPE_NAMES.lock().unwrap();
+    let interned: &'static str = match names.get(s) {
+        Some(n) => n,
+        None => {
+            let leaked: &'static str = Box::leak(s.to_string().into_boxed_str());
+            names.insert(leaked);
+            leaked
+        }
+    };
+    SegmentType::Custom(interned)
 }
 
 fn ensemble(segment: &str, recognizers: &[std::sync::Arc<dyn Recognizer>]) -> Option<Verdict> {

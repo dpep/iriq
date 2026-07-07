@@ -2,7 +2,7 @@
 // byte-for-byte so a corpus created by either runtime opens cleanly in
 // the other.
 
-use crate::classifier::{segment_type_from_str, SegmentType, DEFAULT_CLASSIFIER};
+use crate::classifier::{segment_type_from_name, SegmentType, DEFAULT_CLASSIFIER};
 use crate::cluster::{Cluster, MAX_CLUSTER_EXAMPLES};
 use crate::identifier::Identifier;
 use crate::parser::parse;
@@ -359,9 +359,8 @@ impl Storage for SqliteStorage {
                 })
                 .unwrap();
             for row in rows.flatten() {
-                if let Some(t) = segment_type_from_str(&row.0) {
-                    ps.type_counts.insert(t, row.1 as usize);
-                }
+                ps.type_counts
+                    .insert(segment_type_from_name(&row.0), row.1 as usize);
             }
         }
         // Recompute numeric stats from value_counts × types — same approach
@@ -545,9 +544,9 @@ impl Storage for SqliteStorage {
                 .unwrap();
             for (name, t_str, count) in rows.flatten() {
                 if let Some(stats) = cluster.param_stats.get_mut(&name) {
-                    if let Some(ty) = segment_type_from_str(&t_str) {
-                        stats.type_counts.insert(ty, count as usize);
-                    }
+                    stats
+                        .type_counts
+                        .insert(segment_type_from_name(&t_str), count as usize);
                 }
             }
         }
