@@ -141,7 +141,7 @@ module Iriq
         # concurrent open, and without busy_timeout set they fail
         # immediately with SQLITE_BUSY.
         @db.execute("PRAGMA busy_timeout = 30000")
-        @db.execute("PRAGMA journal_mode = WAL")
+        enable_wal!
         @db.execute("PRAGMA synchronous = NORMAL")
         @db.execute("PRAGMA foreign_keys = ON")
         @in_batch = false
@@ -151,8 +151,11 @@ module Iriq
         @db.execute_batch(SCHEMA)
         existing = @db.get_first_value("SELECT value FROM meta WHERE key = 'schema_version'")
         if existing.nil?
-          @db.execute("INSERT INTO meta (key, value) VALUES ('schema_version', ?)", SCHEMA_VERSION.to_s)
-          @db.execute("INSERT INTO meta (key, value) VALUES ('max_values_per_position', ?)",
+          # OR IGNORE: two processes can race to initialize a fresh corpus
+          # concurrently — both read schema_version as nil, and the loser's
+          # INSERT must not blow up on the PRIMARY KEY.
+          @db.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)", SCHEMA_VERSION.to_s)
+          @db.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('max_values_per_position', ?)",
                       @max_values_per_position.to_s)
         else
           @max_values_per_position = (@db.get_first_value(
@@ -477,6 +480,24 @@ module Iriq
       end
 
       private
+
+      # Converting a rollback-mode database to WAL takes an exclusive lock,
+      # and SQLite does NOT consult the busy handler for that lock — so
+      # concurrent first-opens of a fresh corpus can fail with SQLITE_BUSY
+      # even with busy_timeout set. WAL is a persistent database property:
+      # retry briefly — either this connection wins the conversion or
+      # another process already converted the file.
+      def enable_wal!
+        attempts = 0
+        begin
+          @db.execute("PRAGMA journal_mode = WAL")
+        rescue SQLite3::BusyException
+          raise if (attempts += 1) > 100
+
+          sleep 0.01
+          retry
+        end
+      end
 
       def upsert_shape(table, shape)
         @db.execute(<<~SQL, shape)

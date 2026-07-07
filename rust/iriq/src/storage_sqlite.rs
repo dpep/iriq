@@ -30,8 +30,7 @@ impl SqliteStorage {
         // PRAGMAs first (busy_timeout before journal_mode).
         conn.execute_batch("PRAGMA busy_timeout = 30000;")
             .map_err(rs_err)?;
-        conn.execute_batch("PRAGMA journal_mode = WAL;")
-            .map_err(rs_err)?;
+        enable_wal(&conn)?;
         conn.execute_batch("PRAGMA synchronous = NORMAL;")
             .map_err(rs_err)?;
         conn.execute_batch(SCHEMA).map_err(rs_err)?;
@@ -51,13 +50,16 @@ impl SqliteStorage {
             .map_err(rs_err)?;
         let mut max_values = max_values;
         if existing.is_none() {
+            // OR IGNORE: two processes can race to initialize a fresh corpus
+            // concurrently — both read schema_version as None, and the
+            // loser's INSERT must not blow up on the PRIMARY KEY.
             conn.execute(
-                "INSERT INTO meta (key, value) VALUES ('schema_version', ?)",
+                "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)",
                 params![SCHEMA_VERSION.to_string()],
             )
             .map_err(rs_err)?;
             conn.execute(
-                "INSERT INTO meta (key, value) VALUES ('max_values_per_position', ?)",
+                "INSERT OR IGNORE INTO meta (key, value) VALUES ('max_values_per_position', ?)",
                 params![max_values.to_string()],
             )
             .map_err(rs_err)?;
@@ -89,6 +91,32 @@ impl SqliteStorage {
 
 fn rs_err<E: std::fmt::Display>(e: E) -> std::io::Error {
     std::io::Error::other(e.to_string())
+}
+
+/// Converting a rollback-mode database to WAL takes an exclusive lock, and
+/// SQLite does NOT consult the busy handler for that lock — so concurrent
+/// first-opens of a fresh corpus can fail with SQLITE_BUSY even with
+/// busy_timeout set. WAL is a persistent database property: retry briefly —
+/// either this connection wins the conversion or another process already
+/// converted the file.
+fn enable_wal(conn: &Connection) -> std::io::Result<()> {
+    let mut attempts = 0;
+    loop {
+        match conn.execute_batch("PRAGMA journal_mode = WAL;") {
+            Ok(()) => return Ok(()),
+            Err(rusqlite::Error::SqliteFailure(e, _))
+                if attempts < 100
+                    && matches!(
+                        e.code,
+                        rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+                    ) =>
+            {
+                attempts += 1;
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(e) => return Err(rs_err(e)),
+        }
+    }
 }
 
 impl Storage for SqliteStorage {
