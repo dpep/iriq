@@ -105,4 +105,4 @@ pub use storage::{open_storage, Storage};
 pub use synthesized_recognizer::SynthesizedRecognizer;
 pub use trace::{trace, trace_identifier, TraceResult, TraceRow};
 
-pub const VERSION: &str = "0.32.1";
+pub const VERSION: &str = "0.33.0";
