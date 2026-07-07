@@ -1,0 +1,964 @@
+{
+  "urls": [
+    {
+      "input": "https://api.acme.io/v1/users/48213",
+      "expected_normalize": "https://api.acme.io/{version}/users/{user_id}",
+      "category": "rest_api",
+      "note": "numeric id after version prefix"
+    },
+    {
+      "input": "https://api.acme.io/v2/orders/9f8b7c6d-3e2a-4f1b-8a9c-0d1e2f3a4b5c",
+      "expected_normalize": "https://api.acme.io/{version}/orders/{order_uuid}",
+      "category": "rest_api",
+      "note": "UUID resource id"
+    },
+    {
+      "input": "https://api.acme.io/v3/users/48213/orders/9f8b7c6d-3e2a-4f1b-8a9c-0d1e2f3a4b5c/items/7",
+      "expected_normalize": "https://api.acme.io/{version}/users/{user_id}/orders/{order_uuid}/items/{item_id}",
+      "category": "rest_api",
+      "note": "mixed id styles nested in one path"
+    },
+    {
+      "input": "https://api.acme.io/v2.1/projects/kproj_02Hq/tasks/1042",
+      "expected_normalize": "https://api.acme.io/{version}/projects/{project_id}/tasks/{task_id}",
+      "category": "rest_api",
+      "note": "dotted version + prefixed id + numeric"
+    },
+    {
+      "input": "https://svc.internal.acme.io/api/v3/teams/eng/members",
+      "expected_normalize": "https://svc.internal.acme.io/api/{version}/teams/eng/members",
+      "category": "rest_api",
+      "note": "api/vN embedded mid-path"
+    },
+    {
+      "input": "https://api.acme.io/v1/organizations/org_9aZ2/repos/backend-core/pulls/318/comments",
+      "expected_normalize": "https://api.acme.io/{version}/organizations/org_9aZ2/repos/{repo_id}/pulls/{pull_id}/comments",
+      "category": "rest_api",
+      "note": "deep nested resources"
+    },
+    {
+      "input": "https://gateway.acme.io/v1/customers/CUST-000481/invoices/INV-2024-00917",
+      "expected_normalize": "https://gateway.acme.io/{version}/customers/{customer_id}/invoices/{invoice_id}",
+      "category": "rest_api",
+      "note": "hyphenated business ids"
+    },
+    {
+      "input": "https://api.acme.io/v1/nodes/0x1a2b3c4d/edges/0x9f8e7d6c",
+      "expected_normalize": "https://api.acme.io/{version}/nodes/{node_id}/edges/{edge_id}",
+      "category": "rest_api",
+      "note": "hex-style ids"
+    },
+    {
+      "input": "https://api.acme.io/v1/users/me/settings",
+      "expected_normalize": "https://api.acme.io/{version}/users/me/settings",
+      "category": "rest_api",
+      "note": "singleton alias segment"
+    },
+    {
+      "input": "https://api.acme.io/v1/search?q=widget&type=product&type=bundle",
+      "expected_normalize": "https://api.acme.io/{version}/search?q=widget&type=bundle",
+      "category": "rest_api",
+      "note": "repeated type param — repeated params collapse last-wins by design"
+    },
+    {
+      "input": "https://shop.northwind.com/p/nike-air-max-90-DM0029-100",
+      "expected_normalize": "https://shop.northwind.com/p/{p_id}",
+      "category": "ecommerce",
+      "note": "slug with SKU and colorway embedded"
+    },
+    {
+      "input": "https://shop.northwind.com/products/12490-organic-cotton-tee",
+      "expected_normalize": "https://shop.northwind.com/products/{product_id}",
+      "category": "ecommerce",
+      "note": "numeric id prefix + slug"
+    },
+    {
+      "input": "https://shop.northwind.com/en-us/c/mens/shoes/running",
+      "expected_normalize": "https://shop.northwind.com/{locale}/c/mens/shoes/running",
+      "category": "ecommerce",
+      "note": "locale + category taxonomy"
+    },
+    {
+      "input": "https://shop.northwind.com/de-de/produkt/laufschuh-42-EU",
+      "expected_normalize": "https://shop.northwind.com/{locale}/produkt/{produkt_id}",
+      "category": "ecommerce",
+      "note": "German locale + size token"
+    },
+    {
+      "input": "https://shop.northwind.com/cart?add=SKU-7781&qty=2",
+      "expected_normalize": "https://shop.northwind.com/cart?add={opaque_id}&qty={integer}",
+      "category": "ecommerce",
+      "note": "add-to-cart query"
+    },
+    {
+      "input": "https://checkout.northwind.com/checkout/step/shipping?session=cs_live_a1B2c3D4e5F6",
+      "expected_normalize": "https://checkout.northwind.com/checkout/step/shipping?session={opaque_id}",
+      "category": "ecommerce",
+      "note": "checkout flow with session token"
+    },
+    {
+      "input": "https://shop.northwind.com/p/sony-wh1000xm5-B09XS7JBH8?variant=black",
+      "expected_normalize": "https://shop.northwind.com/p/{p_id}?variant=black",
+      "category": "ecommerce",
+      "note": "ASIN-like id + variant"
+    },
+    {
+      "input": "https://shop.northwind.com/store/US/en/pricing?currency=USD",
+      "expected_normalize": "https://shop.northwind.com/store/{country}/{locale}/pricing?currency=USD",
+      "category": "ecommerce",
+      "note": "country + currency path/param mix"
+    },
+    {
+      "input": "https://shop.northwind.com/wishlist/9f8b7c6d/items",
+      "expected_normalize": "https://shop.northwind.com/wishlist/{wishlist_id}/items",
+      "category": "ecommerce",
+      "note": "opaque list id"
+    },
+    {
+      "input": "https://shop.northwind.com/gift-cards/redeem?code=GC-4X9K-2M7P-QW10",
+      "expected_normalize": "https://shop.northwind.com/{slug}/redeem?code={opaque_id}",
+      "category": "ecommerce",
+      "note": "grouped alnum redemption code"
+    },
+    {
+      "input": "https://shop.northwind.com/p/sku/00840391108844",
+      "expected_normalize": "https://shop.northwind.com/p/sku/{sku_id}",
+      "category": "ecommerce",
+      "note": "14-digit GTIN as segment"
+    },
+    {
+      "input": "https://auth.brightpay.dev/callback?code=4%2F0AeaYSHBx9k2&state=xyz789ABCdef",
+      "expected_normalize": "https://auth.brightpay.dev/callback?code=4%2F0AeaYSHBx9k2&state={opaque_id}",
+      "category": "auth_tokens",
+      "note": "OAuth callback with encoded code + state"
+    },
+    {
+      "input": "https://api.brightpay.dev/verify?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+      "expected_normalize": "https://api.brightpay.dev/verify?token={jwt}",
+      "category": "auth_tokens",
+      "note": "full JWT in query param"
+    },
+    {
+      "input": "https://api.brightpay.dev/repos?access_token=ghp_16C7e42F292c6912E7710c838347Ae178B4a",
+      "expected_normalize": "https://api.brightpay.dev/repos?access_token={opaque_id}",
+      "category": "auth_tokens",
+      "note": "GitHub PAT prefix in query"
+    },
+    {
+      "input": "https://api.brightpay.dev/charge?key=sk_live_51Hq8XZ2eZvKYlo2Cn9k3jQ",
+      "expected_normalize": "https://api.brightpay.dev/charge?key={opaque_id}",
+      "category": "auth_tokens",
+      "note": "Stripe secret key prefix"
+    },
+    {
+      "input": "https://hooks.slack.com/services/T00000000/B00000000/xoxb-2401-abcDEF123ghiJKL",
+      "expected_normalize": "https://hooks.slack.com/services/{service_id}/{opaque_id}/{opaque_id}",
+      "category": "auth_tokens",
+      "note": "Slack bot token in path"
+    },
+    {
+      "input": "https://app.brightpay.dev/reset-password?token=a3f8b2c1d4e5f6079a8b7c6d5e4f30211223344556677889900aabbccddeeff0",
+      "expected_normalize": "https://app.brightpay.dev/{slug}?token={hash}",
+      "category": "auth_tokens",
+      "note": "long hex reset token"
+    },
+    {
+      "input": "https://assets.brightpay.dev.s3.amazonaws.com/report.pdf?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20240115%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20240115T120000Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=b1c2d3e4f5a6978869504132aabbccddee00112233445566778899aabbccddee",
+      "expected_normalize": "https://assets.brightpay.dev.s3.amazonaws.com/{file}?X-Amz-Algorithm={opaque_id}&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20240115%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date={opaque_id}&X-Amz-Expires={integer}&X-Amz-Signature={hash}&X-Amz-SignedHeaders=host",
+      "category": "auth_tokens",
+      "note": "S3 presigned URL with X-Amz params"
+    },
+    {
+      "input": "https://auth.brightpay.dev/oauth/authorize?response_type=code&client_id=abc123&redirect_uri=https%3A%2F%2Fapp.brightpay.dev%2Fcb&scope=read%20write&state=n0nc3",
+      "expected_normalize": "https://auth.brightpay.dev/oauth/authorize?client_id={opaque_id}&redirect_uri=https%3A%2F%2Fapp.brightpay.dev%2Fcb&response_type=code&scope=read%20write&state={opaque_id}",
+      "category": "auth_tokens",
+      "note": "authorize with encoded redirect + scope"
+    },
+    {
+      "input": "https://api.brightpay.dev/v1/session?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJleHAiOjE3MDAwMDAwMDB9.QW5vdGhlclNpZ25hdHVyZVBhcnRIZXJlMTIzNA",
+      "expected_normalize": "https://api.brightpay.dev/{version}/session?jwt={jwt}",
+      "category": "auth_tokens",
+      "note": "RS256 JWT variant"
+    },
+    {
+      "input": "https://cdn.brightpay.dev/dl?sig=SGVsbG9Xb3JsZFNpZ25hdHVyZQ%3D%3D&expires=1735689600",
+      "expected_normalize": "https://cdn.brightpay.dev/dl?expires={timestamp}&sig=SGVsbG9Xb3JsZFNpZ25hdHVyZQ%3D%3D",
+      "category": "auth_tokens",
+      "note": "base64 signature + expiry"
+    },
+    {
+      "input": "https://logs.metrix.io/events/2024-01-15/summary",
+      "expected_normalize": "https://logs.metrix.io/events/2024-01-15/summary",
+      "category": "dates_times",
+      "note": "ISO date in path"
+    },
+    {
+      "input": "https://logs.metrix.io/archive/20240115/index.html",
+      "expected_normalize": "https://logs.metrix.io/archive/2024-01-15/{file}",
+      "category": "dates_times",
+      "note": "compact YYYYMMDD segment"
+    },
+    {
+      "input": "https://api.metrix.io/points?ts=1705315200",
+      "expected_normalize": "https://api.metrix.io/points?ts={timestamp}",
+      "category": "dates_times",
+      "note": "unix timestamp param"
+    },
+    {
+      "input": "https://api.metrix.io/points?ts_ms=1705315200123",
+      "expected_normalize": "https://api.metrix.io/points?ts_ms={timestamp}",
+      "category": "dates_times",
+      "note": "millisecond unix timestamp"
+    },
+    {
+      "input": "https://api.metrix.io/report?from=2024-01-01&to=2024-01-31",
+      "expected_normalize": "https://api.metrix.io/report?from=2024-01-01&to=2024-01-31",
+      "category": "dates_times",
+      "note": "date range query"
+    },
+    {
+      "input": "https://api.metrix.io/events?after=2024-01-15T09%3A30%3A00%2B02%3A00",
+      "expected_normalize": "https://api.metrix.io/events?after=2024-01-15T09%3A30%3A00%2B02%3A00",
+      "category": "dates_times",
+      "note": "RFC3339 with encoded tz offset"
+    },
+    {
+      "input": "https://api.metrix.io/events?after=2024-01-15T07:30:00Z",
+      "expected_normalize": "https://api.metrix.io/events?after={timestamp}",
+      "category": "dates_times",
+      "note": "RFC3339 UTC unencoded colons"
+    },
+    {
+      "input": "https://logs.metrix.io/y/2024/m/01/d/15/h/23",
+      "expected_normalize": "https://logs.metrix.io/y/{y_id}/m/{m_id}/d/{d_id}/h/{h_id}",
+      "category": "dates_times",
+      "note": "hierarchical date-time path"
+    },
+    {
+      "input": "https://api.metrix.io/week/2024-W03/rollup",
+      "expected_normalize": "https://api.metrix.io/week/{week_id}/rollup",
+      "category": "dates_times",
+      "note": "ISO week designator"
+    },
+    {
+      "input": "https://api.metrix.io/range?window=P7D&anchor=2024-01-15",
+      "expected_normalize": "https://api.metrix.io/range?anchor=2024-01-15&window=P7D",
+      "category": "dates_times",
+      "note": "ISO8601 duration param"
+    },
+    {
+      "input": "https://api.feedly.co/v1/items?page=3&limit=50",
+      "expected_normalize": "https://api.feedly.co/{version}/items?limit={integer}&page={integer}",
+      "category": "pagination",
+      "note": "page + limit"
+    },
+    {
+      "input": "https://api.feedly.co/v1/items?offset=200&limit=25&sort=created_at&order=desc",
+      "expected_normalize": "https://api.feedly.co/{version}/items?limit={integer}&offset={integer}&order=desc&sort={slug}",
+      "category": "pagination",
+      "note": "offset + sort + order"
+    },
+    {
+      "input": "https://api.feedly.co/v1/items?cursor=eyJpZCI6MTA0MiwidHMiOjE3MDUzMTUyMDB9",
+      "expected_normalize": "https://api.feedly.co/{version}/items?cursor={opaque_id}",
+      "category": "pagination",
+      "note": "base64 cursor token"
+    },
+    {
+      "input": "https://api.feedly.co/v1/posts?tag=ruby&tag=rust&tag=go",
+      "expected_normalize": "https://api.feedly.co/{version}/posts?tag=go",
+      "category": "pagination",
+      "note": "repeated tag param — repeated params collapse last-wins by design"
+    },
+    {
+      "input": "https://api.feedly.co/v1/posts?filter%5Bstatus%5D=active&filter%5Bkind%5D=note",
+      "expected_normalize": "https://api.feedly.co/{version}/posts?filter%5Bkind%5D=note&filter%5Bstatus%5D=active",
+      "category": "pagination",
+      "note": "encoded bracket filter params"
+    },
+    {
+      "input": "https://api.feedly.co/v1/posts?filter[status]=active&filter[kind]=note",
+      "expected_normalize": "https://api.feedly.co/{version}/posts?filter[kind]=note&filter[status]=active",
+      "category": "pagination",
+      "note": "raw bracket filter params"
+    },
+    {
+      "input": "https://api.feedly.co/v1/feed?before=id_9f8b7c&per_page=100",
+      "expected_normalize": "https://api.feedly.co/{version}/feed?before={slug}&per_page={integer}",
+      "category": "pagination",
+      "note": "keyset before cursor"
+    },
+    {
+      "input": "https://api.feedly.co/v1/search?q=climate&facets[]=author&facets[]=year",
+      "expected_normalize": "https://api.feedly.co/{version}/search?facets[]=year&q=climate",
+      "category": "pagination",
+      "note": "empty-bracket array params — repeated params collapse last-wins by design"
+    },
+    {
+      "input": "https://api.feedly.co/v1/items?sort=-created_at,+name",
+      "expected_normalize": "https://api.feedly.co/{version}/items?sort=-created_at,+name",
+      "category": "pagination",
+      "note": "signed multi-field sort"
+    },
+    {
+      "input": "https://api.feedly.co/v1/items?page[number]=4&page[size]=20",
+      "expected_normalize": "https://api.feedly.co/{version}/items?page[number]={integer}&page[size]={integer}",
+      "category": "pagination",
+      "note": "JSON:API nested page params"
+    },
+    {
+      "input": "https://münchen-reisen.de/über-uns",
+      "expected_normalize": "https://münchen-reisen.de/über-uns",
+      "category": "i18n",
+      "note": "unicode host + umlaut path"
+    },
+    {
+      "input": "https://xn--mnchen-reisen-9db.de/kontakt",
+      "expected_normalize": "https://xn--mnchen-reisen-9db.de/kontakt",
+      "category": "i18n",
+      "note": "punycode host"
+    },
+    {
+      "input": "https://blog.example.jp/%E6%97%A5%E6%9C%AC%E8%AA%9E/%E8%A8%98%E4%BA%8B",
+      "expected_normalize": "https://blog.example.jp/%E6%97%A5%E6%9C%AC%E8%AA%9E/%E8%A8%98%E4%BA%8B",
+      "category": "i18n",
+      "note": "percent-encoded Japanese path"
+    },
+    {
+      "input": "https://news.example.ru/%D0%BD%D0%BE%D0%B2%D0%BE%D1%81%D1%82%D0%B8/2024",
+      "expected_normalize": "https://news.example.ru/%D0%BD%D0%BE%D0%B2%D0%BE%D1%81%D1%82%D0%B8/{%D0%BD%D0%BE%D0%B2%D0%BE%D1%81%D1%82%D0%B8_id}",
+      "category": "i18n",
+      "note": "percent-encoded Cyrillic path"
+    },
+    {
+      "input": "https://shop.example.ae/%D8%A7%D9%84%D9%85%D9%86%D8%AA%D8%AC%D8%A7%D8%AA",
+      "expected_normalize": "https://shop.example.ae/%D8%A7%D9%84%D9%85%D9%86%D8%AA%D8%AC%D8%A7%D8%AA",
+      "category": "i18n",
+      "note": "percent-encoded Arabic path (RTL)"
+    },
+    {
+      "input": "https://social.example.io/u/josé_garcía/posts",
+      "expected_normalize": "https://social.example.io/u/josé_garcía/posts",
+      "category": "i18n",
+      "note": "raw accented mixed-script slug"
+    },
+    {
+      "input": "https://links.example.io/share?title=I%20%E2%9D%A4%EF%B8%8F%20tacos",
+      "expected_normalize": "https://links.example.io/share?title=I%20%E2%9D%A4%EF%B8%8F%20tacos",
+      "category": "i18n",
+      "note": "emoji in encoded query value"
+    },
+    {
+      "input": "https://go.example.io/🔥/trending",
+      "expected_normalize": "https://go.example.io/🔥/trending",
+      "category": "i18n",
+      "note": "raw emoji path segment"
+    },
+    {
+      "input": "https://例え.テスト/パス",
+      "expected_normalize": "https://例え.テスト/パス",
+      "category": "i18n",
+      "note": "fully unicode host + path"
+    },
+    {
+      "input": "https://xn--r8jz45g.xn--zckzah/%E3%83%91%E3%82%B9",
+      "expected_normalize": "https://xn--r8jz45g.xn--zckzah/%E3%83%91%E3%82%B9",
+      "category": "i18n",
+      "note": "punycode host with encoded path"
+    },
+    {
+      "input": "https://cache.example.io/asset%252Fmain.css",
+      "expected_normalize": "https://cache.example.io/asset%252Fmain.css",
+      "category": "encoding_mess",
+      "note": "double percent-encoded slash"
+    },
+    {
+      "input": "https://search.example.io/q?query=new+york+city",
+      "expected_normalize": "https://search.example.io/q?query=new+york+city",
+      "category": "encoding_mess",
+      "note": "plus-as-space in query"
+    },
+    {
+      "input": "https://search.example.io/q?query=new%20york%20city",
+      "expected_normalize": "https://search.example.io/q?query=new%20york%20city",
+      "category": "encoding_mess",
+      "note": "%20 space equivalent"
+    },
+    {
+      "input": "https://search.example.io/q?query=hello world&lang=en",
+      "expected_normalize": "https://search.example.io/q?lang={locale}&query=hello world",
+      "category": "encoding_mess",
+      "note": "unencoded literal space in query"
+    },
+    {
+      "input": "https://api.example.io/eval?expr={a|b}&mode=or",
+      "expected_normalize": "https://api.example.io/eval?expr={a|b}&mode=or",
+      "category": "encoding_mess",
+      "note": "unencoded braces and pipe"
+    },
+    {
+      "input": "https://api.example.io/note?text=she said \"hi\"",
+      "expected_normalize": "https://api.example.io/note?text=she said \"hi\"",
+      "category": "encoding_mess",
+      "note": "unencoded quotes and space"
+    },
+    {
+      "input": "HtTpS://ExAmPle.COM/Path/To/Thing",
+      "expected_normalize": "https://example.com/Path/To/Thing",
+      "category": "encoding_mess",
+      "note": "mixed-case scheme and host"
+    },
+    {
+      "input": "https://files.example.io/dir%2Fsub%2Ffile.txt",
+      "expected_normalize": "https://files.example.io/dir%2Fsub%2Ffile.txt",
+      "category": "encoding_mess",
+      "note": "encoded slashes inside single segment"
+    },
+    {
+      "input": "https://api.example.io/path?a=%zz&b=%2",
+      "expected_normalize": "https://api.example.io/path?a=%zz&b=%2",
+      "category": "encoding_mess",
+      "note": "invalid/truncated percent sequences"
+    },
+    {
+      "input": "https://api.example.io/redir?url=http%3A%2F%2Fother.io%2Fp%3Fx%3D1%26y%3D2",
+      "expected_normalize": "https://api.example.io/redir?url={url}",
+      "category": "encoding_mess",
+      "note": "fully encoded nested URL value"
+    },
+    {
+      "input": "http://192.168.1.50:8080/health",
+      "expected_normalize": "http://192.168.1.50:8080/health",
+      "category": "infrastructure",
+      "note": "IPv4 host with port"
+    },
+    {
+      "input": "http://10.0.0.7/admin/status",
+      "expected_normalize": "http://10.0.0.7/admin/status",
+      "category": "infrastructure",
+      "note": "private IPv4 no port"
+    },
+    {
+      "input": "http://[2001:db8:85a3::8a2e:370:7334]:9000/metrics",
+      "expected_normalize": "http://[2001:db8:85a3::8a2e:370:7334]:9000/metrics",
+      "category": "infrastructure",
+      "note": "bracketed IPv6 with port"
+    },
+    {
+      "input": "http://[fe80::1%25eth0]/",
+      "expected_normalize": "http://[fe80::1%25eth0]/",
+      "category": "infrastructure",
+      "note": "IPv6 link-local with encoded zone id"
+    },
+    {
+      "input": "http://localhost:3000/api/v1/ping",
+      "expected_normalize": "http://localhost:3000/api/{version}/ping",
+      "category": "infrastructure",
+      "note": "localhost dev port"
+    },
+    {
+      "input": "http://payments.svc.cluster.local:8443/grpc",
+      "expected_normalize": "http://payments.svc.cluster.local:8443/grpc",
+      "category": "infrastructure",
+      "note": "k8s internal service DNS"
+    },
+    {
+      "input": "http://0.0.0.0:5000/",
+      "expected_normalize": "http://0.0.0.0:5000/",
+      "category": "infrastructure",
+      "note": "wildcard bind address"
+    },
+    {
+      "input": "https://www.example.com./index.html",
+      "expected_normalize": "https://www.example.com./{file}",
+      "category": "infrastructure",
+      "note": "trailing-dot FQDN"
+    },
+    {
+      "input": "http://[::1]:6379/",
+      "expected_normalize": "http://[::1]:6379/",
+      "category": "infrastructure",
+      "note": "IPv6 loopback shorthand"
+    },
+    {
+      "input": "https://api-staging.internal:443/v1/flags",
+      "expected_normalize": "https://api-staging.internal/{version}/flags",
+      "category": "infrastructure",
+      "note": "internal hostname explicit 443"
+    },
+    {
+      "input": "https://cdn.example.io/assets/app.a3f8b2.min.js",
+      "expected_normalize": "https://cdn.example.io/assets/{file}",
+      "category": "files_media",
+      "note": "content-hashed versioned asset"
+    },
+    {
+      "input": "https://cdn.example.io/img/hero@2x.webp?v=8827",
+      "expected_normalize": "https://cdn.example.io/img/{email}?v={integer}",
+      "category": "files_media",
+      "note": "retina asset + cache-buster — known edge: email shape wins over file for name@NxN.ext"
+    },
+    {
+      "input": "https://cdn.example.io/downloads/report-2024-q1.pdf",
+      "expected_normalize": "https://cdn.example.io/downloads/{file}",
+      "category": "files_media",
+      "note": "dated document filename"
+    },
+    {
+      "input": "https://cdn.example.io/releases/app-1.4.2-darwin-arm64.tar.gz",
+      "expected_normalize": "https://cdn.example.io/releases/{file}",
+      "category": "files_media",
+      "note": "multi-dot archive with double extension"
+    },
+    {
+      "input": "https://media.example.io/video/clip.mp4?range=bytes%3D0-1048575",
+      "expected_normalize": "https://media.example.io/video/{file}?range=bytes%3D0-1048575",
+      "category": "files_media",
+      "note": "byte-range-ish param"
+    },
+    {
+      "input": "https://cdn.example.io/a/b/c/d/e/f/g/h/thumb_128x128.png",
+      "expected_normalize": "https://cdn.example.io/a/b/c/d/e/f/g/h/{file}",
+      "category": "files_media",
+      "note": "deep CDN path + dimension token"
+    },
+    {
+      "input": "https://cdn.example.io/fonts/Inter-Bold.woff2?ts=1705315200",
+      "expected_normalize": "https://cdn.example.io/fonts/{file}?ts={timestamp}",
+      "category": "files_media",
+      "note": "font asset with timestamp buster"
+    },
+    {
+      "input": "https://cdn.example.io/vendor/jquery-3.7.1.min.js.map",
+      "expected_normalize": "https://cdn.example.io/vendor/{file}",
+      "category": "files_media",
+      "note": "sourcemap double extension"
+    },
+    {
+      "input": "https://media.example.io/hls/stream/master.m3u8",
+      "expected_normalize": "https://media.example.io/hls/stream/{file}",
+      "category": "files_media",
+      "note": "HLS manifest"
+    },
+    {
+      "input": "https://cdn.example.io/i/AbCdEf123456.jpg",
+      "expected_normalize": "https://cdn.example.io/i/{file}",
+      "category": "files_media",
+      "note": "opaque short-id image"
+    },
+    {
+      "input": "https://example.io//double//slash///path",
+      "expected_normalize": "https://example.io/double/slash/path",
+      "category": "structural_edge",
+      "note": "empty segments from repeated slashes"
+    },
+    {
+      "input": "https://example.io/trailing/slash/",
+      "expected_normalize": "https://example.io/trailing/slash",
+      "category": "structural_edge",
+      "note": "trailing slash"
+    },
+    {
+      "input": "https://example.io/a/./b/../c",
+      "expected_normalize": "https://example.io/a/c",
+      "category": "structural_edge",
+      "note": "dot and dot-dot segments"
+    },
+    {
+      "input": "https://example.io/shop;jsessionid=9F8B7C6D5E4F30211223344556677889",
+      "expected_normalize": "https://example.io/shop;jsessionid=9F8B7C6D5E4F30211223344556677889",
+      "category": "structural_edge",
+      "note": "matrix param jsessionid"
+    },
+    {
+      "input": "https://alice:s3cr3t@example.io/private",
+      "expected_normalize": "https://alice:s3cr3t@example.io/private",
+      "category": "structural_edge",
+      "note": "userinfo credentials in authority"
+    },
+    {
+      "input": "https://app.example.io/dashboard#/reports/2024/q1",
+      "expected_normalize": "https://app.example.io/dashboard",
+      "category": "structural_edge",
+      "note": "SPA fragment carrying a route — fragments (SPA routes) are dropped by design"
+    },
+    {
+      "input": "https://example.io/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v",
+      "expected_normalize": "https://example.io/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v",
+      "category": "structural_edge",
+      "note": "extremely long 22-segment path"
+    },
+    {
+      "input": "https://example.io/x/y/z/1/2/3",
+      "expected_normalize": "https://example.io/x/y/z/{z_id}/{integer}/{integer}",
+      "category": "structural_edge",
+      "note": "single-char segments"
+    },
+    {
+      "input": "https://example.io/t/RmFrZVZlcnlMb25nT3BhcXVlVG9rZW5UaGF0R29lc09uQW5kT25BbmRPbkZvckFXaGlsZVdpdGhvdXRBbnlPYnZpb3VzU3RydWN0dXJlSnVzdEJhc2U2NElzaFN0dWZmMTIzNDU2Nzg5MEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFla",
+      "expected_normalize": "https://example.io/t/{t_id}",
+      "category": "structural_edge",
+      "note": "200+ char opaque token segment"
+    },
+    {
+      "input": "https://example.io/path;v=1.1;lang=en/resource",
+      "expected_normalize": "https://example.io/path;v=1.1;lang=en/resource",
+      "category": "structural_edge",
+      "note": "multiple matrix params mid-path"
+    },
+    {
+      "input": "https://example.io/page#section?notaquery=1",
+      "expected_normalize": "https://example.io/page",
+      "category": "structural_edge",
+      "note": "query-looking text inside fragment — fragments are dropped by design"
+    },
+    {
+      "input": "mailto:support@northwind.com?subject=Order%20Help&body=Hi%20there",
+      "expected_normalize": "mailto:support@northwind.com?subject=Order%20Help&body=Hi%20there",
+      "category": "non_http_scheme",
+      "note": "mailto with subject/body params"
+    },
+    {
+      "input": "mailto:one@x.io,two@y.io",
+      "expected_normalize": "mailto:one@x.io,two@y.io",
+      "category": "non_http_scheme",
+      "note": "multiple recipients no host authority"
+    },
+    {
+      "input": "urn:isbn:9780262033848",
+      "expected_normalize": "urn:isbn:{timestamp}",
+      "category": "non_http_scheme",
+      "note": "URN ISBN namespace — known edge: 13-digit ISBN falls in the ms-timestamp window"
+    },
+    {
+      "input": "urn:uuid:9f8b7c6d-3e2a-4f1b-8a9c-0d1e2f3a4b5c",
+      "expected_normalize": "urn:uuid:{uuid_uuid}",
+      "category": "non_http_scheme",
+      "note": "URN UUID namespace — cosmetic: uuid namespace + uuid type duplicate into the hint"
+    },
+    {
+      "input": "ftp://ftp.gnu.org/gnu/bash/bash-5.2.tar.gz",
+      "expected_normalize": "ftp://ftp.gnu.org/gnu/bash/{file}",
+      "category": "non_http_scheme",
+      "note": "classic FTP file URL"
+    },
+    {
+      "input": "tel:+1-415-555-0132",
+      "expected_normalize": "tel:+1-415-555-0132",
+      "category": "non_http_scheme",
+      "note": "tel scheme with formatting"
+    },
+    {
+      "input": "slack://channel?team=T024BE7LD&id=C024BE7LR",
+      "expected_normalize": "slack://channel/?id={opaque_id}&team={opaque_id}",
+      "category": "non_http_scheme",
+      "note": "custom app scheme with params"
+    },
+    {
+      "input": "vscode://file/Users/dpepper/code/app.rb:42:5",
+      "expected_normalize": "vscode://file/Users/dpepper/code/app.rb:42:5",
+      "category": "non_http_scheme",
+      "note": "editor deep-link with line:col"
+    },
+    {
+      "input": "sms:+14155550132?body=on%20my%20way",
+      "expected_normalize": "sms:+14155550132?body=on%20my%20way",
+      "category": "non_http_scheme",
+      "note": "sms scheme with body"
+    },
+    {
+      "input": "magnet:?xt=urn:btih:c12fe1c06bba254a9dc9f519b335aa7c1367a88a",
+      "expected_normalize": "magnet:?xt=urn:btih:c12fe1c06bba254a9dc9f519b335aa7c1367a88a",
+      "category": "non_http_scheme",
+      "note": "magnet link, no host, query only"
+    },
+    {
+      "input": "https://blog.northwind.com/post/spring-sale?utm_source=newsletter&utm_medium=email&utm_campaign=spring2024&utm_content=hero&utm_term=shoes",
+      "expected_normalize": "https://blog.northwind.com/post/{post_id}?utm_campaign={opaque_id}&utm_content=hero&utm_medium=email&utm_source=newsletter&utm_term=shoes",
+      "category": "tracking_junk",
+      "note": "full utm cluster"
+    },
+    {
+      "input": "https://blog.northwind.com/post/deal?gclid=Cj0KCQiA1AbCDEfGhIjKlMnOpQr",
+      "expected_normalize": "https://blog.northwind.com/post/deal?gclid={opaque_id}",
+      "category": "tracking_junk",
+      "note": "Google click id"
+    },
+    {
+      "input": "https://blog.northwind.com/post/deal?fbclid=IwAR0aBcDeFgHiJkLmNoPqRsTuVwXyZ1234567890",
+      "expected_normalize": "https://blog.northwind.com/post/deal?fbclid={opaque_id}",
+      "category": "tracking_junk",
+      "note": "Facebook click id"
+    },
+    {
+      "input": "https://blog.northwind.com/post/deal?msclkid=9f8b7c6d5e4f3021abcd1234ef567890",
+      "expected_normalize": "https://blog.northwind.com/post/deal?msclkid={hash}",
+      "category": "tracking_junk",
+      "note": "Microsoft click id"
+    },
+    {
+      "input": "https://go.northwind.com/r?next=https%3A%2F%2Fapp.northwind.com%2Fdashboard%3Ftab%3Dbilling",
+      "expected_normalize": "https://go.northwind.com/r?next=https%3A%2F%2Fapp.northwind.com%2Fdashboard%3Ftab%3Dbilling",
+      "category": "tracking_junk",
+      "note": "nested encoded redirect target"
+    },
+    {
+      "input": "https://go.northwind.com/out?u=https://partner.io/land&aff=12345&sub=email",
+      "expected_normalize": "https://go.northwind.com/out?aff={integer}&sub=email&u={url}",
+      "category": "tracking_junk",
+      "note": "unencoded nested url in redirect"
+    },
+    {
+      "input": "https://blog.northwind.com/p?utm_source=twitter&utm_source=x&ref=share",
+      "expected_normalize": "https://blog.northwind.com/p?ref=share&utm_source=x",
+      "category": "tracking_junk",
+      "note": "duplicate utm_source + ref — repeated params collapse last-wins by design"
+    },
+    {
+      "input": "https://track.northwind.com/pixel.gif?e=view&cid=9f8b7c6d&t=1705315200",
+      "expected_normalize": "https://track.northwind.com/{file}?cid={opaque_id}&e=view&t={timestamp}",
+      "category": "tracking_junk",
+      "note": "tracking pixel beacon"
+    },
+    {
+      "input": "https://blog.northwind.com/post?mc_cid=abc123def4&mc_eid=987654abcd",
+      "expected_normalize": "https://blog.northwind.com/post?mc_cid={opaque_id}&mc_eid={opaque_id}",
+      "category": "tracking_junk",
+      "note": "Mailchimp campaign ids"
+    },
+    {
+      "input": "https://go.northwind.com/l/click?upn=aBcDeF&next=%2Fpricing%3Fplan%3Dpro",
+      "expected_normalize": "https://go.northwind.com/l/click?next=%2Fpricing%3Fplan%3Dpro&upn=aBcDeF",
+      "category": "tracking_junk",
+      "note": "marketing click wrapper + encoded path"
+    },
+    {
+      "input": "https://legacy.northwind.com/cgi-bin/search.pl?q=widgets&cat=42",
+      "expected_normalize": "https://legacy.northwind.com/{slug}/{opaque_id}?cat={integer}&q=widgets",
+      "category": "legacy_web",
+      "note": "cgi-bin perl script"
+    },
+    {
+      "input": "https://legacy.northwind.com/product.php?id=123&ref=home",
+      "expected_normalize": "https://legacy.northwind.com/{opaque_id}?id={integer}&ref=home",
+      "category": "legacy_web",
+      "note": "php id query"
+    },
+    {
+      "input": "https://legacy.northwind.com/Default.aspx?__VIEWSTATE=dDwtMTM3NDkwNTYwNTs7Ppr7&id=88",
+      "expected_normalize": "https://legacy.northwind.com/{opaque_id}?__VIEWSTATE={opaque_id}&id={integer}",
+      "category": "legacy_web",
+      "note": "aspx ViewState-ish param"
+    },
+    {
+      "input": "https://legacy.northwind.com/orders/submitOrder.do?orderId=9912&action=confirm",
+      "expected_normalize": "https://legacy.northwind.com/orders/{order_id}?action=confirm&orderId={integer}",
+      "category": "legacy_web",
+      "note": "struts .do endpoint"
+    },
+    {
+      "input": "https://legacy.northwind.com/~alice/public_html/index.html",
+      "expected_normalize": "https://legacy.northwind.com/{opaque_id}/{slug}/{file}",
+      "category": "legacy_web",
+      "note": "tilde user home dir"
+    },
+    {
+      "input": "https://legacy.northwind.com/servlet/CatalogServlet?category=books",
+      "expected_normalize": "https://legacy.northwind.com/servlet/CatalogServlet?category=books",
+      "category": "legacy_web",
+      "note": "java servlet path"
+    },
+    {
+      "input": "https://legacy.northwind.com/index.jsp;jsessionid=A1B2C3D4E5?p=2",
+      "expected_normalize": "https://legacy.northwind.com/index.jsp;jsessionid=A1B2C3D4E5?p={integer}",
+      "category": "legacy_web",
+      "note": "jsp with jsessionid matrix param"
+    },
+    {
+      "input": "https://legacy.northwind.com/wp-admin/admin-ajax.php?action=get_posts&nonce=abc123",
+      "expected_normalize": "https://legacy.northwind.com/{slug}/{opaque_id}?action={slug}&nonce={opaque_id}",
+      "category": "legacy_web",
+      "note": "wordpress admin-ajax"
+    },
+    {
+      "input": "https://legacy.northwind.com/cfm/detail.cfm?ProductID=451&CFID=99&CFTOKEN=88",
+      "expected_normalize": "https://legacy.northwind.com/cfm/{cfm_id}?CFID={integer}&CFTOKEN={integer}&ProductID={integer}",
+      "category": "legacy_web",
+      "note": "coldfusion cfm with CFID/CFTOKEN"
+    },
+    {
+      "input": "https://legacy.northwind.com/cgi-bin/mailform.cgi",
+      "expected_normalize": "https://legacy.northwind.com/{slug}/{opaque_id}",
+      "category": "legacy_web",
+      "note": "bare cgi endpoint no query"
+    },
+    {
+      "input": "https://api.acme.io/graphql?query=%7Buser(id%3A%2242213%22)%7Bname%20email%7D%7D",
+      "expected_normalize": "https://api.acme.io/graphql?query=%7Buser(id%3A%2242213%22)%7Bname%20email%7D%7D",
+      "category": "graphql",
+      "note": "encoded GraphQL query in GET"
+    },
+    {
+      "input": "https://api.acme.io/graphql?operationName=GetUser&variables=%7B%22id%22%3A%2242213%22%7D&extensions=%7B%22persistedQuery%22%3A%7B%22sha256Hash%22%3A%22abc123%22%7D%7D",
+      "expected_normalize": "https://api.acme.io/graphql?extensions=%7B%22persistedQuery%22%3A%7B%22sha256Hash%22%3A%22abc123%22%7D%7D&operationName=GetUser&variables=%7B%22id%22%3A%2242213%22%7D",
+      "category": "graphql",
+      "note": "persisted query with variables/extensions"
+    },
+    {
+      "input": "https://api.acme.io/graphql",
+      "expected_normalize": "https://api.acme.io/graphql",
+      "category": "graphql",
+      "note": "bare graphql endpoint (POST in practice)"
+    },
+    {
+      "input": "https://api.acme.io/graphiql?query=query%7B__schema%7Btypes%7Bname%7D%7D%7D",
+      "expected_normalize": "https://api.acme.io/graphiql?query=query%7B__schema%7Btypes%7Bname%7D%7D%7D",
+      "category": "graphql",
+      "note": "introspection query in explorer"
+    },
+    {
+      "input": "https://api.acme.io/graphql?query={me{id}}&variables={}",
+      "expected_normalize": "https://api.acme.io/graphql?query={me{id}}&variables={}",
+      "category": "graphql",
+      "note": "unencoded braces GraphQL query"
+    },
+    {
+      "input": "wss://realtime.acme.io/socket?token=eyJhbGciOiJIUzI1NiJ9.eyJ1IjoxMjN9.abc&v=2",
+      "expected_normalize": "wss://realtime.acme.io/socket?token={jwt}&v={integer}",
+      "category": "websocket",
+      "note": "secure websocket with token"
+    },
+    {
+      "input": "ws://localhost:3000/cable",
+      "expected_normalize": "ws://localhost:3000/cable",
+      "category": "websocket",
+      "note": "insecure ws localhost actioncable"
+    },
+    {
+      "input": "wss://gateway.acme.io/v1/stream?channels=orders,alerts&heartbeat=30",
+      "expected_normalize": "wss://gateway.acme.io/{version}/stream?channels=orders,alerts&heartbeat={integer}",
+      "category": "websocket",
+      "note": "ws with comma channel list"
+    },
+    {
+      "input": "wss://push.acme.io/ws/9f8b7c6d-3e2a-4f1b-8a9c-0d1e2f3a4b5c",
+      "expected_normalize": "wss://push.acme.io/ws/{w_uuid}",
+      "category": "websocket",
+      "note": "ws session id in path"
+    },
+    {
+      "input": "https://ci.acme.io/hooks/github?event=push&delivery=72d3162e-cc78-11e3-81ab-4c9367dc0958",
+      "expected_normalize": "https://ci.acme.io/hooks/github?delivery={uuid}&event=push",
+      "category": "webhook",
+      "note": "github webhook with delivery uuid"
+    },
+    {
+      "input": "https://hooks.acme.io/stripe/9f8b7c6d?sig=t%3D1705315200%2Cv1%3Dabcdef1234567890",
+      "expected_normalize": "https://hooks.acme.io/stripe/{stripe_id}?sig=t%3D1705315200%2Cv1%3Dabcdef1234567890",
+      "category": "webhook",
+      "note": "stripe signature timestamp+v1"
+    },
+    {
+      "input": "https://hooks.acme.io/twilio/sms?From=%2B14155550132&To=%2B14155550199&Body=STOP",
+      "expected_normalize": "https://hooks.acme.io/twilio/sms?Body=STOP&From=%2B14155550132&To=%2B14155550199",
+      "category": "webhook",
+      "note": "twilio inbound sms callback"
+    },
+    {
+      "input": "https://hooks.acme.io/endpoint/wh_2Hq8XZ2eZvKYlo2Cn/retry?attempt=3",
+      "expected_normalize": "https://hooks.acme.io/endpoint/{endpoint_id}/retry?attempt={integer}",
+      "category": "webhook",
+      "note": "prefixed webhook id + retry counter"
+    },
+    {
+      "input": "https://hooks.acme.io/generic?type=order.created&ts=1705315200&hmac=9f8b7c6d5e4f3021",
+      "expected_normalize": "https://hooks.acme.io/generic?hmac={opaque_id}&ts={timestamp}&type={opaque_id}",
+      "category": "webhook",
+      "note": "generic event with hmac"
+    },
+    {
+      "input": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      "expected_normalize": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      "category": "data_uri",
+      "note": "base64 png data URI"
+    },
+    {
+      "input": "data:text/plain;charset=utf-8,Hello%20World",
+      "expected_normalize": "data:text/plain;charset=utf-8,Hello%20World",
+      "category": "data_uri",
+      "note": "plain text data URI with encoding"
+    },
+    {
+      "input": "data:application/json,%7B%22a%22%3A1%7D",
+      "expected_normalize": "data:application/json,%7B%22a%22%3A1%7D",
+      "category": "data_uri",
+      "note": "json data URI no base64"
+    },
+    {
+      "input": "blob:https://app.acme.io/9f8b7c6d-3e2a-4f1b-8a9c-0d1e2f3a4b5c",
+      "expected_normalize": "blob:https://app.acme.io/9f8b7c6d-3e2a-4f1b-8a9c-0d1e2f3a4b5c",
+      "category": "data_uri",
+      "note": "blob URL with origin + uuid"
+    },
+    {
+      "input": "https://",
+      "expected_error": "parse_error",
+      "category": "reject_garbage",
+      "note": "scheme only, no authority"
+    },
+    {
+      "input": "http://:80/",
+      "expected_normalize": "http://:80/",
+      "category": "lenient_accept",
+      "note": "port with empty host — parser is deliberately lenient"
+    },
+    {
+      "input": "//cdn.example.com/x.js",
+      "expected_error": "parse_error",
+      "category": "reject_garbage",
+      "note": "protocol-relative, no scheme"
+    },
+    {
+      "input": "http://exa mple.com/",
+      "expected_normalize": "http://exa mple.com/",
+      "category": "lenient_accept",
+      "note": "literal space in host — parser is deliberately lenient"
+    },
+    {
+      "input": "https://example.com/path%00/etc",
+      "expected_normalize": "https://example.com/path%00/etc",
+      "category": "lenient_accept",
+      "note": "null-byte percent sequence — parser is deliberately lenient"
+    },
+    {
+      "input": "http:///no-host/path",
+      "expected_error": "parse_error",
+      "category": "reject_garbage",
+      "note": "empty authority triple slash"
+    },
+    {
+      "input": "ht!tp://example.com/",
+      "expected_error": "parse_error",
+      "category": "reject_garbage",
+      "note": "illegal char in scheme"
+    },
+    {
+      "input": "https://user@:pass@host.io/x",
+      "expected_normalize": "https://user@:pass@host.io/x",
+      "category": "lenient_accept",
+      "note": "malformed userinfo double @ — parser is deliberately lenient"
+    },
+    {
+      "input": "https://example.com:99999/",
+      "expected_normalize": "https://example.com:99999/",
+      "category": "lenient_accept",
+      "note": "port out of range — parser is deliberately lenient"
+    },
+    {
+      "input": "just some pasted text not a url at all",
+      "expected_error": "parse_error",
+      "category": "reject_garbage",
+      "note": "free text, no scheme or host"
+    }
+  ]
+}

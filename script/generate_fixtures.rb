@@ -31,6 +31,8 @@ PARSER_INPUTS = [
   "https://foo.com/x#top",
   "foo.com/users/456",
   "urn:isbn:0451450523",
+  "mailto:support@foo.com",
+  "tel:+1-415-555-0132",
   "urn:uuid:f47ac10b-58cc-4372-a567-0e02b2c3d479",
   "https://例え.テスト/こんにちは",
   "https://foo.com:8443/x?a=1&b=2#top",
@@ -122,6 +124,8 @@ EXPLAIN_INPUTS = [
   "https://foo.com/users/123/orders/456",
   "https://foo.com/posts/abc-123",
   "urn:isbn:0451450523",
+  "mailto:support@foo.com",
+  "tel:+1-415-555-0132",
   "urn:uuid:f47ac10b-58cc-4372-a567-0e02b2c3d479",
   "https://foo.com/2024-05-23/events",
 ].freeze

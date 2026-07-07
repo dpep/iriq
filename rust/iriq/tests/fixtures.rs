@@ -37,7 +37,7 @@ struct ParserIdent {
     kind: String,
     scheme: Option<String>,
     host: Option<String>,
-    port: Option<u16>,
+    port: Option<u64>,
     path_segments: Vec<String>,
     query_params: HashMap<String, String>,
     fragment: Option<String>,
@@ -74,7 +74,7 @@ fn fixture_parser() {
             c.input
         );
         let want_port = c.identifier.port;
-        let got_port = if iri.port == 0 { None } else { Some(iri.port) };
+        let got_port = iri.port;
         assert_eq!(got_port, want_port, "{:?} port", c.input);
         assert_eq!(
             iri.path_segments, c.identifier.path_segments,

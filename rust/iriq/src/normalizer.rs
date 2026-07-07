@@ -64,9 +64,9 @@ pub fn normalize_identifier_with_evidence(
     if !iri.host.is_empty() {
         s.push_str(&iri.host);
     }
-    if iri.port != 0 {
+    if let Some(port) = iri.port {
         s.push(':');
-        s.push_str(&iri.port.to_string());
+        s.push_str(&port.to_string());
     }
     s.push_str(&ev.render_path(iri, c, hints));
     if !iri.query_params.is_empty() {

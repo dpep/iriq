@@ -14,7 +14,7 @@
 //! // Parse + normalize.
 //! let iri = parse("https://Foo.com:443/users/123").unwrap();
 //! assert_eq!(iri.host, "foo.com");
-//! assert_eq!(iri.port, 0);
+//! assert_eq!(iri.port, None); // default port stripped
 //! assert_eq!(normalize("https://foo.com/users/123").unwrap(),
 //!            "https://foo.com/users/{user_id}");
 //!

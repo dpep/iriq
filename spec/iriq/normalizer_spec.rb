@@ -21,6 +21,11 @@ describe Iriq::Normalizer do
       expect(described_class.normalize("urn:isbn:0451450523")).to eq("urn:isbn:{isbn_id}")
     end
 
+    it "preserves the scheme of opaque non-urn IRIs" do
+      expect(described_class.normalize("mailto:support@foo.com")).to eq("mailto:support@foo.com")
+      expect(described_class.normalize("tel:+1-415-555-0132")).to eq("tel:+1-415-555-0132")
+    end
+
     it "preserves Unicode" do
       expect(described_class.normalize("https://例え.テスト/こんにちは")).to eq("https://例え.テスト/こんにちは")
     end

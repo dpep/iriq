@@ -28,15 +28,11 @@ pub struct TraceResult {
     pub scheme: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub host: String,
-    #[serde(skip_serializing_if = "is_zero_u16")]
-    pub port: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port: Option<u64>,
     pub path: Vec<TraceRow>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub query: Vec<TraceRow>,
-}
-
-fn is_zero_u16(n: &u16) -> bool {
-    *n == 0
 }
 
 pub fn trace(input: &str) -> Result<TraceResult, ParseError> {

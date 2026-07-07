@@ -37,7 +37,7 @@ module Iriq
     # Unicode display form (no punycode / percent-encoding pass).
     def canonical
       if urn?
-        "urn:#{nss}"
+        "#{scheme}:#{nss}"
       else
         out = +""
         out << "#{scheme}://" if scheme

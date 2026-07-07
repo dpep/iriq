@@ -86,6 +86,9 @@ jobs:
       - name: regenerate calibration corpus
         run: bundle exec ruby script/build_calibration.rb
 
+      - name: regenerate URL calibration corpus
+        run: bundle exec ruby script/build_url_calibration.rb
+
       - name: assert fixtures unchanged
         run: |
           if ! git diff --quiet spec/fixtures; then

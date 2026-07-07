@@ -671,8 +671,8 @@ fn identifier_json(iri: &Identifier) -> Value {
     if !iri.host.is_empty() {
         o.insert("host".to_string(), Value::String(iri.host.clone()));
     }
-    if iri.port != 0 {
-        o.insert("port".to_string(), Value::Number((iri.port as u64).into()));
+    if let Some(port) = iri.port {
+        o.insert("port".to_string(), Value::Number(port.into()));
     }
     if !iri.path_segments.is_empty() {
         o.insert(
@@ -746,8 +746,8 @@ fn emit_parse_human<W: Write>(stdout: &mut W, iri: &Identifier) {
     if !iri.host.is_empty() {
         let _ = writeln!(stdout, "host:          {}", iri.host);
     }
-    if iri.port != 0 {
-        let _ = writeln!(stdout, "port:          {}", iri.port);
+    if let Some(port) = iri.port {
+        let _ = writeln!(stdout, "port:          {}", port);
     }
     if !iri.path_segments.is_empty() {
         let _ = writeln!(

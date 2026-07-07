@@ -203,6 +203,36 @@
       }
     },
     {
+      "input": "mailto:support@foo.com",
+      "identifier": {
+        "original": "mailto:support@foo.com",
+        "kind": "urn",
+        "scheme": "mailto",
+        "host": null,
+        "port": null,
+        "path_segments": [],
+        "query_params": {},
+        "fragment": null,
+        "nss": "support@foo.com",
+        "canonical": "mailto:support@foo.com"
+      }
+    },
+    {
+      "input": "tel:+1-415-555-0132",
+      "identifier": {
+        "original": "tel:+1-415-555-0132",
+        "kind": "urn",
+        "scheme": "tel",
+        "host": null,
+        "port": null,
+        "path_segments": [],
+        "query_params": {},
+        "fragment": null,
+        "nss": "+1-415-555-0132",
+        "canonical": "tel:+1-415-555-0132"
+      }
+    },
+    {
       "input": "urn:uuid:f47ac10b-58cc-4372-a567-0e02b2c3d479",
       "identifier": {
         "original": "urn:uuid:f47ac10b-58cc-4372-a567-0e02b2c3d479",

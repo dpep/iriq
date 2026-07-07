@@ -223,6 +223,7 @@ pub enum FileKind {
     Data,
     Text,
     Web,
+    Font,
     Audio,
     Video,
     Archive,
@@ -237,6 +238,7 @@ impl FileKind {
             FileKind::Data => "data",
             FileKind::Text => "text",
             FileKind::Web => "web",
+            FileKind::Font => "font",
             FileKind::Audio => "audio",
             FileKind::Video => "video",
             FileKind::Archive => "archive",
@@ -267,13 +269,20 @@ static FILE_EXTENSION_KIND: Lazy<HashMap<&'static str, FileKind>> = Lazy::new(||
     for e in ["txt", "md", "log", "markdown", "rst"] {
         m.insert(e, Text);
     }
-    for e in ["html", "htm", "css", "js", "mjs", "cjs", "ts", "jsx", "tsx"] {
+    for e in [
+        "html", "htm", "css", "js", "mjs", "cjs", "ts", "jsx", "tsx", "map",
+    ] {
         m.insert(e, Web);
+    }
+    for e in ["woff", "woff2", "ttf", "otf", "eot"] {
+        m.insert(e, Font);
     }
     for e in ["mp3", "wav", "ogg", "flac", "aac", "m4a", "opus"] {
         m.insert(e, Audio);
     }
-    for e in ["mp4", "mov", "avi", "mkv", "webm", "flv", "wmv", "m4v"] {
+    for e in [
+        "mp4", "mov", "avi", "mkv", "webm", "flv", "wmv", "m4v", "m3u8",
+    ] {
         m.insert(e, Video);
     }
     for e in ["zip", "tar", "gz", "bz2", "7z", "rar", "xz", "tgz"] {

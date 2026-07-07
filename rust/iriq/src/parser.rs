@@ -13,9 +13,9 @@ static HOSTISH_RE: Lazy<Regex> = Lazy::new(|| {
 static AUTH_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^(?P<host>[^/?#]+?)(?::(?P<port>\d+))?(?P<rest>[/?#].*)?$").unwrap());
 
-static DEFAULT_PORTS: Lazy<HashMap<&'static str, u16>> = Lazy::new(|| {
+static DEFAULT_PORTS: Lazy<HashMap<&'static str, u64>> = Lazy::new(|| {
     HashMap::from([
-        ("http", 80u16),
+        ("http", 80u64),
         ("https", 443),
         ("ftp", 21),
         ("ws", 80),
@@ -39,7 +39,7 @@ pub fn parse(input: &str) -> Result<Identifier, ParseError> {
                 original: input.to_string(),
                 scheme,
                 host: String::new(),
-                port: 0,
+                port: None,
                 path: String::new(),
                 path_segments: Vec::new(),
                 query: String::new(),
@@ -68,7 +68,7 @@ fn parse_urn(original: &str, rest: &str) -> Result<Identifier, ParseError> {
         original: original.to_string(),
         scheme: "urn".to_string(),
         host: String::new(),
-        port: 0,
+        port: None,
         path: String::new(),
         path_segments: Vec::new(),
         query: String::new(),
@@ -89,18 +89,15 @@ fn parse_authority_url(
         .or_else(|| AUTH_RE.captures(remainder))
         .ok_or_else(|| ParseError::new(format!("cannot parse authority from {:?}", original)))?;
     let host = caps.name("host").unwrap().as_str().to_ascii_lowercase();
-    let mut port: u16 = 0;
-    if let Some(p) = caps.name("port") {
-        port = p
-            .as_str()
-            .parse::<u16>()
-            .map_err(|_| ParseError::new(format!("invalid port in {:?}", original)))?;
-    }
-    if port != 0 {
-        if let Some(&default) = DEFAULT_PORTS.get(scheme) {
-            if default == port {
-                port = 0;
-            }
+    // Mirrors Ruby's `to_i` leniency: any digit run is accepted (the parser
+    // is deliberately forgiving of log garbage like out-of-range ports).
+    // Digit runs beyond u64 saturate — indistinguishable in practice.
+    let mut port: Option<u64> = caps
+        .name("port")
+        .map(|p| p.as_str().parse::<u64>().unwrap_or(u64::MAX));
+    if let (Some(n), Some(&default)) = (port, DEFAULT_PORTS.get(scheme)) {
+        if default == n {
+            port = None;
         }
     }
 

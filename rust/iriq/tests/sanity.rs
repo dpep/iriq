@@ -44,7 +44,7 @@ fn urn_isbn() {
 fn parse_https() {
     let iri = parse("https://Foo.com:443/Bar").unwrap();
     assert_eq!(iri.host, "foo.com");
-    assert_eq!(iri.port, 0);
+    assert_eq!(iri.port, None);
     assert_eq!(iri.path_segments, vec!["Bar"]);
 }
 

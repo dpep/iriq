@@ -22,7 +22,7 @@ pub struct Identifier {
     pub original: String,
     pub scheme: String,
     pub host: String,
-    pub port: u16, // 0 == unset
+    pub port: Option<u64>,
     pub path: String,
     pub path_segments: Vec<String>,
     pub query: String,
@@ -45,7 +45,7 @@ impl Identifier {
     /// Unicode display form (no punycode / percent-encoding pass).
     pub fn canonical(&self) -> String {
         if self.is_urn() {
-            return format!("urn:{}", self.nss);
+            return format!("{}:{}", self.scheme, self.nss);
         }
         let mut s = String::new();
         if !self.scheme.is_empty() {
@@ -55,9 +55,9 @@ impl Identifier {
         if !self.host.is_empty() {
             s.push_str(&self.host);
         }
-        if self.port != 0 {
+        if let Some(port) = self.port {
             s.push(':');
-            s.push_str(&self.port.to_string());
+            s.push_str(&port.to_string());
         }
         let has_query = !self.query.is_empty();
         let has_frag = !self.fragment.is_empty();

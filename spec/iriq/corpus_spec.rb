@@ -198,6 +198,11 @@ describe Iriq::Corpus do
       expect(obs.fingerprint).to eq("urn:isbn:{isbn_id}")
       expect(corpus.normalize("urn:isbn:0451450523")).to eq("urn:isbn:{isbn_id}")
     end
+
+    it "keeps the scheme of opaque non-urn IRIs in fingerprints" do
+      obs = corpus.observe("mailto:support@foo.com")
+      expect(obs.fingerprint).to start_with("mailto:")
+    end
   end
 
   describe "save / load round-trip" do

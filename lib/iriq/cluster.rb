@@ -403,8 +403,8 @@ module Iriq
       if iri.urn?
         ns, value = (iri.nss || "").split(":", 2)
         derived = value ? urn_value_shape(ns, value, classifier) : nil
-        key     = "urn:#{ns}:#{derived}"
-        [key, nil, "urn", key]
+        key     = "#{iri.scheme}:#{ns}:#{derived}"
+        [key, nil, iri.scheme, key]
       else
         shape ||= PathShape.new(classifier: classifier).for(iri.path_segments)
         effective_host = host.nil? ? iri.host : host

@@ -127,9 +127,10 @@ module Iriq
       document: %w[pdf doc docx xls xlsx ppt pptx odt ods odp rtf epub],
       data:     %w[csv tsv json xml yaml yml parquet sqlite db ndjson jsonl],
       text:     %w[txt md log markdown rst],
-      web:      %w[html htm css js mjs cjs ts jsx tsx],
+      web:      %w[html htm css js mjs cjs ts jsx tsx map],
+      font:     %w[woff woff2 ttf otf eot],
       audio:    %w[mp3 wav ogg flac aac m4a opus],
-      video:    %w[mp4 mov avi mkv webm flv wmv m4v],
+      video:    %w[mp4 mov avi mkv webm flv wmv m4v m3u8],
       archive:  %w[zip tar gz bz2 7z rar xz tgz],
       code:     %w[rb py go java c cc cpp h hpp sh swift kt rs],
     }.freeze

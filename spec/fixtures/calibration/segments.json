@@ -1005,6 +1005,24 @@
       "source": "double-extension"
     },
     {
+      "value": "Inter-Bold.woff2",
+      "expected_type": "file",
+      "category": "positive",
+      "source": "web font with digit in extension"
+    },
+    {
+      "value": "master.m3u8",
+      "expected_type": "file",
+      "category": "positive",
+      "source": "HLS manifest"
+    },
+    {
+      "value": "app.min.js.map",
+      "expected_type": "file",
+      "category": "positive",
+      "source": "sourcemap double extension"
+    },
+    {
       "value": "script.rb",
       "expected_type": "file",
       "category": "positive",

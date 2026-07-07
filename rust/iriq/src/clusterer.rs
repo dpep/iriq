@@ -37,11 +37,11 @@ pub fn cluster_key_for_host(
         if !value.is_empty() {
             final_shape = urn_value_shape(&ns, &value, c);
         }
-        let key = format!("urn:{}:{}", ns, final_shape);
+        let key = format!("{}:{}:{}", iri.scheme, ns, final_shape);
         return ClusterKey {
             key: key.clone(),
             host: String::new(),
-            scheme: "urn".to_string(),
+            scheme: iri.scheme.clone(),
             shape: key,
         };
     }

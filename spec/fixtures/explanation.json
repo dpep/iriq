@@ -64,6 +64,28 @@
       ]
     },
     {
+      "input": "mailto:support@foo.com",
+      "entries": [
+        {
+          "value": "support@foo.com",
+          "type": "email",
+          "variable": true,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "input": "tel:+1-415-555-0132",
+      "entries": [
+        {
+          "value": "+1-415-555-0132",
+          "type": "phone",
+          "variable": true,
+          "hint": null
+        }
+      ]
+    },
+    {
       "input": "urn:uuid:f47ac10b-58cc-4372-a567-0e02b2c3d479",
       "entries": [
         {
