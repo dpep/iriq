@@ -35,7 +35,7 @@ _iriq() {
             return
             ;;
         completion)
-            COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") )
+            COMPREPLY=( $(compgen -W "bash zsh fish" -- "$cur") )
             return
             ;;
     esac

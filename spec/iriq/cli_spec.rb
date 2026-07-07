@@ -62,7 +62,7 @@ describe Iriq::CLI do
     end
 
     it "wraps an unknown completion shell" do
-      expect(run("completion", "fish", "--json")).to eq(1)
+      expect(run("completion", "tcsh", "--json")).to eq(1)
       expect(error_payload.dig("error", "code")).to eq("unknown_shell")
     end
 
@@ -74,6 +74,20 @@ describe Iriq::CLI do
     it "keeps the plain human error without --json" do
       expect(run("just-some-token")).to eq(2)
       expect(stderr.string).to start_with("iriq: parse error:")
+    end
+  end
+
+  describe "completion" do
+    %w[bash zsh fish].each do |shell|
+      it "emits the bundled #{shell} script" do
+        expect(run("completion", shell)).to eq(0)
+        expect(stdout.string).to eq(File.read(Iriq::CLI::COMPLETION_FILES[shell]))
+      end
+    end
+
+    it "errors on an unknown shell" do
+      expect(run("completion", "tcsh")).to eq(1)
+      expect(stderr.string).to include("unknown shell")
     end
   end
 

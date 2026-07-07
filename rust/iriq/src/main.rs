@@ -1644,19 +1644,8 @@ fn cmd_completion<W: Write, E: Write>(
     args: &[String],
     json_mode: bool,
 ) -> u8 {
-    let shell = match args.first() {
-        Some(s) => s.as_str(),
-        None => {
-            return emit_error(
-                stderr,
-                json_mode,
-                "missing_argument",
-                "missing shell argument; expected bash | zsh | fish",
-                "iriq: completion: missing shell argument; expected bash | zsh | fish",
-                1,
-            );
-        }
-    };
+    let default_shell = default_shell();
+    let shell = args.first().map(|s| s.as_str()).unwrap_or(&default_shell);
     match shell {
         "bash" => {
             let _ = write!(stdout, "{}", BASH_COMPLETION);
@@ -1671,12 +1660,9 @@ fn cmd_completion<W: Write, E: Write>(
             return emit_error(
                 stderr,
                 json_mode,
-                "invalid_argument",
-                &format!("unknown shell {:?}; expected bash | zsh | fish", shell),
-                &format!(
-                    "iriq: completion: unknown shell {:?}; expected bash | zsh | fish",
-                    shell
-                ),
+                "unknown_shell",
+                &format!("unknown shell {:?} (try bash, zsh, or fish)", shell),
+                "",
                 1,
             );
         }
@@ -1684,46 +1670,183 @@ fn cmd_completion<W: Write, E: Write>(
     0
 }
 
-const BASH_COMPLETION: &str = r#"# iriq bash completion (rust port)
-_iriq() {
-  COMPREPLY=( $(compgen -W "-n -c -p -e -j -J -N -V -h --normalize --canonical --parse --explain --json --ndjson --no-hints --version --help --corpus --host --stats --reinfer --propose-recognizers --cross-host-shapes --activate-above --min-hosts --min-observations --min-coverage --no-scheme-less cluster completion" -- "${COMP_WORDS[COMP_CWORD]}") )
+// Mirrors the Ruby CLI: with no shell argument, infer from $SHELL
+// (basename, `.exe` stripped), falling back to bash.
+fn default_shell() -> String {
+    let shell = std::env::var("SHELL").unwrap_or_default();
+    if shell.is_empty() {
+        return "bash".to_string();
+    }
+    let base = shell.rsplit(['/', '\\']).next().unwrap_or(&shell);
+    base.strip_suffix(".exe").unwrap_or(base).to_string()
 }
+
+// Inlined copies of the shared completion scripts at completions/
+// {iriq.bash,_iriq,iriq.fish}. crates.io packages cannot reach files
+// outside the crate root, so they are embedded here — keep them
+// byte-identical to the gem copies (script/cli_parity.sh enforces it).
+const BASH_COMPLETION: &str = r##"# Bash completion for the `iriq` CLI.
+#
+# Install (pick one):
+#   - Persist via Homebrew: brew install dpep/tools/iriq automatically
+#     drops this script into Homebrew's bash-completion dir.
+#   - Try it out in the current shell:
+#       source <(iriq completion bash)
+#   - Persist to ~/.bashrc:
+#       echo 'source <(iriq completion bash)' >> ~/.bashrc
+#   - Or write to your system's bash completion dir:
+#       iriq completion bash > /usr/local/etc/bash_completion.d/iriq
+
+_iriq() {
+    local cur prev words cword
+    _init_completion 2>/dev/null || {
+        cur="${COMP_WORDS[COMP_CWORD]}"
+        prev="${COMP_WORDS[COMP_CWORD-1]}"
+    }
+
+    # Argument completion for flags that take a value.
+    case "$prev" in
+        --corpus)
+            # Corpus paths are file-shaped. _filedir picks up *.json / *.db
+            # / *.sqlite / *.sqlite3 by default extension; the user can also
+            # tab through any path.
+            _filedir
+            return
+            ;;
+        --host)
+            COMPREPLY=( $(compgen -W "full registrable reg none" -- "$cur") )
+            return
+            ;;
+        --min-observations|--min-hosts|--min-coverage|--activate-above)
+            # Numeric argument — no completion candidates.
+            return
+            ;;
+        completion)
+            COMPREPLY=( $(compgen -W "bash zsh fish" -- "$cur") )
+            return
+            ;;
+    esac
+
+    # If the current token starts with `-`, complete flags.
+    if [[ "$cur" == -* ]]; then
+        local flags="-h --help -V --version -p --parse -n --normalize -c --canonical -e --explain
+                     -j --json -J --ndjson -N --no-hints --hints --no-scheme-less
+                     --scheme-less --corpus --host --stats --reinfer
+                     --propose-recognizers --activate-above --cross-host-shapes
+                     --min-observations --min-coverage --min-hosts"
+        COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
+        return
+    fi
+
+    # First non-flag positional may be a subcommand or a file/IRI.
+    if [[ $COMP_CWORD -eq 1 ]]; then
+        COMPREPLY=( $(compgen -W "cluster completion" -- "$cur") )
+        # Also offer files for the auto-extract path (iriq ./access.log).
+        local files
+        files=$(compgen -f -- "$cur")
+        if [[ -n "$files" ]]; then
+            COMPREPLY+=( $files )
+        fi
+        return
+    fi
+
+    # Otherwise fall back to file completion (e.g. `iriq cluster <file>`).
+    _filedir
+}
+
 complete -F _iriq iriq
-"#;
+"##;
 
-const ZSH_COMPLETION: &str = r#"# iriq zsh completion (rust port)
+const ZSH_COMPLETION: &str = r##"#compdef iriq
+# Zsh completion for the `iriq` CLI.
+#
+# Install (pick one):
+#   - Persist via Homebrew: brew install dpep/tools/iriq drops this file
+#     into Homebrew's zsh site-functions dir automatically.
+#   - Try in the current shell:
+#       source <(iriq completion zsh)
+#   - Or copy this file into a directory listed in $fpath and run
+#     `compinit` (typically run by your zshrc).
+
 _iriq() {
-  local -a opts
-  opts=('-n' '-c' '-p' '-e' '-j' '-J' '-N' '-V' '-h' '--normalize' '--canonical' '--parse' '--explain' '--json' '--ndjson' '--no-hints' '--version' '--help' '--corpus' '--host' '--stats' '--reinfer' '--propose-recognizers' '--cross-host-shapes' '--activate-above' '--min-hosts' '--min-observations' '--min-coverage' '--no-scheme-less' 'cluster' 'completion')
-  compadd "${opts[@]}"
-}
-compdef _iriq iriq
-"#;
+    local context state state_descr line
+    typeset -A opt_args
 
-const FISH_COMPLETION: &str = r#"# iriq fish completion (rust port)
-complete -c iriq -s n -l normalize
-complete -c iriq -s c -l canonical
-complete -c iriq -s p -l parse
-complete -c iriq -s e -l explain
-complete -c iriq -s j -l json
-complete -c iriq -s J -l ndjson
-complete -c iriq -s N -l no-hints
-complete -c iriq -s V -l version
-complete -c iriq -s h -l help
-complete -c iriq -l corpus -r
-complete -c iriq -l host -r
-complete -c iriq -l stats
-complete -c iriq -l reinfer
-complete -c iriq -l propose-recognizers
-complete -c iriq -l cross-host-shapes
-complete -c iriq -l activate-above -r
-complete -c iriq -l min-hosts -r
-complete -c iriq -l min-observations -r
-complete -c iriq -l min-coverage -r
-complete -c iriq -l no-scheme-less
-complete -c iriq -n '__fish_use_subcommand' -a cluster
-complete -c iriq -n '__fish_use_subcommand' -a completion
-"#;
+    _arguments -C \
+        '(-h --help)'{-h,--help}'[show usage]' \
+        '(-V --version)'{-V,--version}'[print version]' \
+        '(-p --parse)'{-p,--parse}'[parsed fields section]' \
+        '(-n --normalize)'{-n,--normalize}'[normalized section]' \
+        '(-c --canonical)'{-c,--canonical}'[canonical form section]' \
+        '(-e --explain)'{-e,--explain}'[annotated trace section]' \
+        '(-j --json)'{-j,--json}'[JSON output]' \
+        '(-J --ndjson)'{-J,--ndjson}'[newline-delimited JSON]' \
+        '(-N --no-hints)'{-N,--no-hints}'[use {type} placeholders, not {hint}]' \
+        '--hints[enable hint placeholders]' \
+        '--no-scheme-less[skip schemeless URL extraction]' \
+        '--scheme-less[enable schemeless URL extraction]' \
+        '--corpus[load/create a JSON or SQLite corpus]:corpus path:_files -g "*.(json|db|sqlite|sqlite3)"' \
+        '--host[host-keying strategy for clustering]:strategy:(full registrable reg none)' \
+        '--stats[print rolling aggregates]' \
+        '--reinfer[replay the source-IRI log]' \
+        '--propose-recognizers[propose new Recognizers from observed shapes]' \
+        '--cross-host-shapes[list route shapes seen across multiple hosts]' \
+        '--activate-above[auto-activate proposals at or above this confidence]:F:' \
+        '--min-observations[proposal threshold]:N:' \
+        '--min-coverage[proposal threshold]:F:' \
+        '--min-hosts[threshold for proposals and cross-host shapes]:N:' \
+        '1:command or file:->first' \
+        '*:file:_files' \
+        && return 0
+
+    case $state in
+        first)
+            _alternative \
+                'commands:command:(cluster completion)' \
+                'files:file:_files'
+            ;;
+    esac
+}
+
+_iriq "$@"
+"##;
+
+const FISH_COMPLETION: &str = r##"# Fish completion for the `iriq` CLI.
+#
+# Install (pick one):
+#   - Persist via Homebrew: brew install dpep/tools/iriq drops this file
+#     into Homebrew's fish vendor_completions dir automatically.
+#   - Try it out in the current shell:
+#       iriq completion fish | source
+#   - Persist for future sessions:
+#       iriq completion fish > ~/.config/fish/completions/iriq.fish
+
+complete -c iriq -s h -l help -d 'show usage'
+complete -c iriq -s V -l version -d 'print version'
+complete -c iriq -s p -l parse -d 'parsed fields section'
+complete -c iriq -s n -l normalize -d 'normalized section'
+complete -c iriq -s c -l canonical -d 'canonical form section'
+complete -c iriq -s e -l explain -d 'annotated trace section'
+complete -c iriq -s j -l json -d 'JSON output'
+complete -c iriq -s J -l ndjson -d 'newline-delimited JSON'
+complete -c iriq -s N -l no-hints -d 'use {type} placeholders, not {hint}'
+complete -c iriq -l hints -d 'enable hint placeholders'
+complete -c iriq -l no-scheme-less -d 'skip schemeless URL extraction'
+complete -c iriq -l scheme-less -d 'enable schemeless URL extraction'
+complete -c iriq -l corpus -r -d 'load/create a JSON or SQLite corpus'
+complete -c iriq -l host -x -a 'full registrable reg none' -d 'host-keying strategy for clustering'
+complete -c iriq -l stats -d 'print rolling aggregates'
+complete -c iriq -l reinfer -d 'replay the source-IRI log'
+complete -c iriq -l propose-recognizers -d 'propose new Recognizers from observed shapes'
+complete -c iriq -l cross-host-shapes -d 'list route shapes seen across multiple hosts'
+complete -c iriq -l activate-above -x -d 'auto-activate proposals at or above this confidence'
+complete -c iriq -l min-observations -x -d 'proposal noise floor'
+complete -c iriq -l min-coverage -x -d 'proposal coverage floor'
+complete -c iriq -l min-hosts -x -d 'threshold for proposals and cross-host shapes'
+complete -c iriq -n __fish_use_subcommand -a cluster -d 'force cluster view'
+complete -c iriq -n __fish_use_subcommand -a completion -d 'print shell completion script'
+complete -c iriq -n '__fish_seen_subcommand_from completion' -x -a 'bash zsh fish'
+"##;
 
 // ── JSON helpers ─────────────────────────────────────────────────────────────
 
