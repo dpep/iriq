@@ -44,7 +44,7 @@ _iriq() {
     if [[ "$cur" == -* ]]; then
         local flags="-h --help -V --version -p --parse -n --normalize -c --canonical -e --explain
                      -j --json -J --ndjson -N --no-hints --hints --no-scheme-less
-                     --scheme-less --corpus --host --stats --reinfer
+                     --scheme-less --corpus -C --no-corpus --reset --host --stats --reinfer
                      --propose-recognizers --activate-above --cross-host-shapes
                      --min-observations --min-coverage --min-hosts"
         COMPREPLY=( $(compgen -W "$flags" -- "$cur") )

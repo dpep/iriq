@@ -1764,7 +1764,7 @@ _iriq() {
     if [[ "$cur" == -* ]]; then
         local flags="-h --help -V --version -p --parse -n --normalize -c --canonical -e --explain
                      -j --json -J --ndjson -N --no-hints --hints --no-scheme-less
-                     --scheme-less --corpus --host --stats --reinfer
+                     --scheme-less --corpus -C --no-corpus --reset --host --stats --reinfer
                      --propose-recognizers --activate-above --cross-host-shapes
                      --min-observations --min-coverage --min-hosts"
         COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
@@ -1819,6 +1819,8 @@ _iriq() {
         '--no-scheme-less[skip schemeless URL extraction]' \
         '--scheme-less[enable schemeless URL extraction]' \
         '--corpus[load/create a JSON or SQLite corpus]:corpus path:_files -g "*.(json|db|sqlite|sqlite3)"' \
+        '(-C --no-corpus)'{-C,--no-corpus}'[disable corpus persistence for this invocation]' \
+        '--reset[delete the corpus database and exit]' \
         '--host[host-keying strategy for clustering]:strategy:(full registrable reg none)' \
         '--stats[print rolling aggregates]' \
         '--reinfer[replay the source-IRI log]' \

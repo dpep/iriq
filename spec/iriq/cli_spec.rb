@@ -90,6 +90,31 @@ describe Iriq::CLI do
       expect(run("completion", "tcsh")).to eq(1)
       expect(stderr.string).to include("unknown shell")
     end
+
+    describe "drift guard" do
+      # Every long flag the option parser defines must be completable in
+      # both shells — a new flag added to parse_options without a matching
+      # completions/ update fails here. Scans the `o.on(...)` definitions
+      # and expands "--[no-]x" into both forms.
+      let(:long_flags) do
+        source = File.read(File.expand_path("../../lib/iriq/cli.rb", __dir__))
+        parse_options = source[/def parse_options.+?^    end/m]
+        parse_options.scan(/"(--(?:\[no-\])?[a-z][a-z-]*)/).flatten.flat_map do |flag|
+          flag.include?("[no-]") ? [flag.sub("[no-]", ""), flag.sub("[no-]", "no-")] : [flag]
+        end.uniq
+      end
+
+      %w[bash zsh].each do |shell|
+        it "lists every parser long flag in the #{shell} completion script" do
+          script  = File.read(Iriq::CLI::COMPLETION_FILES[shell])
+          missing = long_flags.reject do |flag|
+            script.match?(/(?<![\w-])#{Regexp.escape(flag)}(?![\w-])/)
+          end
+          expect(long_flags.size).to be > 15 # the scan itself must not silently break
+          expect(missing).to be_empty
+        end
+      end
+    end
   end
 
   describe "default (no section flag)" do

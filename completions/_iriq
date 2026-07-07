@@ -27,6 +27,8 @@ _iriq() {
         '--no-scheme-less[skip schemeless URL extraction]' \
         '--scheme-less[enable schemeless URL extraction]' \
         '--corpus[load/create a JSON or SQLite corpus]:corpus path:_files -g "*.(json|db|sqlite|sqlite3)"' \
+        '(-C --no-corpus)'{-C,--no-corpus}'[disable corpus persistence for this invocation]' \
+        '--reset[delete the corpus database and exit]' \
         '--host[host-keying strategy for clustering]:strategy:(full registrable reg none)' \
         '--stats[print rolling aggregates]' \
         '--reinfer[replay the source-IRI log]' \
