@@ -115,7 +115,7 @@ module Iriq
             acc[:positions] << position
             acc[:hosts] << position.host
             # Collect every match; we'll sort + cap to a stable top-N at
-            # emission time so Ruby and Go produce identical samples
+            # emission time so Ruby and Rust produce identical samples
             # regardless of underlying Hash / map iteration order.
             acc[:matches] << value
           end
@@ -135,7 +135,7 @@ module Iriq
             hosts:             acc[:hosts],
             coverage:          coverage,
             observation_count: acc[:matching_count],
-            # Sort + cap to 5 so Ruby and Go produce identical samples
+            # Sort + cap to 5 so Ruby and Rust produce identical samples
             # regardless of underlying Hash / map iteration order. The
             # samples are illustrative for humans; alphabetical is fine.
             sample_values:     acc[:matches].sort.first(5),

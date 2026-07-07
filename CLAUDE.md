@@ -1,33 +1,31 @@
 # Iriq development conventions
 
-> **⚠️ Behavior changes touch ALL THREE runtimes.** Ruby is the reference; Go
-> + Rust mirror it. Before committing any change to
+> **⚠️ Behavior changes touch BOTH runtimes.** Ruby is the reference; Rust
+> mirrors it. Before committing any change to
 > parser/normalizer/extractor/CLI/etc:
 >
 >   1. Update Ruby + specs.
 >   2. `bundle exec ruby script/generate_fixtures.rb` (regenerate JSON parity fixtures).
->   3. Port the change to Go (the Go module lives in `go/`).
->   4. `go -C go test ./...` — fixture tests should still pass.
->   5. `make build && script/cli_parity.sh` — Ruby ↔ Go CLI parity should still pass.
->   6. Port the change to Rust under `rust/`.
->   7. `cd rust && cargo test --workspace` — Rust fixture tests should still pass
+>   3. Port the change to Rust under `rust/`.
+>   4. `cd rust && cargo test --workspace` — Rust fixture tests should still pass
 >      (SQLite is a default feature).
->   8. `cd rust && cargo build --release --bin iriq && cd .. && script/rust_parity.sh`
->      — Rust ↔ Go CLI parity (covers Ruby transitively).
->   9. Commit the regenerated fixtures alongside the code change.
+>   5. `cd rust && cargo build --release --bin iriq && cd .. && script/cli_parity.sh`
+>      — Ruby ↔ Rust CLI parity should still pass.
+>   6. Commit the regenerated fixtures alongside the code change.
 >
 > CI's parity + Rust jobs will fail if any step is skipped. The **Rust gate**
 > (fmt + clippy + tests) is automated — run `make hooks` once to install the
-> committed pre-push hook that runs `make check`. Full multi-runtime pre-push
-> for a behavior change:
-> `bundle exec rspec && go -C go test ./... && script/cli_parity.sh && make check && script/rust_parity.sh`.
+> committed pre-push hook that runs `make check`. Full pre-push for a
+> behavior change:
+> `bundle exec rspec && make check && script/cli_parity.sh`.
 
-## Repo layout — Ruby at the root, Go and Rust in subdirs
+## Repo layout — Ruby at the root, Rust in a subdir
 
 The Ruby gem lives at the repo root (it's the reference implementation and the
-published gem); the two mirror implementations are compartmentalized into
-`go/` and `rust/`. Earlier the Go code was intermixed at the root; it now sits
-in `go/`, symmetric with `rust/`, so the root reads as "Ruby + two ports."
+published gem); the Rust mirror implementation is compartmentalized into
+`rust/`. A Go port also existed through v0.32.1 (in `go/`) but was retired —
+Ruby + Rust cover the library and CLI surface, and the shipped CLI (Homebrew,
+crates.io) is the Rust binary.
 
 ```
 iriq/
@@ -36,34 +34,25 @@ iriq/
   iriq.gemspec
   Gemfile
 
-  go/                     ← Go module github.com/dpep/iriq/go
-    go.mod go.sum
-    *.go                  ← Go package `iriq`
-    cmd/iriq/             ← Go CLI binary
-    completions/          ← Go's own embedded copy (go:embed can't reach ../)
-
   rust/                   ← Cargo workspace
     Cargo.toml            ← workspace root
     iriq/                 ← one crate: library + `iriq` CLI binary; inlines completions
-    REPORT.md             ← Go → Rust port spike notes + perf
+    REPORT.md             ← Go → Rust port spike notes + perf (historical)
     target/               ← Rust build artifacts (gitignored)
 
-  bin/                    ← built Go binary (gitignored)
   script/                 ← shared dev scripts (fixture gen, parity, benches)
-  spec/fixtures/          ← golden JSON shared by Ruby specs + Go + Rust tests
-  .github/workflows/      ← Ruby CI, Go CI, Rust CI, parity CIs
+  spec/fixtures/          ← golden JSON shared by Ruby specs + Rust tests
+  .github/workflows/      ← Ruby CI, Rust CI (tests + parity)
 ```
 
 Notes on this layout:
 
-- Go's import path is now `github.com/dpep/iriq/go` (the `/go` suffix matches
-  the subdir). Consumers import `github.com/dpep/iriq/go`.
-- One version tag (`vX.Y.Z`) serves all three runtimes — Ruby's gemspec, Go's
-  module, and Rust's `Cargo.toml` use the same tag stream.
-- The gemspec ships only Ruby + `completions/`, excluding `go/` and `rust/`:
-  `git ls-files * ':!:spec' ':!:script' ':!:bin' ':!:rust' ':!:go'`.
-- Completion scripts exist in three places (gem root `completions/`, `go/completions/`
-  for `go:embed`, and inlined in the Rust CLI) — keep them in sync like fixtures.
+- One version tag (`vX.Y.Z`) serves both runtimes — Ruby's gemspec and Rust's
+  `Cargo.toml` use the same tag stream.
+- The gemspec ships only Ruby + `completions/`, excluding `rust/`:
+  `git ls-files * ':!:spec' ':!:script' ':!:rust'`.
+- Completion scripts exist in two places (gem root `completions/` and inlined
+  in the Rust CLI) — keep them in sync like fixtures.
 
 ## Building
 
@@ -72,17 +61,10 @@ Notes on this layout:
 bundle install
 bundle exec exe/iriq --help     # runs the CLI from source
 
-# Go binary — convenience targets in the Makefile
-make build                      # → ./bin/iriq
-make install                    # go install into $GOBIN
-make uninstall                  # remove from $GOBIN
-make clean                      # remove ./bin/
-make test                       # go test ./...
-
 # Rust — one crate (library + `iriq` binary), SQLite bundled by default
-cd rust && cargo build --release --bin iriq    # → ./rust/target/release/iriq
-cd rust && cargo install --path iriq           # install into ~/.cargo/bin
-cd rust && cargo test --workspace
+make build                      # → ./rust/target/release/iriq
+make install                    # cargo install into ~/.cargo/bin
+make test                       # cargo test --workspace
 
 # Via Homebrew (builds the Rust CLI from main)
 brew install dpep/tools/iriq
@@ -91,67 +73,57 @@ brew install dpep/tools/iriq
 cargo install iriq
 ```
 
-## Keeping the three runtimes in sync
+## Keeping the two runtimes in sync
 
-Ruby is the **reference implementation**. Go and Rust mirror its public API
-and behavior. Three layers of parity testing keep them aligned:
+Ruby is the **reference implementation**. Rust mirrors its public API and
+behavior. Two layers of parity testing keep them aligned:
 
 1. **Golden JSON fixtures** (`spec/fixtures/*.json`)
    Generated by `script/generate_fixtures.rb` from the Ruby implementation
-   over a curated set of inputs. Go's `fixtures_test.go` and Rust's
-   `rust/iriq/tests/fixtures.rs` both load each file and assert the same
-   outputs.
+   over a curated set of inputs. Rust's `rust/iriq/tests/fixtures.rs` loads
+   each file and asserts the same outputs.
 
-2. **Ruby ↔ Go CLI parity harness** (`script/cli_parity.sh`)
-   Runs the same input through `bundle exec exe/iriq` and the Go binary and
-   diffs stdout. Lives in CI as the `Ruby ↔ Go parity` job.
-
-3. **Rust ↔ Go CLI parity harness** (`script/rust_parity.sh`)
-   Same idea — runs every Phase 1 + Phase 2 scenario (single-input,
-   pipe-mode, JSON corpus, SQLite corpus, --stats, --reinfer,
-   --propose-recognizers, --cross-host-shapes, --host=reg) through the
-   Go and Rust binaries and diffs stdout. Lives in CI as the
-   `Rust ↔ Go parity` job. Rust transitively inherits Ruby parity via Go.
+2. **Ruby ↔ Rust CLI parity harness** (`script/cli_parity.sh`)
+   Runs the same input through `bundle exec exe/iriq` and the Rust binary
+   and diffs stdout — single-input, pipe-mode, JSON corpus, SQLite corpus,
+   --stats, --reinfer, --propose-recognizers, --cross-host-shapes,
+   --host=reg, completions. Lives in CI as the `Ruby ↔ Rust parity` job,
+   which also regenerates fixtures and fails on drift.
 
 When changing behavior:
 
 1. Update the Ruby code + specs first.
 2. Regenerate fixtures: `bundle exec ruby script/generate_fixtures.rb`.
-3. Port the change to Go.
-4. `go test ./...` (uses the updated fixtures).
-5. `script/cli_parity.sh` should pass.
-6. Port the change to Rust under `rust/`.
-7. `cd rust && cargo test --workspace`.
-8. `cd rust && cargo build --release --bin iriq && cd .. && script/rust_parity.sh` should pass.
-9. Commit fixtures with the change — CI will fail if they're stale.
+3. Port the change to Rust under `rust/`.
+4. `cd rust && cargo test --workspace` (uses the updated fixtures).
+5. `cd rust && cargo build --release --bin iriq && cd .. && script/cli_parity.sh`
+   should pass.
+6. Commit fixtures with the change — CI will fail if they're stale.
 
 ## Tests
 
 ```sh
 bundle exec rspec                                # Ruby suite (305+ examples)
-go test ./...                                    # Go suite (native + fixture parity)
-script/cli_parity.sh                             # Ruby ↔ Go CLI parity
 cd rust && cargo test --workspace
 cd rust && cargo fmt --check                      # formatting (CI-gated)
 cd rust && cargo clippy --workspace --all-targets -- -D warnings
 make check                                        # the three Rust checks above, in one shot
-script/rust_parity.sh                            # Rust ↔ Go CLI parity (~59 scenarios)
+script/cli_parity.sh                             # Ruby ↔ Rust CLI parity
 ```
 
 ## Releases
 
-Versioning is single-stream: one `vX.Y.Z` covers all three runtimes. Bump the
-three version constants **together** — the `--version` parity checks fail
-if they drift:
+Versioning is single-stream: one `vX.Y.Z` covers both runtimes. Bump the
+version constants **together** — the `--version` parity check fails if they
+drift:
 
-1. `lib/iriq/version.rb` (`VERSION`), `go/version.go` (`Version`), and the two
-   `version = "X.Y.Z"` / `pub const VERSION` lines in `rust/iriq/Cargo.toml` and
+1. `lib/iriq/version.rb` (`VERSION`) and the two `version = "X.Y.Z"` /
+   `pub const VERSION` lines in `rust/iriq/Cargo.toml` and
    `rust/iriq/src/lib.rs` — same string.
 2. `Gemfile.lock` — re-resolve so the pinned `iriq (X.Y.Z)` matches
    (`bundle install`, or it regenerates on the next `bundle exec`). Commit it.
 3. Run `cd rust && cargo update -p iriq` to refresh `Cargo.lock`.
-4. Tag `vX.Y.Z` and push. Go consumers pick it up via
-   `go get github.com/dpep/iriq/go@vX.Y.Z`.
+4. Tag `vX.Y.Z` and push.
 5. `gem push iriq-X.Y.Z.gem` to publish to RubyGems.
 6. `cd rust && cargo publish -p iriq` to publish to crates.io (the crate ships
    both the library and the `iriq` binary).
@@ -180,31 +152,26 @@ The `Corpus` class delegates state to a `Storage` backend; three backends ship:
   file with WAL journaling. Supports concurrent observers and avoids
   loading the whole corpus into memory.
 
-`Corpus.open(path)` (Ruby) / `iriq.OpenCorpus(path)` (Go) picks the backend
-by file extension. `corpus.save(other_path)` exports as JSON regardless of
-the live backend; `corpus.save(same_path)` is idempotent (no clobbering a
-SQLite file with JSON, etc.).
+`Corpus.open(path)` picks the backend by file extension. `corpus.save(other_path)`
+exports as JSON regardless of the live backend; `corpus.save(same_path)` is
+idempotent (no clobbering a SQLite file with JSON, etc.).
 
-As of v0.31.0 SQLite is always on across all three runtimes — corpus
-mode is enabled by default and the auto-default uses a `.db` file. The
-Ruby `sqlite3` gem is still loaded lazily so the require cost stays out
-of `iriq --help` etc. On the Go side we use `modernc.org/sqlite` (pure
-Go — no cgo); the previous slim / sqlite build split was retired. The
-Rust side uses `rusqlite` with the `bundled` feature (statically links C
-SQLite, ~3-4 MB binary cost). Schema v4 is shared across all three
-runtimes — a `.db` written by any binary opens cleanly in any other.
+As of v0.31.0 SQLite is always on in both runtimes — corpus mode is
+enabled by default and the auto-default uses a `.db` file. The Ruby
+`sqlite3` gem is still loaded lazily so the require cost stays out of
+`iriq --help` etc. The Rust side uses `rusqlite` with the `bundled`
+feature (statically links C SQLite, ~3-4 MB binary cost). Schema v4 is
+shared across runtimes — a `.db` written by either binary opens cleanly
+in the other (and in `.db` files written by the retired Go port).
 
-When adding a new backend, replicate the contract in all three languages
-and add parity scenarios in `script/cli_parity.sh`'s `corpus_pair`
-section + `script/rust_parity.sh`'s `corpus_pair`.
+When adding a new backend, replicate the contract in both languages and
+add parity scenarios in `script/cli_parity.sh`'s `corpus_pair` section.
 
 ## What lives where in scripts
 
 - `script/benchmark.rb` — Ruby-only throughput benchmark.
 - `script/memory.rb` — Ruby-only memory profile.
 - `script/generate_fixtures.rb` — produces `spec/fixtures/*.json` for cross-runtime parity.
-- `script/cli_parity.sh` — Ruby ↔ Go CLI diff.
-- `script/rust_parity.sh` — Rust ↔ Go CLI diff.
-- `script/bench_three_way.sh` — Go vs Rust wall-clock comparison.
-- `script/bench_compare.sh` — Ruby vs Go CLI wall-time comparison.
+- `script/cli_parity.sh` — Ruby ↔ Rust CLI diff.
+- `script/bench_compare.sh` — Ruby vs Rust CLI wall-time comparison.
 - `script/bench_storage.sh` — JSON vs SQLite backend timing (single-process, incremental, concurrent).

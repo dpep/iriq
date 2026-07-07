@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # Builds spec/fixtures/calibration/segments.json from the inline labeled
 # corpus below. Re-run this script after editing the labels to refresh the
-# fixture used by both Ruby and Go calibration tests.
+# fixture used by both Ruby and Rust calibration tests.
 #
 # Each entry is { value, expected_type, category, source }:
 #   value         — the segment string

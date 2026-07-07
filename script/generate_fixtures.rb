@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Generates golden JSON fixtures from the Ruby implementation. The Go port's
+# Generates golden JSON fixtures from the Ruby implementation. The Rust port's
 # fixture tests load these files and assert the same outputs — a single source
 # of truth that catches drift without re-translating every RSpec example.
 #
@@ -237,7 +237,7 @@ end
 write_fixture("extractor", { "cases" => extractor_cases })
 
 # Synthetic corpus — exercises the corpus heuristics end-to-end with a
-# deterministic stream. We dump the resulting aggregates so Go can replay the
+# deterministic stream. We dump the resulting aggregates so Rust can replay the
 # stream and assert the same final state.
 seed_count = 200
 urls       = IriGenerator.urls(count: seed_count, seed: 1234)
@@ -254,7 +254,7 @@ corpus_fixture = {
     "raw_shape_counts"   => corpus.raw_shape_counts,
     "fingerprint_counts" => corpus.fingerprint_counts,
     "cluster_count"      => corpus.size,
-    # Top 5 by count for stability; full counts above let Go assert exact equality.
+    # Top 5 by count for stability; full counts above let Rust assert exact equality.
     "top_hosts"          => corpus.host_counts.sort_by { |_, n| -n }.first(5).to_h,
     "top_shapes"         => corpus.fingerprint_counts.sort_by { |_, n| -n }.first(5).to_h,
   },
@@ -274,7 +274,7 @@ small = Iriq::Corpus.new
 write_fixture("corpus_dump", small.dump)
 
 # Param classification fixture — exercises the const → string → enum ladder,
-# the confidence score, and enum member values so Go + Rust assert identical
+# the confidence score, and enum member values so Rust asserts identical
 # per-param typing. All params share the /items cluster; each carries a
 # different distribution to land on a different rung.
 params_corpus = Iriq::Corpus.new

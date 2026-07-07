@@ -79,8 +79,8 @@ module Iriq
     end
 
     # Most common type. On count ties, breaks lexicographically by type
-    # symbol name so the result is deterministic and matches Go's
-    # DominantType (Go's map iteration is randomized).
+    # symbol name so the result is deterministic and matches the Rust
+    # port's dominant_type regardless of map iteration order.
     def dominant_type
       best = nil
       best_count = -1

@@ -1,8 +1,5 @@
 *.gem
 coverage
 
-# Go build output
-/bin/
-
 # Rust build output
 /rust/target/

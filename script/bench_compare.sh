@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Side-by-side timing of the Ruby CLI and the Go CLI on a representative
+# Side-by-side timing of the Ruby CLI and the Rust CLI on a representative
 # extraction workload. Not a microbenchmark — measures real CLI start +
 # parse + extract + observe wall time, which is what users actually feel.
 #
@@ -13,15 +13,14 @@ unset CDPATH  # don't let user CDPATH leak into our path resolution
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ITERS="${1:-5}"
-GO_BIN="${IRIQ_GO_BIN:-$REPO_ROOT/bin/iriq}"
+RUST_BIN="${IRIQ_RUST_BIN:-$REPO_ROOT/rust/target/release/iriq}"
 
 export LANG="${LANG:-C.UTF-8}"
 export LC_ALL="${LC_ALL:-C.UTF-8}"
 
-if [[ ! -x "$GO_BIN" ]]; then
-  echo "Building Go binary..." >&2
-  mkdir -p "$(dirname "$GO_BIN")"
-  (cd "$REPO_ROOT/go" && go build -o "$GO_BIN" ./cmd/iriq)
+if [[ ! -x "$RUST_BIN" ]]; then
+  echo "Building Rust binary..." >&2
+  (cd "$REPO_ROOT/rust" && cargo build --release --bin iriq 2>&1 | tail -3)
 fi
 
 # Generate a fixed input file: 2000 synthetic URLs from the spec generator.
@@ -54,4 +53,4 @@ time_one() {
 }
 
 time_one "ruby" "bundle exec --gemfile=$REPO_ROOT/Gemfile $REPO_ROOT/exe/iriq -n"
-time_one "go"   "$GO_BIN -n"
+time_one "rust" "$RUST_BIN -n"

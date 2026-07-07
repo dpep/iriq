@@ -1,3 +1,6 @@
+###  Unreleased
+- **The Go port is retired.** Ruby (reference) + Rust (shipped CLI via Homebrew/crates.io) continue; the `go/` module, its CI, and the Ruby↔Go / Rust↔Go parity harnesses are removed. `script/cli_parity.sh` now diffs Ruby ↔ Rust directly. Go consumers can pin `github.com/dpep/iriq/go@v0.32.1`, the last tag with Go support. `.db` corpora written by the Go binary still open cleanly (shared schema v4).
+
 ###  0.32.1  (2026-06-26)
 - Go and Rust `cluster --json` now include the per-param `values` and `value_distribution` (plus `subtype_distribution`, `kind_distribution`, and numeric `min`/`max`/`avg`) that Ruby already emitted — the cluster JSON is now identical across all three runtimes. No change to the human-readable cluster view.
 - Test coverage: new `param_summary` golden fixture exercises the const → string → enum ladder + confidence across Ruby/Go/Rust (`go test` / `cargo test`), and the parity harnesses gained a key-order-agnostic JSON comparison (`jq -S` + number canonicalization) with a `cluster --json` scenario.
