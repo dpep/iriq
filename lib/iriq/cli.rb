@@ -84,7 +84,7 @@ module Iriq
 
       Subcommands:
         cluster [file]        Force cluster view (default for ≥10 IRIs anyway)
-        completion <shell>    Print shell completion script (bash | zsh | fish)
+        completion <shell>    Print shell completion script (bash | zsh)
 
       Examples:
         iriq foo.com/users/456
@@ -564,7 +564,7 @@ module Iriq
     end
 
     # `completion <shell>` — emit the bundled shell-completion script.
-    # Scripts live in completions/{iriq.bash,_iriq,iriq.fish} alongside the
+    # Scripts live in completions/{iriq.bash,_iriq} alongside the
     # gem; Homebrew installs them automatically, but the user can also do
     # `source <(iriq completion bash)` in their shell rc. The Rust CLI
     # inlines the same scripts — keep them byte-identical (parity-tested).
@@ -572,14 +572,13 @@ module Iriq
     COMPLETION_FILES = {
       "bash" => File.join(COMPLETIONS_DIR, "iriq.bash"),
       "zsh"  => File.join(COMPLETIONS_DIR, "_iriq"),
-      "fish" => File.join(COMPLETIONS_DIR, "iriq.fish"),
     }.freeze
 
     def cmd_completion(args)
       shell = args.first || default_shell
       path  = COMPLETION_FILES[shell]
       unless path
-        return emit_error("unknown_shell", "unknown shell #{shell.inspect} (try bash, zsh, or fish)", 1)
+        return emit_error("unknown_shell", "unknown shell #{shell.inspect} (try bash or zsh)", 1)
       end
       stdout.write(File.read(path))
       0
