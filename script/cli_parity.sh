@@ -227,6 +227,24 @@ else
   diff <(echo "$ruby_dedup_out") <(echo "$rust_dedup_out") | sed 's/^/    /' || true
 fi
 
+# Cluster param numeric ranges must survive the SQLite readback (regression:
+# the Ruby backend once dropped numeric min/max/avg when loading a cluster).
+numeric_stream=$'https://foo.com/search?page=1\nhttps://foo.com/search?page=2\nhttps://foo.com/search?page=3\nhttps://foo.com/search?page=4\n'
+ruby_nums="$corpus_dir/ruby-nums.db"
+rust_nums="$corpus_dir/rust-nums.db"
+echo -n "$numeric_stream" | (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_nums") > /dev/null
+echo -n "$numeric_stream" | "$RUST_BIN" --corpus "$rust_nums" > /dev/null
+ruby_nums_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_nums" cluster < /dev/null) )
+rust_nums_out=$( "$RUST_BIN" --corpus "$rust_nums" cluster < /dev/null )
+if [[ "$ruby_nums_out" == "$rust_nums_out" ]]; then
+  pass_count=$((pass_count + 1))
+else
+  fail_count=$((fail_count + 1))
+  echo
+  echo "MISMATCH: cluster param numeric readback (SQLite)"
+  diff <(echo "$ruby_nums_out") <(echo "$rust_nums_out") | sed 's/^/    /' || true
+fi
+
 # --reinfer parity. After observing the same stream, both CLIs should
 # produce identical --reinfer output, and --stats afterward should still
 # match (idempotent replay).

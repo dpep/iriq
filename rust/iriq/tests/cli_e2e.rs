@@ -237,6 +237,35 @@ fn reinfer_runs() {
     let _ = std::fs::remove_file(&cp);
 }
 
+#[test]
+fn reset_deletes_the_corpus_and_tolerates_a_missing_one() {
+    let cp = std::env::temp_dir().join(format!("iriq_e2e_{}_reset.db", std::process::id()));
+    let cps = cp.to_str().unwrap();
+    let _ = std::fs::remove_file(&cp);
+
+    run(&["--corpus", cps], "https://foo.com/users/1\n");
+    assert!(cp.exists(), "corpus should exist before reset");
+
+    let (_out, err, ok) = run_full(&["--reset", "--corpus", cps], "");
+    assert!(ok, "{err}");
+    assert!(err.contains(&format!("reset corpus at {cps}")), "{err}");
+    assert!(!cp.exists(), "corpus should be gone after reset");
+    for side in [format!("{cps}-wal"), format!("{cps}-shm")] {
+        assert!(
+            !std::path::Path::new(&side).exists(),
+            "sidecar left behind: {side}"
+        );
+    }
+
+    // Resetting again is not an error — it just reports there's nothing there.
+    let (_out, err, ok) = run_full(&["--reset", "--corpus", cps], "");
+    assert!(ok, "{err}");
+    assert!(
+        err.contains(&format!("no corpus to reset at {cps}")),
+        "{err}"
+    );
+}
+
 // ── errors & meta ────────────────────────────────────────────────────────────
 
 #[test]

@@ -445,6 +445,7 @@ module Iriq
         ) { |r| tc[r[0].to_sym] = r[1] }
         stats.instance_variable_set(:@type_counts, tc)
 
+        recompute_numeric!(stats)
         stats
       end
 
@@ -543,9 +544,38 @@ module Iriq
           stats = params[r[0]] or next
           stats.type_counts[r[1].to_sym] = r[2]
         end
+        params.each_value { |stats| recompute_numeric!(stats) }
         c.instance_variable_set(:@param_stats, params)
 
         c
+      end
+
+      # The rolling numeric aggregates (count/min/max/sum) aren't stored in
+      # the schema — rebuild them from the tracked value counts, mirroring
+      # the Rust backend: only positions with integer/float observations
+      # qualify, and cap-trimmed values are lost.
+      def recompute_numeric!(stats)
+        return if (stats.type_counts[:integer] + stats.type_counts[:float]).zero?
+
+        count = 0
+        min   = nil
+        max   = nil
+        sum   = 0.0
+        stats.value_counts.each do |value, n|
+          num = Float(value, exception: false)
+          next unless num
+
+          count += n
+          min = num if min.nil? || num < min
+          max = num if max.nil? || num > max
+          n.times { sum += num }
+        end
+        return if count.zero?
+
+        stats.instance_variable_set(:@numeric_count, count)
+        stats.instance_variable_set(:@numeric_min, min)
+        stats.instance_variable_set(:@numeric_max, max)
+        stats.instance_variable_set(:@numeric_sum, sum)
       end
     end
   end

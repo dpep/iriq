@@ -1,5 +1,6 @@
 require "json"
 require "stringio"
+require "tmpdir"
 
 describe Iriq::CLI do
   let(:stdin)  { StringIO.new }
@@ -176,6 +177,18 @@ describe Iriq::CLI do
       stdout.truncate(stdout.rewind)
       expect(run("-pcn", "--json", "foo.com/users/123")).to eq(0)
       expect(JSON.parse(stdout.string).keys).to eq(%w[parse canonical normalize])
+    end
+  end
+
+  describe "--explain" do
+    it "renders the normalized form plus per-segment path and query tables" do
+      expect(run("-e", "https://foo.com/users/123?page=2")).to eq(0)
+      out = stdout.string
+      expect(out.lines.first).to include("{user_id}")
+      expect(out).to include("path:")
+      expect(out).to include("query:")
+      expect(out).to include("123")
+      expect(out).to include("page=2")
     end
   end
 
@@ -513,6 +526,121 @@ describe Iriq::CLI do
       expect(data["host_counts"]).to eq("foo.com" => 2)
     end
 
+  end
+
+  describe "--reset" do
+    let(:corpus_dir)  { Dir.mktmpdir("iriq-reset") }
+    let(:corpus_path) { File.join(corpus_dir, "corpus.db") }
+
+    after { FileUtils.remove_entry(corpus_dir) }
+
+    it "deletes the corpus file and its sidecars" do
+      [corpus_path, "#{corpus_path}-wal", "#{corpus_path}-shm", "#{corpus_path}.tmp"].each do |p|
+        File.write(p, "")
+      end
+
+      expect(run("--reset", "--corpus", corpus_path)).to eq(0)
+      expect(Dir.children(corpus_dir)).to be_empty
+      expect(stderr.string).to include("reset corpus at #{corpus_path}")
+    end
+
+    it "reports when there is no corpus to reset" do
+      expect(run("--reset", "--corpus", corpus_path)).to eq(0)
+      expect(stderr.string).to include("no corpus to reset at #{corpus_path}")
+    end
+
+    it "honors --corpus even when --no-corpus is set" do
+      File.write(corpus_path, "")
+      expect(run("--reset", "--no-corpus", "--corpus", corpus_path)).to eq(0)
+      expect(File.exist?(corpus_path)).to be false
+      expect(stderr.string).to include("reset corpus at #{corpus_path}")
+    end
+  end
+
+  describe "corpus commands" do
+    let(:corpus_file) do
+      f = Tempfile.new(["iriq-corpus-cmd", ".json"])
+      f.close
+      File.delete(f.path)
+      f
+    end
+    let(:corpus_path) { corpus_file.path }
+
+    after { File.delete(corpus_path) if File.exist?(corpus_path) }
+
+    # Observe `urls` into the corpus via a separate CLI invocation, so the
+    # command under test starts from a persisted corpus like a real second run.
+    def seed(urls)
+      seeder = described_class.new(stdin: StringIO.new(urls.join("\n")),
+                                   stdout: StringIO.new, stderr: StringIO.new)
+      expect(seeder.run(["--corpus", corpus_path])).to eq(0)
+    end
+
+    def seed_recognizable_stream
+      seed((1..25).map { |i| "https://api.github.com/auth/ghp_aaaa#{i.to_s.rjust(4, '0')}xyzzy" })
+    end
+
+    describe "--reinfer" do
+      it "reports the replayed observation and cluster counts" do
+        seed(%w[https://foo.com/users/1 https://foo.com/users/2 https://foo.com/users/3])
+        expect(run("--corpus", corpus_path, "--reinfer")).to eq(0)
+        expect(stdout.string).to eq("reinferred 3 observations: 1 → 1 cluster\n")
+      end
+    end
+
+    describe "--propose-recognizers" do
+      it "renders one block per proposal" do
+        seed_recognizable_stream
+        expect(run("--corpus", corpus_path, "--propose-recognizers")).to eq(0)
+        out = stdout.string
+        expect(out).to include("proposal: ghp (ghp_)")
+        expect(out).to include("coverage:")
+        expect(out).to include("confidence:")
+        expect(out).to include("samples:")
+      end
+
+      it "reports when there are no proposals" do
+        seed(%w[https://foo.com/users/1])
+        expect(run("--corpus", corpus_path, "--propose-recognizers")).to eq(0)
+        expect(stdout.string).to include("no recognizer proposals (1 observations scanned)")
+      end
+
+      it "prints each activated recognizer with --activate-above" do
+        seed_recognizable_stream
+        expect(run("--corpus", corpus_path, "--propose-recognizers", "--activate-above", "0.5")).to eq(0)
+        expect(stdout.string).to include("activated: ghp (ghp_)")
+      end
+
+      it "reports when nothing clears the activation threshold" do
+        seed_recognizable_stream
+        expect(run("--corpus", corpus_path, "--propose-recognizers", "--activate-above", "1.5")).to eq(0)
+        expect(stdout.string).to include("no proposals at or above coverage 1.5")
+      end
+    end
+
+    describe "--cross-host-shapes" do
+      before do
+        seed(%w[https://a.com/users/1 https://b.com/users/2 https://c.com/users/3])
+      end
+
+      it "lists shapes that recur across hosts" do
+        expect(run("--corpus", corpus_path, "--cross-host-shapes")).to eq(0)
+        expect(stdout.string).to include("/users/{user_id}  (3 hosts: a.com, b.com, c.com)  obs=3")
+      end
+
+      it "emits a JSON array with --json" do
+        expect(run("--corpus", corpus_path, "--cross-host-shapes", "--json")).to eq(0)
+        data = JSON.parse(stdout.string)
+        expect(data).to contain_exactly(
+          hash_including("shape" => "/users/{user_id}", "host_count" => 3, "observation_count" => 3),
+        )
+      end
+
+      it "reports when nothing recurs across enough hosts" do
+        expect(run("--corpus", corpus_path, "--cross-host-shapes", "--min-hosts", "5")).to eq(0)
+        expect(stdout.string).to include("no cross-host shapes")
+      end
+    end
   end
 
   describe "file-arg auto-detection (replaces --extract)" do

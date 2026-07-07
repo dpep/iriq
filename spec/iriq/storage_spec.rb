@@ -155,6 +155,47 @@ describe Iriq::Storage do
       sqlite.close
     end
 
+    describe "query-param persistence" do
+      let(:param_inputs) do
+        (1..10).map { |i| "https://foo.com/search?page=#{i}&format=json" }
+      end
+
+      it "matches the Memory backend's param summary" do
+        mem    = Iriq::Corpus.new
+        sqlite = Iriq::Corpus.open(@path)
+        observe_through(mem, param_inputs)
+        observe_through(sqlite, param_inputs)
+
+        expect(sqlite.clusters.first.param_summary).to eq(mem.clusters.first.param_summary)
+        sqlite.close
+      end
+
+      it "survives a close-and-reopen round-trip" do
+        sqlite = Iriq::Corpus.open(@path)
+        observe_through(sqlite, param_inputs)
+        before = sqlite.clusters.first.param_summary
+        sqlite.close
+
+        reopened = Iriq::Corpus.open(@path)
+        after = reopened.clusters.first.param_summary
+        expect(after).to eq(before)
+
+        page = after.find { |row| row[:name] == "page" }
+        expect(page).to include(type: :integer, count: 10, min: 1.0, max: 10.0)
+        reopened.close
+      end
+
+      it "caps tracked param values while counting every observation" do
+        sqlite = Iriq::Corpus.open(@path, max_values_per_position: 5)
+        20.times { |i| sqlite.observe("https://foo.com/items?page=#{i}") }
+
+        stats = sqlite.clusters.first.param_stats["page"]
+        expect(stats.cardinality).to eq(5)
+        expect(stats.total).to eq(20)
+        sqlite.close
+      end
+    end
+
     it "survives concurrent observers via WAL" do
       writer1 = Iriq::Corpus.open(@path)
       writer2 = Iriq::Corpus.open(@path)
