@@ -40,8 +40,11 @@
 //! corpus.save("c.db").unwrap();
 //! ```
 //!
-//! Corpora persist to SQLite out of the box (bundled [`rusqlite`], WAL,
-//! concurrent observers) — no system dependency.
+//! Corpora persist to SQLite out of the box (bundled `rusqlite`, WAL,
+//! concurrent observers) — no system dependency. That backend lives behind
+//! the default-on `sqlite` feature; `default-features = false` drops the
+//! bundled C build for consumers who only need parsing, extraction, or
+//! normalization, leaving the Memory and JSON backends.
 //!
 //! See the [project README](https://github.com/dpep/iriq) for the
 //! conceptual overview and the CHANGELOG for version history.
@@ -71,6 +74,7 @@ pub mod shape;
 pub mod storage;
 pub mod storage_json;
 pub mod storage_memory;
+#[cfg(feature = "sqlite")]
 pub mod storage_sqlite;
 pub mod synthesized_recognizer;
 pub mod trace;
@@ -105,4 +109,4 @@ pub use storage::{open_storage, Storage};
 pub use synthesized_recognizer::SynthesizedRecognizer;
 pub use trace::{trace, trace_identifier, TraceResult, TraceRow};
 
-pub const VERSION: &str = "0.33.0";
+pub const VERSION: &str = "0.34.0";

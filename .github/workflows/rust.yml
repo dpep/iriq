@@ -57,6 +57,17 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
         if: always()
 
+      # Library consumers can drop the bundled C SQLite build with
+      # `default-features = false`. Without a gate this configuration rots
+      # silently — every sqlite-only test and helper needs its cfg.
+      - name: test (no default features)
+        run: cargo test --workspace --no-default-features
+        if: always()
+
+      - name: clippy (no default features)
+        run: cargo clippy --workspace --all-targets --no-default-features -- -D warnings
+        if: always()
+
   parity:
     name: Ruby ↔ Rust parity
     runs-on: ubuntu-latest

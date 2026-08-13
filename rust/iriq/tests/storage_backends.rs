@@ -2,7 +2,9 @@
 //! routing in `open_storage`, and the SQLite round-trip including query-param
 //! stats (the readback path that rebuilds PositionStats from the param tables).
 
-use iriq::{Corpus, ParamSummary};
+use iriq::Corpus;
+#[cfg(feature = "sqlite")]
+use iriq::ParamSummary;
 use std::path::{Path, PathBuf};
 
 fn temp_path(name: &str) -> PathBuf {
@@ -40,6 +42,7 @@ fn json_extension_routes_to_the_json_backend() {
 }
 
 #[test]
+#[cfg(feature = "sqlite")]
 fn sqlite_extensions_route_to_the_sqlite_backend() {
     for ext in ["db", "sqlite", "sqlite3"] {
         let p = temp_path(&format!("route_ext.{ext}"));
@@ -61,8 +64,10 @@ fn sqlite_extensions_route_to_the_sqlite_backend() {
 
 // ── SQLite round-trip with query params ──────────────────────────────────────
 
+#[cfg(feature = "sqlite")]
 const QUERY: &str = "https://foo.com/search";
 
+#[cfg(feature = "sqlite")]
 fn observe_param_stream(c: &mut Corpus) {
     for i in 1..=10 {
         c.observe(&format!("{QUERY}?page={i}&format=json")).unwrap();
@@ -71,6 +76,7 @@ fn observe_param_stream(c: &mut Corpus) {
 
 /// Comparable projection of the param rows (floats included — the numeric
 /// range is part of what must survive persistence).
+#[cfg(feature = "sqlite")]
 fn param_rows(summaries: &[ParamSummary]) -> Vec<(String, String, usize, usize, f64, f64, f64)> {
     summaries
         .iter()
@@ -89,6 +95,7 @@ fn param_rows(summaries: &[ParamSummary]) -> Vec<(String, String, usize, usize, 
 }
 
 #[test]
+#[cfg(feature = "sqlite")]
 fn sqlite_round_trips_query_param_stats() {
     let p = temp_path("params.db");
     cleanup(&p);
@@ -114,6 +121,7 @@ fn sqlite_round_trips_query_param_stats() {
 }
 
 #[test]
+#[cfg(feature = "sqlite")]
 fn sqlite_resave_to_same_path_is_idempotent() {
     let p = temp_path("resave.db");
     cleanup(&p);

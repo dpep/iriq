@@ -1,6 +1,7 @@
 //! A SQLite-backed cluster dedupes its examples by canonical, matching the
 //! in-memory `Cluster::add` path. Regression guard against the SQLite example
 //! insert drifting from the Memory backend (it once stored duplicates).
+#![cfg(feature = "sqlite")]
 
 use iriq::Corpus;
 

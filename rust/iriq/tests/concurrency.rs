@@ -3,6 +3,7 @@
 //! .db corpus — including racing to initialize it from scratch — and observe
 //! a disjoint slice of URLs. The reopened corpus must contain every
 //! observation with consistent aggregates.
+#![cfg(feature = "sqlite")]
 
 use iriq::Corpus;
 use std::collections::HashMap;

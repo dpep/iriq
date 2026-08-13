@@ -92,9 +92,15 @@ pub fn open_storage(path: &str, max_values: usize) -> Result<Box<dyn Storage>, s
     }
     let lower = path.to_lowercase();
     if lower.ends_with(".db") || lower.ends_with(".sqlite") || lower.ends_with(".sqlite3") {
+        #[cfg(feature = "sqlite")]
         return Ok(Box::new(crate::storage_sqlite::SqliteStorage::open(
             path, max_values,
         )?));
+        #[cfg(not(feature = "sqlite"))]
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            format!("{path}: built without the `sqlite` feature; use a .json corpus instead"),
+        ));
     }
     Ok(Box::new(crate::storage_json::JsonStorage::open(
         path, max_values,

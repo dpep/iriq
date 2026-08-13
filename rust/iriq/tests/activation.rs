@@ -33,6 +33,7 @@ fn activates_under_the_suggested_custom_type() {
 }
 
 #[test]
+#[cfg(feature = "sqlite")]
 fn custom_type_survives_sqlite_reopen() {
     let dir = std::env::temp_dir().join(format!("iriq-activation-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

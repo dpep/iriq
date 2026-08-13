@@ -1,6 +1,6 @@
 [package]
 name = "iriq"
-version = "0.33.0"
+version = "0.34.0"
 edition = "2021"
 description = "IRI/URL extraction, normalization, and shape clustering."
 license = "MIT"
@@ -21,13 +21,21 @@ exclude = ["tests/fixtures/*"]
 name = "iriq"
 path = "src/main.rs"
 
+# SQLite is on by default — `cargo install iriq` and the Homebrew formula get
+# the full CLI unchanged. Library consumers who only want the parser,
+# extractor, or normalizer can skip the bundled C SQLite build with
+# `default-features = false`.
+[features]
+default = ["sqlite"]
+sqlite = ["dep:rusqlite"]
+
 [dependencies]
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 thiserror = "1"
 once_cell = "1"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["bundled"], optional = true }
 
 [dev-dependencies]
 proptest = "1"

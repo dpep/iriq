@@ -344,7 +344,14 @@ fn default_corpus_path() -> String {
             },
         }
     };
-    base.join("default.db").to_string_lossy().into_owned()
+    // Without the sqlite feature the SQLite backend isn't linked, so the
+    // auto-default falls back to the JSON backend rather than naming a file
+    // open_storage would reject.
+    #[cfg(feature = "sqlite")]
+    let name = "default.db";
+    #[cfg(not(feature = "sqlite"))]
+    let name = "default.json";
+    base.join(name).to_string_lossy().into_owned()
 }
 
 fn env_corpus_disabled() -> bool {

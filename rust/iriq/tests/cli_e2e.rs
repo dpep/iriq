@@ -238,6 +238,7 @@ fn reinfer_runs() {
 }
 
 #[test]
+#[cfg(feature = "sqlite")]
 fn reset_deletes_the_corpus_and_tolerates_a_missing_one() {
     let cp = std::env::temp_dir().join(format!("iriq_e2e_{}_reset.db", std::process::id()));
     let cps = cp.to_str().unwrap();

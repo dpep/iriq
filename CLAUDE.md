@@ -158,12 +158,17 @@ The `Corpus` class delegates state to a `Storage` backend; three backends ship:
 exports as JSON regardless of the live backend; `corpus.save(same_path)` is
 idempotent (no clobbering a SQLite file with JSON, etc.).
 
-As of v0.31.0 SQLite is always on in both runtimes — corpus mode is
+As of v0.31.0 SQLite is on by default in both runtimes — corpus mode is
 enabled by default and the auto-default uses a `.db` file. The Ruby
 `sqlite3` gem is still loaded lazily so the require cost stays out of
 `iriq --help` etc. The Rust side uses `rusqlite` with the `bundled`
-feature (statically links C SQLite, ~3-4 MB binary cost). Schema v4 is
-shared across runtimes — a `.db` written by either binary opens cleanly
+feature (statically links C SQLite, ~3-4 MB binary cost) behind the
+default-on `sqlite` cargo feature — library consumers can opt out with
+`default-features = false`, which drops the C build and leaves the Memory
+and JSON backends. When touching storage, keep the cfg gates intact: CI
+runs `cargo test --no-default-features` and clippy in that configuration,
+and the auto-default corpus becomes `default.json` when the feature is
+off. Schema v4 is shared across runtimes — a `.db` written by either binary opens cleanly
 in the other (and in `.db` files written by the retired Go port).
 
 When adding a new backend, replicate the contract in both languages and
