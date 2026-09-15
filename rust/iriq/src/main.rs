@@ -10,7 +10,7 @@ use iriq::{
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io::{self, BufRead, BufReader, IsTerminal, Read, Write};
 use std::process::ExitCode;
 
 const LARGE_BATCH_THRESHOLD: usize = 10;
@@ -204,7 +204,7 @@ fn run<R: Read, W: Write, E: Write>(
         None => false,
     };
 
-    let piped = !atty_isatty_stdin();
+    let piped = !io::stdin().is_terminal();
     let batch_mode = explicit_cluster || positional_is_file || (args.is_empty() && piped);
 
     // --reset short-circuits: delete the resolved corpus file + SQLite
@@ -403,15 +403,6 @@ fn resolve_reset_path(opts: &Opts) -> String {
         return env;
     }
     default_corpus_path()
-}
-
-fn atty_isatty_stdin() -> bool {
-    use std::os::fd::AsRawFd;
-    extern "C" {
-        fn isatty(fd: i32) -> i32;
-    }
-    // SAFETY: isatty is FFI; we pass a valid fd we got via AsRawFd.
-    unsafe { isatty(io::stdin().as_raw_fd()) != 0 }
 }
 
 fn parseable_iri(s: &str) -> bool {

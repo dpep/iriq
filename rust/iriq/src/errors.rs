@@ -53,6 +53,7 @@ pub enum Error {
     /// `rusqlite::Error`, boxed so the public API doesn't pin a rusqlite
     /// version.
     #[cfg(feature = "sqlite")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "sqlite")))]
     #[error("corpus {}", path.display())]
     #[non_exhaustive]
     Sqlite {

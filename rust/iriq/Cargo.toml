@@ -11,7 +11,10 @@ readme = "README.md"
 keywords = ["url", "iri", "uri", "parser", "normalize"]
 categories = ["parser-implementations", "command-line-utilities", "text-processing"]
 authors = ["Daniel Pepper"]
-exclude = ["tests/fixtures/*"]
+rust-version = "1.85"
+# The integration tests read golden fixtures from the repo root (spec/), which
+# the published crate can't ship; they run from the repository.
+exclude = ["tests/"]
 
 # One crate ships both the library (src/lib.rs) and the `iriq` CLI
 # (src/main.rs) — the idiomatic Rust shape (cf. ripgrep), not the Go
@@ -39,3 +42,10 @@ rusqlite = { version = "0.32", features = ["bundled"], optional = true }
 
 [dev-dependencies]
 proptest = "1"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(docsrs)"] }

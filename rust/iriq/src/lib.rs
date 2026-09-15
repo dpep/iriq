@@ -49,6 +49,10 @@
 //! See the [project README](https://github.com/dpep/iriq) for the
 //! conceptual overview and the CHANGELOG for version history.
 
+// docs.rs builds on nightly with `--cfg docsrs`, where `doc(cfg)` labels the
+// SQLite-only items; stable builds never see this.
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
 // `color_kind` became unreachable when the surface narrowed; delete it there
 // and drop this allow.
 #[allow(dead_code)]

@@ -27,6 +27,11 @@
   - A JSON file that isn't a corpus opened as an empty corpus and was overwritten on save. Opening an object with none of the corpus's top-level keys now fails with `iriq: corpus <path>: not an iriq corpus (no corpus keys at the top level)` and exits 1, leaving the file untouched. An empty object `{}` is still an empty corpus.
   - A corpus in a directory that doesn't exist opened fine and failed only at save, with an error that didn't name the file. It now fails at open with `iriq: corpus <path>: No such file or directory (os error 2)`.
 - **Bugfix (Rust, SQLite corpora): a corpus written by a newer iriq was opened anyway.** Its stored schema version was recorded but never checked, so an older binary could read and write a schema it doesn't understand. Opening one now fails before anything is written, with `iriq: corpus <path>: schema version <n> is newer than this iriq supports (4); upgrade iriq`, and exits 1. Corpora without a recorded version are stamped as before.
+- **Rust crate packaging.** No behavior change.
+  - The crate declares `rust-version = "1.85"`, checked against the current lockfile.
+  - docs.rs builds with all features and labels the SQLite-only error variant.
+  - The published crate no longer ships integration tests, which read fixtures from the repository and could only fail outside it.
+  - The CLI detects a terminal with `std::io::IsTerminal` instead of an `unsafe` Unix-only `isatty` call.
 <!-- /lane: rust-storage -->
 
 ###  0.34.0  (2026-08-12)
