@@ -60,6 +60,35 @@ fn cli_normalize_uses_corpus() {
     let _ = std::fs::remove_file(&corpus);
 }
 
+/// Pipe mode observes each IRI and then renders it from the corpus as it stands,
+/// so a cold corpus prints literals until the evidence for a placeholder exists.
+#[test]
+fn cli_pipe_normalize_renders_from_the_corpus_so_far() {
+    let corpus =
+        std::env::temp_dir().join(format!("iriq_cli_pipe_so_far_{}.json", std::process::id()));
+    let cp = corpus.to_str().unwrap();
+    let _ = std::fs::remove_file(&corpus);
+
+    let urls: String = NAMES
+        .iter()
+        .map(|n| format!("https://foo.com/users/{n}/profile\n"))
+        .collect();
+    let out = run(&["-n", "--corpus", cp], &urls);
+
+    // Pinned at today's collapse point; a minimum-evidence rule for shape
+    // changes would move it.
+    let expected: String = NAMES
+        .iter()
+        .enumerate()
+        .map(|(i, n)| match i {
+            0..4 => format!("https://foo.com/users/{n}/profile\n"),
+            _ => "https://foo.com/users/{user}/profile\n".to_string(),
+        })
+        .collect();
+    assert_eq!(out, expected);
+    let _ = std::fs::remove_file(&corpus);
+}
+
 #[test]
 fn cli_normalize_without_corpus_is_mechanical() {
     // No corpus → a literal slot stays literal.

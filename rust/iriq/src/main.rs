@@ -912,13 +912,11 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
     corpus: Option<&mut Corpus>,
     explicit_cluster: bool,
 ) -> io::Result<u8> {
-    // Per-IRI sections (-n/-p/-c/-e) without --corpus are independent line to
-    // line, so we stream: read input lazily, extract per line, emit each IRI as
-    // it arrives (flushed for live `tail -f | iriq -n`). The corpus-informed
-    // sections path and the aggregate views below need the whole input first,
-    // so they slurp.
-    if !opts.sections.is_empty() && corpus.is_none() {
-        return stream_per_iri_sections(stdin, stdout, stderr, args, opts);
+    // Per-IRI sections (-n/-p/-c/-e) stream, with or without a corpus, so a
+    // live `tail -f | iriq -n` prints as lines arrive. The aggregate views
+    // below need the whole input first, so they slurp.
+    if !opts.sections.is_empty() {
+        return stream_per_iri_sections(stdin, stdout, stderr, args, opts, corpus);
     }
 
     let text = match read_text(stdin, args) {
@@ -933,7 +931,6 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
     let iris = extractor.extract(&text);
 
     // Feed observations into the corpus when present.
-    let caller_has_corpus = corpus.is_some();
     let mut owned_corpus = if corpus.is_none() {
         Some(Corpus::new())
     } else {
@@ -955,18 +952,6 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
         return Ok(1);
     }
 
-    if !opts.sections.is_empty() {
-        // Corpus-informed only when the caller actually had a corpus (auto-
-        // default or explicit --corpus). The throwaway in-memory corpus
-        // above is just for the cluster/stats views.
-        let real_corpus: Option<&Corpus> = if caller_has_corpus {
-            Some(&*working)
-        } else {
-            None
-        };
-        emit_per_iri_sections(stdout, &iris, opts, real_corpus)?;
-        return Ok(0);
-    }
     if opts.stats {
         emit_stats(stdout, working, opts)?;
         return Ok(0);
@@ -988,77 +973,15 @@ fn read_text<R: Read>(stdin: &mut R, args: &[String]) -> std::io::Result<String>
     std::fs::read_to_string(&args[0])
 }
 
-fn emit_per_iri_sections<W: Write>(
-    stdout: &mut W,
-    iris: &[Identifier],
-    opts: &Opts,
-    corpus: Option<&Corpus>,
-) -> io::Result<()> {
-    if opts.json {
-        let mut payloads: Vec<Value> = Vec::with_capacity(iris.len());
-        for iri in iris {
-            if opts.sections.len() == 1 {
-                payloads.push(section_payload(iri, opts.sections[0], opts, corpus));
-            } else {
-                let mut m = serde_json::Map::new();
-                for s in ["parse", "canonical", "normalize", "explain"] {
-                    if let Some(sec) = opts.sections.iter().find(|sec| sec.name() == s) {
-                        m.insert(s.to_string(), section_payload(iri, *sec, opts, corpus));
-                    }
-                }
-                payloads.push(Value::Object(m));
-            }
-        }
-        emit_json_array(stdout, &payloads, opts)?;
-        return Ok(());
-    }
+// Read size for streamed input. A chunk is every complete line already read,
+// so this bounds how many lines share a transaction, not how long output waits.
+const CHUNK_BYTES: usize = 64 * 1024;
 
-    if opts.sections.len() == 1
-        && (opts.sections[0] == Section::Normalize || opts.sections[0] == Section::Canonical)
-    {
-        for iri in iris {
-            match opts.sections[0] {
-                Section::Canonical => {
-                    writeln!(stdout, "{}", iri.canonical())?;
-                }
-                Section::Normalize => {
-                    writeln!(stdout, "{}", normalize_section(iri, opts, corpus))?;
-                }
-                _ => {}
-            }
-        }
-        return Ok(());
-    }
-
-    for (i, iri) in iris.iter().enumerate() {
-        if i > 0 {
-            writeln!(stdout)?;
-        }
-        writeln!(stdout, "# {}", iri.canonical())?;
-        for (j, sec) in opts.sections.iter().enumerate() {
-            if j > 0 {
-                writeln!(stdout)?;
-            }
-            match sec {
-                Section::Parse => emit_parse_human(stdout, iri)?,
-                Section::Canonical => {
-                    writeln!(stdout, "{}", iri.canonical())?;
-                }
-                Section::Normalize => {
-                    writeln!(stdout, "{}", normalize_section(iri, opts, corpus))?;
-                }
-                Section::Explain => emit_explain_human(stdout, &trace_identifier(iri, opts.hints))?,
-            }
-        }
-    }
-    Ok(())
-}
-
-// Stream the per-IRI sections output (no --corpus): read input one line at a
-// time, extract per line, and emit each IRI as it arrives. Human and NDJSON
-// flush per IRI (so `tail -f | iriq -n` is live); a single wrapping JSON array
-// can't be emitted incrementally, so it collects first. Matches whole-text
-// extraction exactly — a candidate never spans a newline and extract dedups
+// Stream the per-IRI sections: a chunk at a time, observe each IRI (when there
+// is a corpus), render it from the corpus as it now stands, and print the chunk
+// only after its transaction commits, so a killed process never printed a line
+// its corpus lost. A wrapping JSON array prints at EOF. Matches whole-text
+// extraction exactly: a candidate never spans a newline and extract dedups
 // nothing.
 fn stream_per_iri_sections<R: Read, W: Write, E: Write>(
     stdin: &mut R,
@@ -1066,74 +989,147 @@ fn stream_per_iri_sections<R: Read, W: Write, E: Write>(
     stderr: &mut E,
     args: &[String],
     opts: &Opts,
+    mut corpus: Option<&mut Corpus>,
 ) -> io::Result<u8> {
-    let mut extractor = Extractor::new();
-    extractor.scheme_less = opts.scheme_less;
-    let mut reader: Box<dyn BufRead + '_> = if args.is_empty() || args[0] == "-" {
-        Box::new(BufReader::new(stdin))
+    let source: Box<dyn Read + '_> = if args.is_empty() || args[0] == "-" {
+        Box::new(stdin)
     } else {
         match File::open(&args[0]) {
-            Ok(f) => Box::new(BufReader::new(f)),
+            Ok(f) => Box::new(f),
             Err(e) => {
                 let _ = writeln!(stderr, "iriq: {}", e);
                 return Ok(1);
             }
         }
     };
-
-    let buffered_json = opts.json && !opts.ndjson;
-    let mut collected: Vec<Identifier> = Vec::new();
+    let mut input = LineInput::new(source, opts);
+    let mut rendered = Rendered::default();
     let mut line = String::new();
-    let mut i = 0usize;
-    loop {
-        line.clear();
-        match reader.read_line(&mut line) {
-            Ok(0) => break,
-            Ok(_) => {
-                for iri in extractor.extract(&line) {
-                    if buffered_json {
-                        collected.push(iri);
-                    } else {
-                        emit_one_iri_section(stdout, &iri, i, opts)?;
-                        i += 1;
-                        stdout.flush()?;
-                    }
-                }
-            }
-            Err(e) => {
-                let _ = writeln!(stderr, "iriq: {}", e);
-                return Ok(1);
-            }
+    // Waits for input outside any transaction: a quiet `tail -f` must not hold
+    // the corpus's write lock.
+    while input.error.is_none() && input.next_line(&mut line) {
+        let chunk = match corpus.as_deref_mut() {
+            Some(c) => c.batch(|c| input.chunk(&mut line, Some(c), opts, &mut rendered)),
+            None => input.chunk(&mut line, None, opts, &mut rendered),
+        };
+        if let Err(e) = chunk {
+            let _ = writeln!(stderr, "iriq: {}", describe(&e));
+            return Ok(1);
         }
+        stdout.write_all(&rendered.bytes)?;
+        stdout.flush()?;
+        rendered.bytes.clear();
     }
-    if buffered_json {
-        emit_per_iri_sections(stdout, &collected, opts, None)?;
+    if let Some(e) = input.error {
+        let _ = writeln!(stderr, "iriq: {}", e);
+        return Ok(1);
+    }
+    if opts.json && !opts.ndjson {
+        emit_json_array(stdout, &rendered.json, opts)?;
     }
     Ok(0)
 }
 
-// Emit one IRI's sections in human or NDJSON form (i is its global index,
-// controlling the blank-line separator). The buffered JSON-array case is
-// handled by emit_per_iri_sections. Mirrors the human/NDJSON branches there
-// exactly, with no corpus (the streaming path is the no-`--corpus` case).
+struct LineInput<'a> {
+    reader: BufReader<Box<dyn Read + 'a>>,
+    extractor: Extractor,
+    error: Option<io::Error>,
+}
+
+impl<'a> LineInput<'a> {
+    fn new(source: Box<dyn Read + 'a>, opts: &Opts) -> Self {
+        let mut extractor = Extractor::new();
+        extractor.scheme_less = opts.scheme_less;
+        LineInput {
+            reader: BufReader::with_capacity(CHUNK_BYTES, source),
+            extractor,
+            error: None,
+        }
+    }
+
+    // The next line, waiting for it if need be; false at EOF or on a read
+    // error, which is kept in `error`.
+    fn next_line(&mut self, line: &mut String) -> bool {
+        line.clear();
+        match self.reader.read_line(line) {
+            Ok(n) => n > 0,
+            Err(e) => {
+                self.error = Some(e);
+                false
+            }
+        }
+    }
+
+    // Observes and renders `line`, then every further complete line already
+    // buffered. Never waits for input: this runs inside the chunk's transaction.
+    fn chunk(
+        &mut self,
+        line: &mut String,
+        mut corpus: Option<&mut Corpus>,
+        opts: &Opts,
+        rendered: &mut Rendered,
+    ) -> iriq::Result<()> {
+        loop {
+            for iri in self.extractor.extract(line.as_str()) {
+                if let Some(c) = corpus.as_deref_mut() {
+                    c.observe_iri(&iri)?;
+                }
+                rendered.push(&iri, opts, corpus.as_deref());
+            }
+            if !self.reader.buffer().contains(&b'\n') || !self.next_line(line) {
+                return Ok(());
+            }
+        }
+    }
+}
+
+// Output for IRIs whose chunk hasn't committed yet, plus the elements of a
+// JSON array, which prints whole at EOF.
+#[derive(Default)]
+struct Rendered {
+    bytes: Vec<u8>,
+    json: Vec<Value>,
+    count: usize,
+}
+
+impl Rendered {
+    fn push(&mut self, iri: &Identifier, opts: &Opts, corpus: Option<&Corpus>) {
+        if opts.json && !opts.ndjson {
+            self.json.push(iri_payload(iri, opts, corpus));
+        } else {
+            emit_one_iri_section(&mut self.bytes, iri, self.count, opts, corpus)
+                .expect("writing to a Vec cannot fail");
+        }
+        self.count += 1;
+    }
+}
+
+// One IRI's JSON: the bare value for a single section, else an object keyed
+// parse / canonical / normalize / explain.
+fn iri_payload(iri: &Identifier, opts: &Opts, corpus: Option<&Corpus>) -> Value {
+    if opts.sections.len() == 1 {
+        return section_payload(iri, opts.sections[0], opts, corpus);
+    }
+    let mut m = serde_json::Map::new();
+    for s in ["parse", "canonical", "normalize", "explain"] {
+        if let Some(sec) = opts.sections.iter().find(|sec| sec.name() == s) {
+            m.insert(s.to_string(), section_payload(iri, *sec, opts, corpus));
+        }
+    }
+    Value::Object(m)
+}
+
+// Emit one IRI's sections in human or NDJSON form (i is its index in the whole
+// stream, controlling the blank-line separator).
 fn emit_one_iri_section<W: Write>(
     stdout: &mut W,
     iri: &Identifier,
     i: usize,
     opts: &Opts,
+    corpus: Option<&Corpus>,
 ) -> io::Result<()> {
     if opts.ndjson {
-        let payload = if opts.sections.len() == 1 {
-            section_payload(iri, opts.sections[0], opts, None)
-        } else {
-            let mut m = serde_json::Map::new();
-            for s in ["parse", "canonical", "normalize", "explain"] {
-                if let Some(sec) = opts.sections.iter().find(|sec| sec.name() == s) {
-                    m.insert(s.to_string(), section_payload(iri, *sec, opts, None));
-                }
-            }
-            Value::Object(m)
-        };
+        let payload = iri_payload(iri, opts, corpus);
         writeln!(stdout, "{}", serde_json::to_string(&payload).unwrap())?;
         return Ok(());
     }
@@ -1146,7 +1142,7 @@ fn emit_one_iri_section<W: Write>(
                 writeln!(stdout, "{}", iri.canonical())?;
             }
             Section::Normalize => {
-                writeln!(stdout, "{}", normalize_section(iri, opts, None))?;
+                writeln!(stdout, "{}", normalize_section(iri, opts, corpus))?;
             }
             _ => {}
         }
@@ -1167,7 +1163,7 @@ fn emit_one_iri_section<W: Write>(
                 writeln!(stdout, "{}", iri.canonical())?;
             }
             Section::Normalize => {
-                writeln!(stdout, "{}", normalize_section(iri, opts, None))?;
+                writeln!(stdout, "{}", normalize_section(iri, opts, corpus))?;
             }
             Section::Explain => emit_explain_human(stdout, &trace_identifier(iri, opts.hints))?,
         }
