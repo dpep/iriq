@@ -531,6 +531,9 @@ propose_pair "SQLite storage" ".db"
 # the proposal; a min-hosts floor above the corpus (single host) drops it.
 propose_pair "JSON + loose thresholds" ".json" --min-observations 10 --min-coverage 0.5 --min-hosts 1
 propose_pair "SQLite + min-hosts filter" ".db" --min-hosts 2
+# Nothing clears --activate-above: the message names confidence, the threshold
+# that filtered.
+propose_pair "JSON + activate-above above every confidence" ".json" --activate-above 1.5
 
 # Completion-subcommand parity. Both runtimes embed the same files; the
 # parity test ensures we don't ship divergent scripts.

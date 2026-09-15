@@ -23,6 +23,7 @@
 <!-- /lane: ruby -->
 <!-- lane: ruby-perf -->
 - **Ruby, SQLite corpora: corpus-informed `-n` does far less work per URL.** Normalizing a URL read every value tracked at each of its path positions, and its whole cluster; it now reads only the counts classification uses. Output is unchanged. 10k URLs into a fresh `.db` take about a third of the CPU (~2400G → ~870G instructions).
+- `--propose-recognizers --activate-above F` with nothing to activate now says `no proposals at or above confidence F`; it said "coverage", but `F` is a confidence threshold.
 <!-- /lane: ruby-perf -->
 
 <!-- lane: rust-storage -->

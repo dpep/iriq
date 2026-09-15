@@ -552,7 +552,7 @@ module Iriq
     # --propose-recognizers: scan observed values for prefix patterns
     # that recur enough to suggest a new Recognizer. Prints one block
     # per proposal in human mode, or a JSON array under --json. With
-    # --activate-above F, every proposal at or above coverage F is
+    # --activate-above F, every proposal at or above confidence F is
     # promoted to a live Recognizer on the corpus's classifier and the
     # corpus reinfers to apply the new classifier to existing
     # observations.
@@ -567,7 +567,7 @@ module Iriq
       if opts[:activate_above]
         activated = corpus.activate_proposals_above(opts[:activate_above], **kwargs)
         if activated.empty?
-          stdout.puts "no proposals at or above coverage #{opts[:activate_above]}"
+          stdout.puts "no proposals at or above confidence #{opts[:activate_above]}"
         else
           activated.each do |r|
             stdout.puts "activated: #{r.type} (#{r.prefix})"

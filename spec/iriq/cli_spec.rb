@@ -742,7 +742,8 @@ describe Iriq::CLI do
       it "reports when nothing clears the activation threshold" do
         seed_recognizable_stream
         expect(run("--corpus", corpus_path, "--propose-recognizers", "--activate-above", "1.5")).to eq(0)
-        expect(stdout.string).to include("no proposals at or above coverage 1.5")
+        # --activate-above filters on confidence, so the message names it.
+        expect(stdout.string).to eq("no proposals at or above confidence 1.5\n")
       end
     end
 
