@@ -15,6 +15,8 @@ module Iriq
     #
     #   host_counts / path_length_counts / raw_shape_counts / fingerprint_counts
     #   position_stats(position)
+    #   position_evidence(position, value)             # the narrow read normalize uses
+    #   param_stats(cluster_key, name)                 # one param, without the cluster
     #   each_position_stats { |position, stats| ... }
     #   each_observed_iri { |canonical| ... }
     #   clear_materialized_views                       # for reinfer
@@ -149,6 +151,12 @@ module Iriq
         @position_stats[position]
       end
 
+      # Built over the live stats, so nothing is copied.
+      def position_evidence(position, value)
+        stats = @position_stats[position]
+        stats && PositionEvidence.from_stats(stats, value)
+      end
+
       def each_position_stats(&block)
         @position_stats.each(&block)
       end
@@ -161,11 +169,15 @@ module Iriq
         @clusters.size
       end
 
-      # O(1) lookup by cluster key — used by Corpus#normalize to pull the
-      # cluster's param_stats for the URL being normalized. nil if no cluster
-      # has been observed under this key yet.
+      # O(1) lookup by cluster key. nil if no cluster has been observed under
+      # this key yet.
       def cluster_for(key)
         @clusters[key]
+      end
+
+      def param_stats(key, name)
+        cluster = @clusters[key]
+        cluster && cluster.param_stats[name]
       end
 
       # --- Bulk load (used by JSON backend) --------------------------------

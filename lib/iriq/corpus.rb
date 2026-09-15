@@ -284,19 +284,20 @@ module Iriq
     # with the cluster's type; below that the corpus has no opinion and the
     # param renders exactly as mechanical normalize would.
     def render_query(iri, _classifier = @classifier)
+      return "" if iri.query_params.nil? || iri.query_params.empty?
+
       hinted_shape = PathShape.new(classifier: @classifier, hints: true)
                               .from_entries(SegmentHints.derive(iri.path_segments, @classifier))
       key, * = Cluster.key_for(iri, classifier: @classifier, shape: hinted_shape,
                                host: effective_host(iri.host))
-      cluster    = @storage.cluster_for(key)
       mechanical = NullEvidenceSource.new
 
       iri.query_params.keys.sort.map do |k|
         v     = iri.query_params[k].to_s
-        stats = cluster && cluster.param_stats[k]
+        stats = @storage.param_stats(key, k)
         shaped =
           if stats && stats.total >= MIN_OBSERVATIONS_FOR_INFERENCE
-            render_param_value(v, cluster.param_type(k) || @classifier.classify(v))
+            render_param_value(v, Cluster.param_type_for(k, stats) || @classifier.classify(v))
           else
             mechanical.render_param(k, v, @classifier)
           end
@@ -415,10 +416,10 @@ module Iriq
       prefix = ""
       keying_host = effective_host(iri.host)
       hinted.map do |entry|
-        stats = @storage.position_stats(Position.path(host: keying_host, prefix: prefix))
+        position = Position.path(host: keying_host, prefix: prefix)
         out = entry.merge(
           prefix:         prefix,
-          classification: classify(entry, stats),
+          classification: classify(entry) { @storage.position_evidence(position, entry[:value]) },
         )
         prefix = "#{prefix}/#{placeholder(entry)}"
         out
@@ -443,20 +444,20 @@ module Iriq
     # position, the literal is almost always the better display.
     STABLE_VARIABLE_TYPES = %i[version locale currency boolean slug opaque_id].freeze
 
-    def classify(entry, stats)
+    # The block reads the position's PositionEvidence; a variable of a
+    # non-stable type is answered without it.
+    def classify(entry)
       variable = entry[:variable]
+      return :variable_identifier if variable && !STABLE_VARIABLE_TYPES.include?(entry[:type])
 
+      stats = yield
       return variable ? :variable_identifier : :ambiguous if stats.nil? || stats.total.zero?
-      if variable && !STABLE_VARIABLE_TYPES.include?(entry[:type])
-        return :variable_identifier
-      end
 
-      value            = entry[:value]
       total            = stats.total
       variable_frac    = stats.variable_fraction(@classifier)
       cardinality_frac = stats.cardinality.to_f / total
       enough_data      = total >= MIN_OBSERVATIONS_FOR_INFERENCE
-      value_frac       = stats.value_fraction(value)
+      value_frac       = stats.value_fraction
 
       # For STABLE_VARIABLE_TYPES (version, locale, currency, boolean),
       # a dominant value wins over the variable-dominance branch — a
@@ -473,7 +474,7 @@ module Iriq
       if enough_data && variable_frac >= VARIABLE_DOMINANCE_THRESHOLD
         # Position is dominated by variable types (UUIDs, integers, etc.).
         # A literal here is a special-case outlier (e.g. /users/me).
-        stats.value_counts.key?(value) ? :rare_literal : :ambiguous
+        stats.value_count ? :rare_literal : :ambiguous
       elsif value_frac >= STABLE_LITERAL_THRESHOLD
         # This specific value dominates — preserve it regardless of how
         # diverse the rest of the position is.
@@ -483,10 +484,10 @@ module Iriq
         # recognize values that dramatically exceed the uniform baseline as
         # "popular outliers" (e.g. /workspaces/mainspace surviving in a slot
         # full of one-shot user-created workspace names).
-        popular_outlier?(stats, value) ? :stable_literal : :corpus_inferred_variable
+        popular_outlier?(stats) ? :stable_literal : :corpus_inferred_variable
       elsif stats.cardinality == 1
         :stable_literal
-      elsif stats.value_counts.key?(value)
+      elsif stats.value_count
         :rare_literal
       else
         :ambiguous
@@ -500,12 +501,11 @@ module Iriq
         stats.cardinality >= MIN_CARDINALITY_FOR_INFERENCE
     end
 
-    def popular_outlier?(stats, value)
-      count = stats.value_counts[value] || 0
-      return false if count < POPULAR_MIN_COUNT
+    def popular_outlier?(stats)
+      return false if (stats.value_count || 0) < POPULAR_MIN_COUNT
 
       baseline = 1.0 / stats.cardinality
-      stats.value_fraction(value) >= POPULAR_BASELINE_MULTIPLE * baseline
+      stats.value_fraction >= POPULAR_BASELINE_MULTIPLE * baseline
     end
 
     # Dates and currencies print in canonical form (ISO date, upper-case code)

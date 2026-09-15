@@ -499,6 +499,52 @@ module Iriq
         load_cluster(key)
       end
 
+      # What Corpus#classify reads: counts, not every value tracked at the
+      # position.
+      def position_evidence(position, value)
+        where = [position.host || "", position.scope.to_s, position.locator]
+        total = @db.get_first_value(
+          "SELECT total FROM position_stats WHERE host = ? AND scope = ? AND locator = ?", where,
+        )
+        return nil if total.nil?
+
+        type_counts = Hash.new(0)
+        @db.execute(
+          "SELECT type, count FROM position_types WHERE host = ? AND scope = ? AND locator = ?", where,
+        ) { |r| type_counts[r[0].to_sym] = r[1] }
+        PositionEvidence.new(
+          total:       total,
+          type_counts: type_counts,
+          cardinality: @db.get_first_value(
+            "SELECT COUNT(*) FROM position_values WHERE host = ? AND scope = ? AND locator = ?", where,
+          ),
+          value_count: @db.get_first_value(
+            "SELECT count FROM position_values WHERE host = ? AND scope = ? AND locator = ? AND value = ?",
+            [*where, value],
+          ),
+        )
+      end
+
+      # One query param's stats — narrower than cluster_for, which also loads
+      # the cluster's examples and segment counts.
+      def param_stats(key, name)
+        total = @db.get_first_value(
+          "SELECT total FROM cluster_params WHERE cluster_key = ? AND name = ?", [key, name],
+        )
+        return nil if total.nil?
+
+        stats = PositionStats.new(max_values: @max_values_per_position)
+        stats.instance_variable_set(:@total, total)
+        @db.execute(
+          "SELECT value, count FROM cluster_param_values WHERE cluster_key = ? AND name = ?", [key, name],
+        ) { |r| stats.value_counts[r[0]] = r[1] }
+        @db.execute(
+          "SELECT type, count FROM cluster_param_types WHERE cluster_key = ? AND name = ?", [key, name],
+        ) { |r| stats.type_counts[r[0].to_sym] = r[1] }
+        recompute_numeric!(stats)
+        stats
+      end
+
       private
 
       # Converting a rollback-mode database to WAL takes an exclusive lock,

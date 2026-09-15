@@ -225,6 +225,58 @@ describe Iriq::Storage do
     end
   end
 
+  describe "narrow reads" do
+    around do |example|
+      Dir.mktmpdir("iriq-narrow") do |dir|
+        @dir = dir
+        example.run
+      end
+    end
+
+    let(:huge) { "1" * 400 }
+
+    # A cap of 3 so each position and param drops a value.
+    def each_backend
+      {
+        "memory" => Iriq::Storage::Memory.new(max_values_per_position: 3),
+        "json"   => Iriq::Storage.open(File.join(@dir, "c.json"), max_values_per_position: 3),
+        "sqlite" => Iriq::Storage.open(File.join(@dir, "c.db"), max_values_per_position: 3),
+      }.each do |name, storage|
+        yield name, storage
+      ensure
+        storage.close
+      end
+    end
+
+    it "agree with the full reads they replace, on every backend" do
+      position = Iriq::Position.path(host: "x.com", prefix: "/teams")
+      unseen   = Iriq::Position.path(host: "x.com", prefix: "/nowhere")
+
+      each_backend do |backend, storage|
+        [[huge, :integer], ["a", :literal], ["7", :integer], ["a", :literal], ["b-c", :slug], ["7", :integer]]
+          .each { |value, type| storage.observe_position(position, value, type) }
+        ["https://x.com/teams/a?page=#{huge}&tab=a", "https://x.com/teams/a?page=1&tab=b",
+         "https://x.com/teams/b?page=2&tab=c", "https://x.com/teams/c?page=2&tab=d",
+         "https://x.com/teams/d?page=7&tab=a"]
+          .each { |url| storage.add_to_cluster("k", "x.com", "https", "/teams/{team}", Iriq.parse(url)) }
+
+        [position, unseen].each do |pos|
+          stats = storage.position_stats(pos)
+          # Tracked (including the 400-digit value), dropped at the cap, never seen.
+          [huge, "a", "7", "b-c", "zzz"].each do |value|
+            expect(storage.position_evidence(pos, value))
+              .to eq(stats && Iriq::PositionEvidence.from_stats(stats, value)), "#{backend}: #{value[0, 8]} at #{pos.locator}"
+          end
+        end
+
+        [%w[k page], %w[k tab], %w[k nope], %w[nope page]].each do |key, name|
+          full = storage.cluster_for(key)&.param_stats&.[](name)
+          expect(storage.param_stats(key, name)&.dump).to eq(full&.dump), "#{backend}: #{key} #{name}"
+        end
+      end
+    end
+  end
+
   describe "files iriq refuses to open" do
     around do |example|
       Dir.mktmpdir("iriq-refuse") do |dir|

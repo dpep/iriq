@@ -625,6 +625,24 @@ describe Iriq::Corpus do
     end
   end
 
+  describe "evidence reads" do
+    it "classifies a variable segment of a non-stable type without reading its position" do
+      corpus.observe("https://foo.com/users/1")
+      allow(corpus.storage).to receive(:position_evidence).and_call_original
+
+      corpus.normalize("https://foo.com/users/2")
+      expect(corpus.storage).to have_received(:position_evidence).once
+    end
+
+    it "renders an absent query without reading the cluster" do
+      corpus.observe("https://foo.com/users?page=1")
+      allow(corpus.storage).to receive(:param_stats).and_call_original
+
+      expect(corpus.render_query(Iriq.parse("https://foo.com/users"))).to eq("")
+      expect(corpus.storage).not_to have_received(:param_stats)
+    end
+  end
+
   describe ":date quorum threshold" do
     it "does NOT promote a param to :date when date-typed observations are below 80%" do
       corpus = described_class.new

@@ -19,6 +19,7 @@ require "iriq/trace"
 require "iriq/cluster"
 require "iriq/clusterer"
 require "iriq/position_stats"
+require "iriq/position_evidence"
 require "set"
 
 require "iriq/observation"
