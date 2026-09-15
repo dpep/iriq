@@ -138,16 +138,20 @@ impl Corpus {
         Ok(())
     }
 
+    /// Rebuild every view from the observation log, as one transaction: a
+    /// writer's observation lands wholly before or after it, never between the
+    /// log read and the replay.
     pub fn reinfer(&mut self) -> Result<()> {
-        let mut iris = Vec::new();
-        self.storage
-            .each_observed_iri(&mut |c| iris.push(c.to_string()));
-        self.storage.clear_materialized_views()?;
-        for canonical in iris {
-            let iri = parse(&canonical)?;
-            self.replay(&iri)?;
-        }
-        Ok(())
+        self.batch(|c| {
+            let mut iris = Vec::new();
+            c.storage
+                .each_observed_iri(&mut |iri| iris.push(iri.to_string()));
+            c.storage.clear_materialized_views()?;
+            for canonical in iris {
+                c.replay(&parse(&canonical)?)?;
+            }
+            Ok(())
+        })
     }
 
     pub fn observed_iri_count(&self) -> usize {
