@@ -223,6 +223,70 @@ fn host_registrable_collapses_subdomains() {
 }
 
 #[test]
+fn a_bare_filename_is_read_as_a_file_unless_it_contains_a_scheme() {
+    let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("bare-file-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("urls.txt"), "https://foo.com/users/1\n").unwrap();
+
+    let out = common::iriq()
+        .current_dir(&dir)
+        .args(["-n", "urls.txt"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "https://foo.com/users/{user_id}\n"
+    );
+
+    // Only "://" makes it an IRI, whatever is on disk.
+    std::fs::create_dir_all(dir.join("https:")).unwrap();
+    std::fs::write(dir.join("https:/x"), "").unwrap();
+    let out = common::iriq()
+        .current_dir(&dir)
+        .args(["-n", "https://x"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "https://x/\n");
+}
+
+#[test]
+fn unreadable_input_says_why_and_honors_json() {
+    let (_, err, ok) = run_full(&["./definitely-missing.txt"], "");
+    assert!(!ok);
+    assert_eq!(err, "iriq: no such file: ./definitely-missing.txt\n");
+
+    let (_, err, ok) = run_full(&["--json", "cluster", "nope.log"], "");
+    assert!(!ok);
+    assert_eq!(
+        err,
+        "{\"error\":{\"code\":\"file_not_found\",\"message\":\"no such file: nope.log\"}}\n"
+    );
+
+    let mut child = common::iriq()
+        .args(["--json", "-n"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    stdin
+        .write_all(b"https://foo.com/users/1\nhttps://foo.com/\xff/x\n")
+        .unwrap();
+    drop(stdin);
+    let o = child.wait_with_output().unwrap();
+    assert!(!o.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&o.stderr),
+        "{\"error\":{\"code\":\"invalid_utf8\",\"message\":\"stream did not contain valid UTF-8\"}}\n"
+    );
+}
+
+#[test]
 fn host_applies_to_the_throwaway_no_corpus_cluster() {
     let out = run(
         &["-C", "--host", "reg", "cluster"],

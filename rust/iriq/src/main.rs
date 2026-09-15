@@ -195,16 +195,12 @@ fn run<R: Read, W: Write, E: Write>(
         args.remove(0);
     }
 
-    let positional_is_file = match args.first() {
-        Some(arg) => {
-            if let Ok(meta) = std::fs::metadata(arg) {
-                meta.is_file() && !parseable_iri(arg)
-            } else {
-                false
-            }
-        }
-        None => false,
-    };
+    // A positional that names an existing file is read as a file, so
+    // `iriq access.log` works without ./ (it also parses as a host). An
+    // argument containing "://" is always an IRI.
+    let positional_is_file = args
+        .first()
+        .is_some_and(|arg| !arg.contains("://") && is_file(arg));
 
     let piped = !io::stdin().is_terminal();
     let batch_mode = explicit_cluster || positional_is_file || (args.is_empty() && piped);
@@ -214,6 +210,12 @@ fn run<R: Read, W: Write, E: Write>(
     // the normal path.
     if opts.reset {
         return cmd_reset(&mut stderr, &opts);
+    }
+
+    // Before any corpus is opened, so a typo doesn't create one.
+    if let Some(missing) = missing_input_file(args.first(), explicit_cluster) {
+        let message = format!("no such file: {missing}");
+        return emit_error(&mut stderr, opts.json, "file_not_found", &message, "", 1);
     }
 
     if args.is_empty() && !batch_mode && !opts.reinfer && !opts.propose && !opts.cross_host_shapes {
@@ -458,6 +460,30 @@ fn json_temp_files(path: &Path) -> Vec<PathBuf> {
 
 fn parseable_iri(s: &str) -> bool {
     parse(s).is_ok()
+}
+
+fn is_file(path: &str) -> bool {
+    std::fs::metadata(path).is_ok_and(|m| m.is_file())
+}
+
+// The argument iriq would have read as a file but can't find: anything after
+// `cluster`, or a /, ./, ../ path that isn't an IRI.
+fn missing_input_file(arg: Option<&String>, explicit_cluster: bool) -> Option<&str> {
+    let arg = arg?.as_str();
+    if arg == "-" || is_file(arg) {
+        return None;
+    }
+    let path_like = ["/", "./", "../"].iter().any(|p| arg.starts_with(p));
+    (explicit_cluster || (path_like && !parseable_iri(arg))).then_some(arg)
+}
+
+// Input iriq couldn't read. Invalid UTF-8 has its own JSON code, as in Ruby.
+fn read_error<E: Write>(stderr: &mut E, json: bool, e: &io::Error) -> u8 {
+    let code = match e.kind() {
+        io::ErrorKind::InvalidData => "invalid_utf8",
+        _ => "read_error",
+    };
+    emit_error(stderr, json, code, &e.to_string(), "", 1)
 }
 
 fn argv_wants_json(argv: &[String]) -> bool {
@@ -916,10 +942,7 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
 
     let text = match read_text(stdin, args) {
         Ok(t) => t,
-        Err(e) => {
-            let _ = writeln!(stderr, "iriq: {}", e);
-            return Ok(1);
-        }
+        Err(e) => return Ok(read_error(stderr, opts.json, &e)),
     };
     let mut extractor = Extractor::new();
     extractor.scheme_less = opts.scheme_less;
@@ -991,10 +1014,7 @@ fn stream_per_iri_sections<R: Read, W: Write, E: Write>(
     } else {
         match File::open(&args[0]) {
             Ok(f) => Box::new(f),
-            Err(e) => {
-                let _ = writeln!(stderr, "iriq: {}", e);
-                return Ok(1);
-            }
+            Err(e) => return Ok(read_error(stderr, opts.json, &e)),
         }
     };
     let mut input = LineInput::new(source, opts);
@@ -1015,8 +1035,7 @@ fn stream_per_iri_sections<R: Read, W: Write, E: Write>(
         rendered.bytes.clear();
     }
     if let Some(e) = input.error {
-        let _ = writeln!(stderr, "iriq: {}", e);
-        return Ok(1);
+        return Ok(read_error(stderr, opts.json, &e));
     }
     if opts.json && !opts.ndjson {
         emit_json_array(stdout, &rendered.json, opts)?;
