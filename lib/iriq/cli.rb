@@ -307,16 +307,15 @@ module Iriq
       default_corpus_path
     end
 
-    # Platform-aware default. XDG-honoring on Linux + BSD, Apple-style on
-    # macOS, %LOCALAPPDATA% on Windows. Same logic in Rust so both
-    # runtimes share the same default.db.
+    # %LOCALAPPDATA%\iriq on Windows; everywhere else (macOS included)
+    # $XDG_DATA_HOME/iriq if set and non-empty, else ~/.local/share/iriq.
+    # Mirrored in Rust so both runtimes share the same default.db.
     def default_corpus_path
-      base = if (xdg = ENV["XDG_DATA_HOME"].to_s) && !xdg.empty?
-        File.join(xdg, "iriq")
-      elsif RUBY_PLATFORM =~ /darwin/
-        File.expand_path("~/Library/Application Support/iriq")
-      elsif RUBY_PLATFORM =~ /mingw|mswin|cygwin/
+      xdg = ENV["XDG_DATA_HOME"].to_s
+      base = if RUBY_PLATFORM =~ /mingw|mswin|cygwin/
         File.join(ENV["LOCALAPPDATA"].to_s.empty? ? File.expand_path("~/AppData/Local") : ENV["LOCALAPPDATA"], "iriq")
+      elsif !xdg.empty?
+        File.join(xdg, "iriq")
       else
         File.expand_path("~/.local/share/iriq")
       end

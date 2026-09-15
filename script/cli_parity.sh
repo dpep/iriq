@@ -981,6 +981,36 @@ env_corpus_pair() {
 env_corpus_pair "IRIQ_CORPUS first run announces creation" fresh
 env_corpus_pair "IRIQ_CORPUS second run is quiet"          existing
 
+# Default corpus location with no --corpus / IRIQ_CORPUS: $XDG_DATA_HOME/iriq
+# if set, else ~/.local/share/iriq. HOME and XDG_DATA_HOME point into the
+# scratch dir, so the real default is never touched.
+default_path_pair() {
+  local label="$1" xdg="$2"
+  local home="$corpus_dir/default-home"
+  local input="https://foo.com/users/1"
+  local xdg_env=(-u XDG_DATA_HOME)
+  if [[ "$xdg" == "set" ]]; then
+    xdg_env=(XDG_DATA_HOME="$home/xdg")
+  fi
+  local ruby_out rust_out
+  rm -rf "$home" && mkdir -p "$home"
+  ruby_out=$(echo -n "$input" | (cd "$REPO_ROOT" && env -u IRIQ_NO_CORPUS -u IRIQ_CORPUS "${xdg_env[@]}" HOME="$home" $RUBY -n) 2>&1 || true)
+  ruby_out+=$'\n'$(cd "$home" && find . -name default.db | sort)
+  rm -rf "$home" && mkdir -p "$home"
+  rust_out=$(echo -n "$input" | env -u IRIQ_NO_CORPUS -u IRIQ_CORPUS "${xdg_env[@]}" HOME="$home" "$RUST_BIN" -n 2>&1 || true)
+  rust_out+=$'\n'$(cd "$home" && find . -name default.db | sort)
+  if [[ "$ruby_out" == "$rust_out" ]]; then
+    pass_count=$((pass_count + 1))
+  else
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH: $label"
+    diff <(echo "$ruby_out") <(echo "$rust_out") | sed 's/^/    /' || true
+  fi
+}
+default_path_pair "default corpus under ~/.local/share when XDG_DATA_HOME unset" unset
+default_path_pair "default corpus under \$XDG_DATA_HOME when set"                set
+
 # Seeded messy-corpus sweep. The curated scenarios above use hand-picked
 # inputs; this one pipes ~300 lines of deterministically corrupted URLs
 # (fixed seed — the file is byte-identical on every run) through both

@@ -361,20 +361,12 @@ fn resolve_corpus_path(opts: &Opts) -> Option<String> {
     Some(default_corpus_path())
 }
 
-// default_corpus_path mirrors the Ruby + Go resolvers — XDG on Linux,
-// Apple-style on macOS, %LOCALAPPDATA% on Windows.
+// default_corpus_path mirrors the Ruby resolver: %LOCALAPPDATA%\iriq on
+// Windows; everywhere else (macOS included) $XDG_DATA_HOME/iriq if set and
+// non-empty, else ~/.local/share/iriq.
 fn default_corpus_path() -> String {
     use std::path::PathBuf;
-    let base: PathBuf = if cfg!(target_os = "macos") {
-        if let Some(home) = std::env::var_os("HOME") {
-            PathBuf::from(home)
-                .join("Library")
-                .join("Application Support")
-                .join("iriq")
-        } else {
-            std::env::temp_dir().join("iriq")
-        }
-    } else if cfg!(target_os = "windows") {
+    let base: PathBuf = if cfg!(target_os = "windows") {
         let appdata = std::env::var_os("LOCALAPPDATA").or_else(|| {
             std::env::var_os("USERPROFILE").map(|h| {
                 PathBuf::from(h)

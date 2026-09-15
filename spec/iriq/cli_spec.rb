@@ -23,6 +23,33 @@ describe Iriq::CLI do
     end
   end
 
+  describe "default corpus path" do
+    around do |example|
+      saved = ENV.to_h.slice("HOME", "XDG_DATA_HOME")
+      Dir.mktmpdir("iriq-home") do |home|
+        ENV["HOME"] = home
+        example.run
+      end
+    ensure
+      %w[HOME XDG_DATA_HOME].each { |k| ENV[k] = saved[k] }
+    end
+
+    it "uses ~/.local/share/iriq when XDG_DATA_HOME is unset, on macOS too" do
+      ENV.delete("XDG_DATA_HOME")
+      expect(cli.send(:default_corpus_path)).to eq(File.join(ENV["HOME"], ".local/share/iriq/default.db"))
+    end
+
+    it "falls back to ~/.local/share/iriq when XDG_DATA_HOME is empty" do
+      ENV["XDG_DATA_HOME"] = ""
+      expect(cli.send(:default_corpus_path)).to eq(File.join(ENV["HOME"], ".local/share/iriq/default.db"))
+    end
+
+    it "uses $XDG_DATA_HOME/iriq when XDG_DATA_HOME is set" do
+      ENV["XDG_DATA_HOME"] = File.join(ENV["HOME"], "xdg")
+      expect(cli.send(:default_corpus_path)).to eq(File.join(ENV["HOME"], "xdg/iriq/default.db"))
+    end
+  end
+
   describe "help / usage / version" do
     it "prints usage with no args" do
       expect(run).to eq(0)

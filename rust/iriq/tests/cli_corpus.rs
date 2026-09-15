@@ -114,3 +114,41 @@ fn harness_confines_the_default_corpus_to_the_sandbox() {
         "default corpus escaped the sandbox: {stderr}"
     );
 }
+
+/// `--reset` names the default path without creating anything, so each XDG
+/// case can be checked against its own scratch home.
+fn default_path_under(case: &str, xdg: Option<&str>) -> (std::path::PathBuf, String) {
+    let home = common::sandbox_home().join(case);
+    std::fs::create_dir_all(&home).unwrap();
+    let mut cmd = common::iriq();
+    cmd.env("HOME", &home).arg("--reset");
+    match xdg {
+        Some(v) => cmd.env("XDG_DATA_HOME", v),
+        None => cmd.env_remove("XDG_DATA_HOME"),
+    };
+    let out = cmd.output().expect("run iriq");
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(out.status.success(), "{stderr}");
+    (home, stderr)
+}
+
+#[cfg(not(windows))]
+#[test]
+fn default_corpus_follows_xdg_data_home_else_local_share() {
+    let name = if cfg!(feature = "sqlite") {
+        "default.db"
+    } else {
+        "default.json"
+    };
+    let notice = |p: std::path::PathBuf| format!("iriq: no corpus to reset at {}\n", p.display());
+
+    let (home, stderr) = default_path_under("xdg-unset", None);
+    assert_eq!(stderr, notice(home.join(".local/share/iriq").join(name)));
+
+    let (home, stderr) = default_path_under("xdg-empty", Some(""));
+    assert_eq!(stderr, notice(home.join(".local/share/iriq").join(name)));
+
+    let xdg = common::sandbox_home().join("xdg-set-data");
+    let (_, stderr) = default_path_under("xdg-set", xdg.to_str());
+    assert_eq!(stderr, notice(xdg.join("iriq").join(name)));
+}
