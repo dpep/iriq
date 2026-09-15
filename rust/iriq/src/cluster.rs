@@ -52,14 +52,16 @@ pub const HTTP_STATUS_MIN_OBSERVATIONS: usize = 5;
 pub const HTTP_STATUS_MIN_DISTINCT: usize = 2;
 pub const HTTP_STATUS_MAX_DISTINCT: usize = 30;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct SegmentPositionStat {
     pub position: usize,
     pub stable: bool,
     pub values: HashMap<String, usize>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Cluster {
     pub key: String,
     pub host: String,
@@ -256,7 +258,8 @@ impl Cluster {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct ParamSummary {
     pub name: String,
     pub count: usize,
@@ -460,5 +463,27 @@ mod tests {
             .collect();
         // Ruby: {"document" => 0.75, "unknown" => 0.25}
         assert_eq!(dist, HashMap::from([("document", 0.75), ("unknown", 0.25)]));
+    }
+
+    #[test]
+    fn clusters_and_summaries_compare_by_value() {
+        let build = |urls: &[&str]| {
+            let mut c = Cluster::new(
+                "k".into(),
+                "x.com".into(),
+                "https".into(),
+                "/a/{a_id}".into(),
+                0,
+            );
+            for url in urls {
+                c.add(&crate::parser::parse(url).unwrap());
+            }
+            c
+        };
+        let urls = ["https://x.com/a/1?p=1", "https://x.com/a/2?p=2.5"];
+        let (a, b) = (build(&urls), build(&urls));
+        assert_eq!(a, b);
+        assert_eq!(a.param_summary(), b.param_summary());
+        assert_ne!(a, build(&urls[..1]));
     }
 }

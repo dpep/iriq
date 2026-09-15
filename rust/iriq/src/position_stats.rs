@@ -3,7 +3,8 @@ use std::collections::HashMap;
 
 pub const DEFAULT_MAX_VALUES_PER_POSITION: usize = 5_000;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct PositionStats {
     pub value_counts: HashMap<String, usize>,
     pub type_counts: HashMap<SegmentType, usize>,

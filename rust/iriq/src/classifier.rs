@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum SegmentType {
     Literal,
     Integer,
@@ -47,9 +48,25 @@ pub enum SegmentType {
     OpaqueId,
     /// Dynamic type synthesized at runtime (e.g. an activated recognizer
     /// proposal like `ghp`). Ruby models types as symbols, so any name is
-    /// valid; the name is interned once (see segment_type_from_name) so the
-    /// enum stays Copy and as_str() keeps returning &'static str.
-    Custom(&'static str),
+    /// valid. Obtain one from [`segment_type_from_name`], which returns the
+    /// built-in variant for a built-in name, so a custom type never aliases
+    /// one:
+    ///
+    /// ```compile_fail
+    /// let _ = iriq::SegmentType::Custom("integer");
+    /// ```
+    Custom(CustomType),
+}
+
+/// The name of a [`SegmentType::Custom`] type. Only [`segment_type_from_name`]
+/// creates one, and never for a built-in name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CustomType(&'static str);
+
+impl CustomType {
+    pub fn as_str(&self) -> &'static str {
+        self.0
+    }
 }
 
 impl SegmentType {
@@ -86,7 +103,7 @@ impl SegmentType {
             Enum => "enum",
             String => "string",
             OpaqueId => "opaque_id",
-            Custom(name) => name,
+            Custom(name) => name.as_str(),
         }
     }
 }
@@ -231,6 +248,7 @@ static CURRENCY_CODES: Lazy<HashSet<&'static str>> = Lazy::new(|| {
 });
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum FileKind {
     Image,
     Document,
@@ -533,7 +551,7 @@ pub fn segment_type_from_name(s: &str) -> SegmentType {
             leaked
         }
     };
-    SegmentType::Custom(interned)
+    SegmentType::Custom(CustomType(interned))
 }
 
 fn ensemble(segment: &str, recognizers: &[std::sync::Arc<dyn Recognizer>]) -> Option<Verdict> {
@@ -915,4 +933,24 @@ fn classify_ipv4(segment: &str) -> SegmentType {
         }
     }
     SegmentType::Ipv4
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn type_names_round_trip_and_builtins_never_become_custom() {
+        for t in [
+            SegmentType::Integer,
+            SegmentType::OpaqueId,
+            SegmentType::HttpStatus,
+        ] {
+            assert_eq!(segment_type_from_name(t.as_str()), t);
+        }
+        let ghp = segment_type_from_name("ghp");
+        assert!(matches!(ghp, SegmentType::Custom(c) if c.as_str() == "ghp"));
+        assert_eq!(segment_type_from_name("ghp"), ghp);
+        assert_eq!(segment_type_from_name(ghp.as_str()), ghp);
+    }
 }
