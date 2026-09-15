@@ -150,10 +150,9 @@ struct NormalizerFx {
 #[test]
 fn fixture_normalizer() {
     let fx: NormalizerFx = load("normalizer.json");
-    let c = SegmentClassifier::new();
     for case in &fx.cases {
         let iri = parse(&case.input).unwrap();
-        let got = normalize_identifier(&iri, &c, case.hints);
+        let got = normalize_identifier(&iri, case.hints);
         assert_eq!(
             got, case.output,
             "normalize {:?} hints={}",
@@ -228,8 +227,9 @@ struct ExtractorFx {
 #[test]
 fn fixture_extractor() {
     let fx: ExtractorFx = load("extractor.json");
-    let scheme_less = Extractor { scheme_less: true };
-    let strict = Extractor { scheme_less: false };
+    let scheme_less = Extractor::new();
+    let mut strict = Extractor::new();
+    strict.scheme_less = false;
     for case in &fx.cases {
         let got_sl = scheme_less.extract_strings(&case.text);
         assert_eq!(

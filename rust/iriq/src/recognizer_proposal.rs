@@ -7,6 +7,7 @@ use regex::Regex;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct RecognizerProposal {
     pub prefix: String,
     pub suggested_type: String,
@@ -26,7 +27,10 @@ fn compute_confidence(coverage: f64, host_count: usize) -> f64 {
     score.min(1.0)
 }
 
+/// Thresholds for `Corpus::propose_recognizers`; a zero field takes its
+/// default. Start from `ProposalOptions::default()` and set fields.
 #[derive(Debug, Clone, Copy, Default)]
+#[non_exhaustive]
 pub struct ProposalOptions {
     pub min_observations: usize,
     pub min_coverage: f64,

@@ -1,9 +1,10 @@
-use crate::classifier::{SegmentClassifier, SegmentType, DEFAULT_CLASSIFIER};
+use crate::classifier::{SegmentClassifier, SegmentType};
 use crate::inflector::singularize;
 use once_cell::sync::Lazy;
 use std::collections::HashSet;
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct SegmentHint {
     pub value: String,
     pub ty: SegmentType,
@@ -37,10 +38,6 @@ pub fn derive_hints(segments: &[String], c: &SegmentClassifier) -> Vec<SegmentHi
         });
     }
     out
-}
-
-pub fn derive_hints_default(segments: &[String]) -> Vec<SegmentHint> {
-    derive_hints(segments, &DEFAULT_CLASSIFIER)
 }
 
 pub fn hint_for(

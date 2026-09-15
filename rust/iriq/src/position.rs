@@ -3,6 +3,7 @@
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum PositionScope {
     Path,
     Query,
@@ -18,6 +19,7 @@ impl PositionScope {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct Position {
     pub host: String,
     pub scope: PositionScope,

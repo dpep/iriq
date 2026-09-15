@@ -40,10 +40,21 @@ pub fn normalize_with(
     hints: bool,
 ) -> Result<String, ParseError> {
     let iri = parse(input)?;
-    Ok(normalize_identifier(&iri, c, hints))
+    Ok(normalize_identifier_with(&iri, c, hints))
 }
 
-pub fn normalize_identifier(iri: &Identifier, c: &SegmentClassifier, hints: bool) -> String {
+/// Normalize an already-parsed IRI (see [`normalize`]). `hints: false`
+/// renders bare type placeholders (`{integer}`) instead of hinted names
+/// (`{user_id}`).
+pub fn normalize_identifier(iri: &Identifier, hints: bool) -> String {
+    normalize_identifier_with(iri, &DEFAULT_CLASSIFIER, hints)
+}
+
+pub(crate) fn normalize_identifier_with(
+    iri: &Identifier,
+    c: &SegmentClassifier,
+    hints: bool,
+) -> String {
     normalize_identifier_with_evidence(iri, c, hints, &NullEvidence)
 }
 

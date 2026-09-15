@@ -62,7 +62,7 @@ pub enum Error {
     },
 }
 
-/// `Result` with [`Error`] as the default error type.
+/// `Result` with [`Error`](enum@Error) as the default error type.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 impl Error {

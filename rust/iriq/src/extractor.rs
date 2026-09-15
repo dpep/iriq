@@ -4,6 +4,9 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashSet;
 
+/// Pulls IRIs out of free text. `scheme_less` (default `true`) also accepts
+/// bare `host.tld/path` forms; set it on a value from `Extractor::new()`.
+#[non_exhaustive]
 pub struct Extractor {
     pub scheme_less: bool,
 }

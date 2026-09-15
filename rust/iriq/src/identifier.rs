@@ -1,6 +1,7 @@
 use crate::ordered_map::OrderedMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Kind {
     Url,
     Urn,
@@ -18,6 +19,7 @@ impl Kind {
 /// Parsed IRI. For URN-style inputs only Scheme + NSS are populated;
 /// Host/Path are empty.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Identifier {
     pub original: String,
     pub scheme: String,

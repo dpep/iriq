@@ -6,10 +6,11 @@ use crate::errors::ParseError;
 use crate::hints::{derive_hints, hint_eligible_types, SegmentHint};
 use crate::identifier::Identifier;
 use crate::inflector::singularize;
-use crate::normalizer::normalize_identifier;
+use crate::normalizer::normalize_identifier_with;
 use crate::parser::parse;
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[non_exhaustive]
 pub struct TraceRow {
     #[serde(skip_serializing_if = "String::is_empty")]
     pub name: String,
@@ -21,6 +22,7 @@ pub struct TraceRow {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[non_exhaustive]
 pub struct TraceResult {
     pub input: String,
     pub normalized: String,
@@ -37,13 +39,16 @@ pub struct TraceResult {
 
 pub fn trace(input: &str) -> Result<TraceResult, ParseError> {
     let iri = parse(input)?;
-    Ok(trace_identifier(&iri, &DEFAULT_CLASSIFIER, true))
+    Ok(trace_identifier(&iri, true))
 }
 
-pub fn trace_identifier(iri: &Identifier, c: &SegmentClassifier, hints: bool) -> TraceResult {
+/// Trace an already-parsed IRI (see [`trace`]); `hints` as in
+/// [`normalize_identifier`](crate::normalize_identifier).
+pub fn trace_identifier(iri: &Identifier, hints: bool) -> TraceResult {
+    let c: &SegmentClassifier = &DEFAULT_CLASSIFIER;
     let mut out = TraceResult {
         input: iri.canonical(),
-        normalized: normalize_identifier(iri, c, hints),
+        normalized: normalize_identifier_with(iri, c, hints),
         scheme: iri.scheme.clone(),
         host: iri.host.clone(),
         port: iri.port,

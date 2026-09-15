@@ -41,10 +41,6 @@ impl Shape {
         }
         s
     }
-
-    pub fn equal(&self, other: &Shape) -> bool {
-        self.render(ShapeRenderOptions::default()) == other.render(ShapeRenderOptions::default())
-    }
 }
 
 impl std::fmt::Display for Shape {

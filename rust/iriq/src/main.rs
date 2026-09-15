@@ -4,9 +4,8 @@
 // pipe-mode URL list, cluster auto-switch) also covered here.
 
 use iriq::{
-    classifier::DEFAULT_CLASSIFIER, cross_host_shape::cross_host_shapes, normalize_identifier,
-    parse, trace_identifier, Cluster, Corpus, Extractor, HostStrategy, Identifier, ProposalOptions,
-    RecognizerProposal, TraceResult,
+    normalize_identifier, parse, trace_identifier, Cluster, Corpus, Extractor, HostStrategy,
+    Identifier, ProposalOptions, RecognizerProposal, TraceResult,
 };
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -661,7 +660,7 @@ fn cmd_summary<W: Write, E: Write>(
 fn normalize_section(iri: &Identifier, opts: &Opts, corpus: Option<&Corpus>) -> String {
     match corpus {
         Some(c) => c.normalize_identifier(iri),
-        None => normalize_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints),
+        None => normalize_identifier(iri, opts.hints),
     }
 }
 
@@ -670,9 +669,7 @@ fn section_payload(iri: &Identifier, sec: Section, opts: &Opts, corpus: Option<&
         Section::Parse => identifier_json(iri),
         Section::Canonical => Value::String(iri.canonical()),
         Section::Normalize => Value::String(normalize_section(iri, opts, corpus)),
-        Section::Explain => {
-            serde_json::to_value(trace_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints)).unwrap()
-        }
+        Section::Explain => serde_json::to_value(trace_identifier(iri, opts.hints)).unwrap(),
     }
 }
 
@@ -748,10 +745,7 @@ fn emit_sections_human<W: Write>(
                 let _ = writeln!(stdout, "{}", normalize_section(iri, opts, corpus));
             }
             Section::Explain => {
-                emit_explain_human(
-                    stdout,
-                    &trace_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints),
-                );
+                emit_explain_human(stdout, &trace_identifier(iri, opts.hints));
             }
         }
     }
@@ -882,9 +876,8 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
             return 1;
         }
     };
-    let extractor = Extractor {
-        scheme_less: opts.scheme_less,
-    };
+    let mut extractor = Extractor::new();
+    extractor.scheme_less = opts.scheme_less;
     let iris = extractor.extract(&text);
 
     // Feed observations into the corpus when present.
@@ -1002,10 +995,7 @@ fn emit_per_iri_sections<W: Write>(
                 Section::Normalize => {
                     let _ = writeln!(stdout, "{}", normalize_section(iri, opts, corpus));
                 }
-                Section::Explain => emit_explain_human(
-                    stdout,
-                    &trace_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints),
-                ),
+                Section::Explain => emit_explain_human(stdout, &trace_identifier(iri, opts.hints)),
             }
         }
     }
@@ -1024,9 +1014,8 @@ fn stream_per_iri_sections<R: Read, W: Write, E: Write>(
     args: &[String],
     opts: &Opts,
 ) -> u8 {
-    let extractor = Extractor {
-        scheme_less: opts.scheme_less,
-    };
+    let mut extractor = Extractor::new();
+    extractor.scheme_less = opts.scheme_less;
     let mut reader: Box<dyn BufRead + '_> = if args.is_empty() || args[0] == "-" {
         Box::new(BufReader::new(stdin))
     } else {
@@ -1122,10 +1111,7 @@ fn emit_one_iri_section<W: Write>(stdout: &mut W, iri: &Identifier, i: usize, op
             Section::Normalize => {
                 let _ = writeln!(stdout, "{}", normalize_section(iri, opts, None));
             }
-            Section::Explain => emit_explain_human(
-                stdout,
-                &trace_identifier(iri, &DEFAULT_CLASSIFIER, opts.hints),
-            ),
+            Section::Explain => emit_explain_human(stdout, &trace_identifier(iri, opts.hints)),
         }
     }
 }
@@ -1510,11 +1496,10 @@ fn cmd_propose<W: Write, E: Write>(
             1,
         );
     };
-    let popts = ProposalOptions {
-        min_observations: opts.propose_min_obs,
-        min_coverage: opts.propose_min_coverage,
-        min_hosts: opts.min_hosts,
-    };
+    let mut popts = ProposalOptions::default();
+    popts.min_observations = opts.propose_min_obs;
+    popts.min_coverage = opts.propose_min_coverage;
+    popts.min_hosts = opts.min_hosts;
     if opts.activate_above > 0.0 {
         match c.activate_proposals_above(opts.activate_above, popts) {
             Ok(activated) => {
@@ -1527,7 +1512,7 @@ fn cmd_propose<W: Write, E: Write>(
                     return 0;
                 }
                 for r in activated {
-                    let _ = writeln!(stdout, "activated: {} ({})", r.ty.as_str(), r.prefix);
+                    let _ = writeln!(stdout, "activated: {} ({})", r.suggested_type, r.prefix);
                 }
                 return 0;
             }
@@ -1640,7 +1625,7 @@ fn cmd_cross_host_shapes<W: Write, E: Write>(
             1,
         );
     };
-    let shapes = cross_host_shapes(c, opts.min_hosts);
+    let shapes = c.cross_host_shapes(opts.min_hosts);
     if opts.json {
         let arr: Vec<Value> = shapes
             .iter()

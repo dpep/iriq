@@ -4,6 +4,7 @@ use crate::classifier::{
 use crate::cluster::ParamSummary;
 use crate::cluster::{placeholder_for, Cluster};
 use crate::clusterer::cluster_key_for_host;
+use crate::cross_host_shape::{cross_host_shapes, CrossHostShape};
 use crate::errors::{Error, ParseError, Result};
 use crate::event::Event;
 use crate::hints::{derive_hints, SegmentHint};
@@ -24,6 +25,7 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum Classification {
     StableLiteral,
     VariableIdentifier,
@@ -44,22 +46,24 @@ impl Classification {
     }
 }
 
-pub const VARIABLE_DOMINANCE_THRESHOLD: f64 = 0.8;
-pub const LITERAL_UNIQUENESS_THRESHOLD: f64 = 0.8;
-pub const LITERAL_UNIQUENESS_MODERATE_THRESHOLD: f64 = 0.5;
-pub const MIN_CARDINALITY_FOR_INFERENCE: usize = 20;
-pub const MIN_OBSERVATIONS_FOR_INFERENCE: usize = 5;
-pub const STABLE_LITERAL_THRESHOLD: f64 = 0.5;
-pub const POPULAR_MIN_COUNT: usize = 5;
-pub const POPULAR_BASELINE_MULTIPLE: f64 = 3.0;
+const VARIABLE_DOMINANCE_THRESHOLD: f64 = 0.8;
+const LITERAL_UNIQUENESS_THRESHOLD: f64 = 0.8;
+const LITERAL_UNIQUENESS_MODERATE_THRESHOLD: f64 = 0.5;
+const MIN_CARDINALITY_FOR_INFERENCE: usize = 20;
+const MIN_OBSERVATIONS_FOR_INFERENCE: usize = 5;
+const STABLE_LITERAL_THRESHOLD: f64 = 0.5;
+const POPULAR_MIN_COUNT: usize = 5;
+const POPULAR_BASELINE_MULTIPLE: f64 = 3.0;
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct CorpusEntry {
     pub hint: SegmentHint,
     pub classification: Classification,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum HostStrategy {
     #[default]
     Full,
@@ -68,29 +72,25 @@ pub enum HostStrategy {
 }
 
 pub struct Corpus {
-    /// Classifier — `Arc` so a Corpus can swap to its own per-corpus
-    /// classifier without affecting `DEFAULT_CLASSIFIER` (Activate path).
-    pub classifier: Arc<SegmentClassifier>,
-    pub host_strategy: HostStrategy,
+    /// The shared default classifier until a recognizer is activated, then a
+    /// private copy (see `reapply_activated_recognizers`).
+    classifier: Arc<SegmentClassifier>,
+    host_strategy: HostStrategy,
     storage: Box<dyn Storage>,
 }
 
 impl Corpus {
+    /// An in-memory corpus.
     pub fn new() -> Self {
-        Self::new_with_classifier(
-            DEFAULT_CLASSIFIER_ARC.clone(),
-            DEFAULT_MAX_VALUES_PER_POSITION,
-        )
-    }
-
-    pub fn new_with_classifier(c: Arc<SegmentClassifier>, max_values: usize) -> Self {
         Corpus {
-            classifier: c,
+            classifier: DEFAULT_CLASSIFIER_ARC.clone(),
             host_strategy: HostStrategy::Full,
-            storage: Box::new(MemoryStorage::new(max_values)),
+            storage: Box::new(MemoryStorage::new(DEFAULT_MAX_VALUES_PER_POSITION)),
         }
     }
 
+    /// Open, or start, the corpus at `path`. The extension picks the backend:
+    /// `.db` / `.sqlite` / `.sqlite3` is SQLite, anything else JSON.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let storage = open_storage(path.as_ref(), DEFAULT_MAX_VALUES_PER_POSITION)?;
         let mut cp = Corpus {
@@ -106,15 +106,7 @@ impl Corpus {
         self.host_strategy = s;
     }
 
-    pub fn storage(&self) -> &dyn Storage {
-        self.storage.as_ref()
-    }
-
-    pub fn storage_mut(&mut self) -> &mut dyn Storage {
-        self.storage.as_mut()
-    }
-
-    pub fn effective_host(&self, host: &str) -> String {
+    fn effective_host(&self, host: &str) -> String {
         match self.host_strategy {
             HostStrategy::Registrable => registrable_domain(host),
             HostStrategy::None => String::new(),
@@ -161,19 +153,19 @@ impl Corpus {
         propose_recognizers(self.storage.as_ref(), opts)
     }
 
-    pub fn activate_proposal(&mut self, p: &RecognizerProposal) -> Result<SynthesizedRecognizer> {
+    /// Activate a proposal as a recognizer on this corpus, then reinfer.
+    /// Activating one the corpus already holds changes nothing.
+    pub fn activate_proposal(&mut self, p: &RecognizerProposal) -> Result<()> {
         // The proposal suggests a type name (e.g. "ghp"). Unknown names
         // become dynamic Custom types, matching Ruby's symbol semantics.
         let ty = segment_type_from_name(&p.suggested_type);
-        let r = SynthesizedRecognizer::from_prefix(p.prefix.clone(), ty);
-        let dump = r.dump();
+        let dump = SynthesizedRecognizer::from_prefix(p.prefix.clone(), ty).dump();
         if self.has_activated(&dump) {
-            return Ok(r);
+            return Ok(());
         }
         self.storage.record_activated_recognizer(dump)?;
         self.reapply_activated_recognizers();
-        self.reinfer()?;
-        Ok(r)
+        self.reinfer()
     }
 
     fn has_activated(&self, dump: &serde_json::Value) -> bool {
@@ -183,18 +175,20 @@ impl Corpus {
         found
     }
 
+    /// Activate every proposal at or above `confidence_threshold`, returning
+    /// the proposals activated.
     pub fn activate_proposals_above(
         &mut self,
         confidence_threshold: f64,
         opts: ProposalOptions,
-    ) -> Result<Vec<SynthesizedRecognizer>> {
-        let proposals = self.propose_recognizers(opts);
+    ) -> Result<Vec<RecognizerProposal>> {
         let mut activated = Vec::new();
-        for p in proposals {
+        for p in self.propose_recognizers(opts) {
             if p.confidence < confidence_threshold {
                 continue;
             }
-            activated.push(self.activate_proposal(&p)?);
+            self.activate_proposal(&p)?;
+            activated.push(p);
         }
         Ok(activated)
     }
@@ -315,13 +309,11 @@ impl Corpus {
     pub fn size(&self) -> usize {
         self.storage.cluster_size()
     }
-    pub fn max_values_per_position(&self) -> usize {
-        self.storage.max_values()
-    }
 
-    pub fn stats_for(&self, host: &str, prefix: &str) -> Option<PositionStats> {
-        self.storage
-            .position_stats_for(&Position::path(host, prefix))
+    /// Route shapes (path only, host stripped) that recur across at least
+    /// `min_hosts` hosts; `0` means the default of 2.
+    pub fn cross_host_shapes(&self, min_hosts: usize) -> Vec<CrossHostShape> {
+        cross_host_shapes(self, min_hosts)
     }
 
     /// Persist the corpus. Saving to the corpus's own file (however it is
@@ -646,6 +638,15 @@ static DEFAULT_CLASSIFIER_ARC: Lazy<Arc<SegmentClassifier>> =
 impl Default for Corpus {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl std::fmt::Debug for Corpus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Corpus")
+            .field("path", &self.storage.path())
+            .field("host_strategy", &self.host_strategy)
+            .finish_non_exhaustive()
     }
 }
 

@@ -49,64 +49,62 @@
 //! See the [project README](https://github.com/dpep/iriq) for the
 //! conceptual overview and the CHANGELOG for version history.
 
-pub mod classifier;
-pub mod cluster;
-pub mod clusterer;
-pub mod corpus;
-pub mod cross_host_shape;
-pub mod errors;
-pub mod event;
-pub mod explanation;
-pub mod extractor;
-pub mod hints;
-pub mod identifier;
-pub mod inflector;
-pub mod normalizer;
-pub mod observation;
-pub mod ordered_map;
-pub mod parser;
-pub mod path_shape;
-pub mod position;
-pub mod position_stats;
-pub mod recognizer_proposal;
-pub mod registrable_domain;
-pub mod shape;
-pub mod storage;
-pub mod storage_json;
-pub mod storage_memory;
+// `color_kind` became unreachable when the surface narrowed; delete it there
+// and drop this allow.
+#[allow(dead_code)]
+mod classifier;
+mod cluster;
+mod clusterer;
+mod corpus;
+mod cross_host_shape;
+mod errors;
+mod event;
+mod explanation;
+mod extractor;
+mod hints;
+mod identifier;
+mod inflector;
+mod normalizer;
+mod ordered_map;
+mod parser;
+mod path_shape;
+mod position;
+mod position_stats;
+mod recognizer_proposal;
+mod registrable_domain;
+mod shape;
+mod storage;
+mod storage_json;
+mod storage_memory;
 #[cfg(feature = "sqlite")]
-pub mod storage_sqlite;
-pub mod synthesized_recognizer;
-pub mod trace;
+mod storage_sqlite;
+mod synthesized_recognizer;
+mod trace;
 
-pub use classifier::{
-    canonical_currency, canonical_date, color_kind, display_type, file_kind, param_name_hint,
-    FileKind, SegmentClassifier, SegmentType, DEFAULT_CLASSIFIER,
-};
+// The public API. Every name here is a semver promise; everything else is
+// crate-private. A type is listed when a public signature or field reaches it.
+pub use classifier::{segment_type_from_name, CustomType, FileKind, SegmentType};
 pub use cluster::{Cluster, ParamSummary, SegmentPositionStat};
-pub use clusterer::{cluster_key_for, cluster_key_for_host, ClusterKey, Clusterer, ExplainEntry};
 pub use corpus::{Classification, Corpus, CorpusEntry, HostStrategy};
 pub use cross_host_shape::CrossHostShape;
 pub use errors::{Error, ParseError, Result};
-pub use explanation::{explain, explain_identifier};
+pub use explanation::explain;
 pub use extractor::Extractor;
-pub use hints::{derive_hints, derive_hints_default, SegmentHint};
+pub use hints::SegmentHint;
 pub use identifier::{Identifier, Kind};
 pub use inflector::singularize;
-pub use normalizer::{
-    normalize, normalize_identifier, normalize_identifier_with_evidence, NormalizationEvidence,
-    NullEvidence,
-};
+pub use normalizer::{normalize, normalize_identifier};
 pub use ordered_map::OrderedMap;
 pub use parser::parse;
-pub use path_shape::{path_shape_for, PathShape};
+pub use path_shape::path_shape_for;
 pub use position::{Position, PositionScope};
-pub use position_stats::{PositionStats, DEFAULT_MAX_VALUES_PER_POSITION};
+pub use position_stats::PositionStats;
 pub use recognizer_proposal::{ProposalOptions, RecognizerProposal};
 pub use registrable_domain::registrable_domain;
-pub use shape::{Shape, ShapeRenderOptions};
-pub use storage::{open_storage, Storage};
-pub use synthesized_recognizer::SynthesizedRecognizer;
 pub use trace::{trace, trace_identifier, TraceResult, TraceRow};
+
+// For the crate's own integration tests only; not part of the API.
+#[doc(hidden)]
+pub use classifier::{canonical_date, SegmentClassifier};
 
 pub const VERSION: &str = "0.34.0";

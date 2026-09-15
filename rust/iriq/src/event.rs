@@ -29,16 +29,3 @@ pub enum Event {
         iri: Box<Identifier>,
     },
 }
-
-impl Event {
-    pub fn kind(&self) -> &'static str {
-        match self {
-            Event::HostSeen { .. } => "host_seen",
-            Event::PathLengthSeen { .. } => "path_length_seen",
-            Event::RawShapeSeen { .. } => "raw_shape_seen",
-            Event::FingerprintSeen { .. } => "fingerprint_seen",
-            Event::PositionSeen { .. } => "position_seen",
-            Event::ClusterAddition { .. } => "cluster_addition",
-        }
-    }
-}

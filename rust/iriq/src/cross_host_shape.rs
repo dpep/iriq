@@ -2,6 +2,7 @@ use crate::corpus::Corpus;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct CrossHostShape {
     pub shape: String,
     pub hosts: Vec<String>,

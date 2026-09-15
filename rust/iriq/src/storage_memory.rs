@@ -104,21 +104,6 @@ impl Storage for MemoryStorage {
     fn host_counts(&self) -> HashMap<String, usize> {
         self.host_counts.clone()
     }
-    fn for_each_host(&self, f: &mut dyn FnMut(&str, usize)) {
-        for (k, v) in &self.host_counts {
-            f(k, *v);
-        }
-    }
-    fn for_each_raw_shape(&self, f: &mut dyn FnMut(&str, usize)) {
-        for (k, v) in &self.raw_shape_counts {
-            f(k, *v);
-        }
-    }
-    fn for_each_fingerprint(&self, f: &mut dyn FnMut(&str, usize)) {
-        for (k, v) in &self.fingerprint_counts {
-            f(k, *v);
-        }
-    }
     fn path_length_counts(&self) -> HashMap<usize, usize> {
         self.path_length_counts.clone()
     }

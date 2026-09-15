@@ -4,9 +4,7 @@
 //! survive a corpus reopen from disk. Mirrors Ruby's
 //! activate_proposal_spec.
 
-use iriq::classifier::{segment_type_from_name, SegmentType};
-use iriq::recognizer_proposal::ProposalOptions;
-use iriq::Corpus;
+use iriq::{segment_type_from_name, Corpus, ProposalOptions, SegmentType};
 
 fn observe_pat_stream(c: &mut Corpus) {
     for i in 0..25 {
@@ -24,7 +22,7 @@ fn activates_under_the_suggested_custom_type() {
         .activate_proposals_above(0.9, ProposalOptions::default())
         .unwrap();
     assert_eq!(activated.len(), 1);
-    assert_eq!(activated[0].ty.as_str(), "ghp");
+    assert_eq!(activated[0].suggested_type, "ghp");
     assert_eq!(
         c.normalize("https://api.github.com/auth/ghp_zzzz9999xyzzy")
             .unwrap(),
