@@ -460,7 +460,7 @@ module Iriq
 
       def path_length_counts
         h = Hash.new(0)
-        @db.execute("SELECT length, count FROM path_length_counts") { |r| h[r[0]] = r[1] }
+        @db.execute("SELECT length, count FROM path_length_counts") { |r| h[r[0]] = coerce_int!(r[1], 1, "count") }
         h
       end
 
@@ -483,20 +483,20 @@ module Iriq
         return nil if total.nil?
 
         stats = PositionStats.new(max_values: @max_values_per_position)
-        stats.instance_variable_set(:@total, total)
+        stats.instance_variable_set(:@total, coerce_int!(total, 0, "total"))
 
         vc = Hash.new(0)
         @db.execute(
           "SELECT value, count FROM position_values WHERE host = ? AND scope = ? AND locator = ?",
           [host, scope, locator],
-        ) { |r| vc[r[0]] = r[1] }
+        ) { |r| vc[r[0]] = coerce_int!(r[1], 1, "count") }
         stats.instance_variable_set(:@value_counts, vc)
 
         tc = Hash.new(0)
         @db.execute(
           "SELECT type, count FROM position_types WHERE host = ? AND scope = ? AND locator = ?",
           [host, scope, locator],
-        ) { |r| tc[r[0].to_sym] = r[1] }
+        ) { |r| tc[r[0].to_sym] = coerce_int!(r[1], 1, "count") }
         stats.instance_variable_set(:@type_counts, tc)
 
         recompute_numeric!(stats)
@@ -542,17 +542,18 @@ module Iriq
         type_counts = Hash.new(0)
         @db.execute(
           "SELECT type, count FROM position_types WHERE host = ? AND scope = ? AND locator = ?", where,
-        ) { |r| type_counts[r[0].to_sym] = r[1] }
+        ) { |r| type_counts[r[0].to_sym] = coerce_int!(r[1], 1, "count") }
+        value_count = @db.get_first_value(
+          "SELECT count FROM position_values WHERE host = ? AND scope = ? AND locator = ? AND value = ?",
+          [*where, value],
+        )
         PositionEvidence.new(
-          total:       total,
+          total:       coerce_int!(total, 0, "total"),
           type_counts: type_counts,
           cardinality: @db.get_first_value(
             "SELECT COUNT(*) FROM position_values WHERE host = ? AND scope = ? AND locator = ?", where,
           ),
-          value_count: @db.get_first_value(
-            "SELECT count FROM position_values WHERE host = ? AND scope = ? AND locator = ? AND value = ?",
-            [*where, value],
-          ),
+          value_count: value_count.nil? ? nil : coerce_int!(value_count, 0, "count"),
         )
       end
 
@@ -565,13 +566,13 @@ module Iriq
         return nil if total.nil?
 
         stats = PositionStats.new(max_values: @max_values_per_position)
-        stats.instance_variable_set(:@total, total)
+        stats.instance_variable_set(:@total, coerce_int!(total, 0, "total"))
         @db.execute(
           "SELECT value, count FROM cluster_param_values WHERE cluster_key = ? AND name = ?", [key, name],
-        ) { |r| stats.value_counts[r[0]] = r[1] }
+        ) { |r| stats.value_counts[r[0]] = coerce_int!(r[1], 1, "count") }
         @db.execute(
           "SELECT type, count FROM cluster_param_types WHERE cluster_key = ? AND name = ?", [key, name],
-        ) { |r| stats.type_counts[r[0].to_sym] = r[1] }
+        ) { |r| stats.type_counts[r[0].to_sym] = coerce_int!(r[1], 1, "count") }
         recompute_numeric!(stats)
         stats
       end
@@ -605,21 +606,45 @@ module Iriq
 
       def rows_to_count_hash(table, key_col)
         h = Hash.new(0)
-        @db.execute("SELECT #{key_col}, count FROM #{table}") { |r| h[r[0]] = r[1] }
+        @db.execute("SELECT #{key_col}, count FROM #{table}") { |r| h[r[0]] = coerce_int!(r[1], 1, "count") }
         h
       end
 
+      # rusqlite's storage class name for a value SQLite handed back untyped
+      # for an INTEGER column — matches the words rust/ raises for the same
+      # corrupted row so the two runtimes agree.
+      SQLITE_TYPE_NAMES = {
+        NilClass => "Null",
+        Float    => "Real",
+        String   => "Text",
+      }.freeze
+
+      # Every count/total column is declared INTEGER, but SQLite's affinity
+      # rules only convert a value on write when that can be done losslessly
+      # — a hand-edited (or otherwise corrupted) corpus can still leave a
+      # Text or Real value behind. Reads validate the type here instead of
+      # crashing downstream on Integer#+ / Array#sum / Integer#times.
+      def coerce_int!(value, index, name)
+        return value if value.is_a?(Integer)
+
+        type_name = SQLITE_TYPE_NAMES.fetch(value.class, "Blob")
+        raise CorpusError, "corpus #{@path}: Invalid column type #{type_name} at index: #{index}, name: #{name}"
+      end
+
       def load_cluster(key)
+        # key isn't re-selected — it's already the query parameter (matches
+        # the Rust reader's column list, so a corrupted `count` reports the
+        # same column index in both runtimes).
         row = @db.get_first_row(
-          "SELECT key, host, scheme, shape, count FROM clusters WHERE key = ?", [key],
+          "SELECT host, scheme, shape, count FROM clusters WHERE key = ?", [key],
         )
         return nil unless row
 
         c = Cluster.new(
-          key: row[0], host: row[1], scheme: row[2], shape: row[3],
+          key: key, host: row[0], scheme: row[1], shape: row[2],
           max_values: @max_values_per_position,
         )
-        c.instance_variable_set(:@count, row[4])
+        c.instance_variable_set(:@count, coerce_int!(row[3], 3, "count"))
 
         examples = []
         @db.execute(
@@ -632,9 +657,9 @@ module Iriq
           "SELECT position, value, count FROM cluster_segments WHERE cluster_key = ? ORDER BY position",
           [key],
         ) do |r|
-          pos = r[0]
+          pos = coerce_int!(r[0], 0, "position")
           seg_counts[pos] ||= Hash.new(0)
-          seg_counts[pos][r[1]] = r[2]
+          seg_counts[pos][r[1]] = coerce_int!(r[2], 2, "count")
         end
         c.instance_variable_set(:@segment_counts, seg_counts)
 
@@ -647,20 +672,20 @@ module Iriq
           # and type counts; only @total needs filling here. The followup
           # SELECTs below populate value/type rows in place.
           stats = PositionStats.new(max_values: @max_values_per_position)
-          stats.instance_variable_set(:@total, r[1])
+          stats.instance_variable_set(:@total, coerce_int!(r[1], 1, "total"))
           params[r[0]] = stats
         end
         @db.execute(
           "SELECT name, value, count FROM cluster_param_values WHERE cluster_key = ?", [key],
         ) do |r|
           stats = params[r[0]] or next
-          stats.value_counts[r[1]] = r[2]
+          stats.value_counts[r[1]] = coerce_int!(r[2], 2, "count")
         end
         @db.execute(
           "SELECT name, type, count FROM cluster_param_types WHERE cluster_key = ?", [key],
         ) do |r|
           stats = params[r[0]] or next
-          stats.type_counts[r[1].to_sym] = r[2]
+          stats.type_counts[r[1].to_sym] = coerce_int!(r[2], 2, "count")
         end
         params.each_value { |stats| recompute_numeric!(stats) }
         c.instance_variable_set(:@param_stats, params)

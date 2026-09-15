@@ -356,6 +356,63 @@ describe Iriq::Storage do
     end
   end
 
+  describe "corrupted SQLite rows" do
+    around do |example|
+      Dir.mktmpdir("iriq-corrupt") do |dir|
+        @dir = dir
+        example.run
+      end
+    end
+
+    # SQLite's INTEGER affinity only converts a write when it can do so
+    # losslessly, so a stray UPDATE/INSERT of a text value past the app
+    # layer leaves the wrong storage class behind. A read of that column
+    # must raise CorpusError like every other corpus failure, never let
+    # the bad value flow into Integer#+ / Array#sum / Integer#times.
+    def corrupt(path, sql)
+      require "iriq/storage/sqlite"
+      db = SQLite3::Database.new(path)
+      db.execute(sql)
+      db.close
+    end
+
+    it "reports a non-integer host_counts.count instead of crashing on Array#sum" do
+      path = File.join(@dir, "c.db")
+      Iriq::Corpus.open(path).tap { |c| c.observe("https://foo.com/x") }.close
+      corrupt(path, "INSERT INTO host_counts VALUES ('ghost.com', 'not a count')")
+
+      expect { Iriq::Corpus.open(path).host_counts }.to raise_error(
+        Iriq::CorpusError,
+        "corpus #{path}: Invalid column type Text at index: 1, name: count",
+      )
+    end
+
+    it "reports the same way for a cluster's own count column (index matches Rust's narrower SELECT)" do
+      path = File.join(@dir, "c.db")
+      storage = Iriq::Storage.open(path)
+      storage.add_to_cluster("k1", "foo.com", "https", "/users/{id}", Iriq.parse("https://foo.com/users/1"))
+      storage.close
+      corrupt(path, "UPDATE clusters SET count = 'many'")
+
+      storage = Iriq::Storage.open(path)
+      expect { storage.cluster_for("k1") }.to raise_error(
+        Iriq::CorpusError,
+        "corpus #{path}: Invalid column type Text at index: 3, name: count",
+      )
+    end
+
+    it "reports a Real value the same way as a Text one" do
+      path = File.join(@dir, "c.db")
+      Iriq::Corpus.open(path).tap { |c| c.observe("https://foo.com/x") }.close
+      corrupt(path, "UPDATE host_counts SET count = 1.5")
+
+      expect { Iriq::Corpus.open(path).host_counts }.to raise_error(
+        Iriq::CorpusError,
+        "corpus #{path}: Invalid column type Real at index: 1, name: count",
+      )
+    end
+  end
+
   describe "JSON saves" do
     around do |example|
       Dir.mktmpdir("iriq-json-save") do |dir|

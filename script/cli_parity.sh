@@ -409,6 +409,17 @@ dir_as_db_pair() {
 dir_as_db_pair "directory named .db (human)" --corpus "$corpus_dir/dir.db" -n "https://x.com/users/1"
 dir_as_db_pair "directory named .db (json)"  --json --corpus "$corpus_dir/dir.db" -n "https://x.com/users/1"
 
+# A count column holding text instead of an integer: SQLite's affinity
+# rules only convert on write when that's lossless, so a hand-edited row can
+# leave the wrong storage class behind. Both runtimes read it, not crash.
+echo -n "https://foo.com/x" | "$RUST_BIN" --corpus "$corpus_dir/badcount.db" > /dev/null
+(cd "$REPO_ROOT" && bundle exec ruby -rsqlite3 -e '
+  db = SQLite3::Database.new(ARGV[0])
+  db.execute("INSERT INTO host_counts VALUES (?, ?)", ["ghost.com", "not a count"])
+' "$corpus_dir/badcount.db")
+run_pair "corrupted count column"      "" --corpus "$corpus_dir/badcount.db" --stats
+run_pair "corrupted count column json" "" --json --corpus "$corpus_dir/badcount.db" --stats
+
 corpus_pair() {
   local label="$1" ext="$2"
   local ruby_path="$corpus_dir/ruby$ext"
