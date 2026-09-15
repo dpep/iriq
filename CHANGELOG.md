@@ -44,6 +44,7 @@
 <!-- lane: perf -->
 - **Performance (Rust): corpus-informed normalization no longer slows down as the corpus grows.** No action needed; output is byte-for-byte unchanged. `iriq -n` with a corpus (the default) read every value and example the corpus held for a route to shape each URL, so each line cost more than the last. Piping 20,000 URLs of one route through `iriq -n` into a fresh corpus took about 5 minutes with `.db` and 20 s with `.json`; it now takes about 6 s and 0.2 s. It now reads only the counts classification uses.
 - **Performance (Rust, SQLite): observing a route the corpus already knows no longer scans every route.** No action needed. Each observation looked through all of a `.db` corpus's routes to number a new one, even when the route wasn't new; now only a route's first observation does. 20,000 URLs over 1,000 hosts went from about 1 s to 0.4 s.
+- **Performance (Rust, SQLite): a new value in a busy URL slot no longer re-counts the slot.** No action needed. To enforce the per-slot value cap, each value a `.db` corpus hadn't seen in a slot counted every value already there, up to the cap of 5,000. Inside a batch the corpus now remembers the count, and drops it whenever another process has written to the file since. Observing 20,000 URLs of one route with `--stats` went from about 6 s to 0.5 s, and `-n` from about 6 s to 1 s.
 <!-- /lane: perf -->
 
 ###  0.34.0  (2026-08-12)

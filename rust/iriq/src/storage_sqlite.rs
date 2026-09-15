@@ -29,6 +29,14 @@ pub struct SqliteStorage {
     conn: Mutex<Connection>,
     max_values: usize,
     path: PathBuf,
+    in_batch: bool,
+    /// Tracked values per position, counted inside a batch so each new value
+    /// needn't re-count them. Exact only while this connection holds the
+    /// write lock and, across batches, while `counts_version` still matches.
+    value_counts: HashMap<Position, usize>,
+    /// `PRAGMA data_version` as of the batch that filled `value_counts`; it
+    /// changes when any other connection commits.
+    counts_version: Option<i64>,
 }
 
 impl SqliteStorage {
@@ -105,6 +113,9 @@ impl SqliteStorage {
             conn: Mutex::new(conn),
             max_values,
             path: path.to_path_buf(),
+            in_batch: false,
+            value_counts: HashMap::new(),
+            counts_version: None,
         })
     }
 
@@ -276,20 +287,30 @@ impl Storage for SqliteStorage {
             .and_then(|mut s| s.execute(params![pos.host, scope, pos.locator, value]))
             .map_err(err)?;
         if updated == 0 {
-            let card: i64 = c
-                .prepare_cached(
-                    "SELECT COUNT(*) FROM position_values WHERE host = ? AND scope = ? AND locator = ?",
-                )
-                .and_then(|mut s| {
-                    s.query_row(params![pos.host, scope, pos.locator], |r| r.get(0))
-                })
-                .map_err(err)?;
-            if (card as usize) < self.max_values {
+            let remembered = self.value_counts.get(pos).filter(|_| self.in_batch);
+            let mut card = match remembered {
+                Some(&n) => n,
+                None => c
+                    .prepare_cached(
+                        "SELECT COUNT(*) FROM position_values WHERE host = ? AND scope = ? AND locator = ?",
+                    )
+                    .and_then(|mut s| {
+                        s.query_row(params![pos.host, scope, pos.locator], |r| {
+                            r.get::<_, i64>(0)
+                        })
+                    })
+                    .map_err(err)? as usize,
+            };
+            if card < self.max_values {
                 c.prepare_cached(
                     "INSERT INTO position_values (host, scope, locator, value, count) VALUES (?, ?, ?, ?, 1)",
                 )
                 .and_then(|mut s| s.execute(params![pos.host, scope, pos.locator, value]))
                 .map_err(err)?;
+                card += 1;
+            }
+            if self.in_batch {
+                self.value_counts.insert(pos.clone(), card);
             }
         }
         Ok(())
@@ -702,6 +723,7 @@ impl Storage for SqliteStorage {
         n as usize
     }
     fn clear_materialized_views(&mut self) -> Result<()> {
+        self.value_counts.clear();
         let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         for q in [
             "DELETE FROM host_counts",
@@ -783,14 +805,31 @@ impl Storage for SqliteStorage {
     fn batch_begin(&mut self) -> Result<()> {
         let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         c.execute_batch("BEGIN IMMEDIATE")
-            .map_err(|e| Error::sqlite(&self.path, e))
+            .map_err(|e| Error::sqlite(&self.path, e))?;
+        // Under the write lock no one else can commit until we do, so a
+        // version read now stays true for the whole batch.
+        let version = c
+            .query_row("PRAGMA data_version", [], |r| r.get::<_, i64>(0))
+            .ok();
+        if version.is_none() || version != self.counts_version {
+            self.value_counts.clear();
+        }
+        self.counts_version = version;
+        self.in_batch = true;
+        Ok(())
     }
     fn batch_commit(&mut self) -> Result<()> {
+        self.in_batch = false;
         let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
-        c.execute_batch("COMMIT")
-            .map_err(|e| Error::sqlite(&self.path, e))
+        let committed = c.execute_batch("COMMIT");
+        if committed.is_err() {
+            self.value_counts.clear();
+        }
+        committed.map_err(|e| Error::sqlite(&self.path, e))
     }
     fn batch_rollback(&mut self) -> Result<()> {
+        self.in_batch = false;
+        self.value_counts.clear();
         let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         c.execute_batch("ROLLBACK")
             .map_err(|e| Error::sqlite(&self.path, e))
