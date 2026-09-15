@@ -7,8 +7,25 @@
 mod common;
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::process::{Child, ExitStatus, Stdio};
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
+use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
+
+/// Held while this binary starts any process. Without pipe2 (macOS), std
+/// creates a child's stdio pipe and marks it close-on-exec in two steps; a
+/// test spawning on another thread in between gives its child our stdout's
+/// read end, so iriq's writes succeed instead of failing with EPIPE.
+static SPAWN: Mutex<()> = Mutex::new(());
+
+fn spawn(cmd: &mut Command) -> Child {
+    let _one_at_a_time = SPAWN.lock().unwrap_or_else(PoisonError::into_inner);
+    cmd.spawn().expect("spawn iriq")
+}
+
+fn output(cmd: &mut Command) -> Output {
+    let _one_at_a_time = SPAWN.lock().unwrap_or_else(PoisonError::into_inner);
+    cmd.output().expect("run iriq")
+}
 
 /// A hang guard, not a timing assertion: a process that ignores its closed
 /// stdout never exits, so the test fails here instead of hanging.
@@ -41,13 +58,13 @@ fn stderr_of(child: &mut Child) -> String {
 fn a_closed_reader_ends_a_live_stream() {
     // `tail -f log | iriq -n | head -1`: stdin stays open, so only the failed
     // write of the next line can end the process.
-    let mut child = common::iriq()
-        .arg("-n")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn iriq");
+    let mut child = spawn(
+        common::iriq()
+            .arg("-n")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    );
     let mut stdin = child.stdin.take().expect("piped stdin");
     writeln!(stdin, "https://foo.com/users/1").unwrap();
 
@@ -67,13 +84,13 @@ fn a_closed_reader_ends_a_live_stream() {
 
 #[test]
 fn a_closed_reader_ends_the_cluster_view_quietly() {
-    let mut child = common::iriq()
-        .arg("cluster")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn iriq");
+    let mut child = spawn(
+        common::iriq()
+            .arg("cluster")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    );
     drop(child.stdout.take());
     let urls: String = (1..=50)
         .map(|i| format!("https://h{i}.com/users/{i}\n"))
@@ -93,14 +110,14 @@ fn a_closed_reader_keeps_what_the_corpus_observed() {
         .join(format!("pipes-corpus-{}.json", std::process::id()));
     let _ = std::fs::remove_file(&corpus);
 
-    let mut child = common::iriq()
-        .args(["-n", "--corpus"])
-        .arg(&corpus)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn iriq");
+    let mut child = spawn(
+        common::iriq()
+            .args(["-n", "--corpus"])
+            .arg(&corpus)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null()),
+    );
     drop(child.stdout.take());
     let mut stdin = child.stdin.take().expect("piped stdin");
     stdin
@@ -110,12 +127,12 @@ fn a_closed_reader_keeps_what_the_corpus_observed() {
     let status = exit_status(&mut child);
     assert_eq!(status.code(), Some(141), "{status:?}");
 
-    let stats = common::iriq()
-        .args(["--stats", "--json", "--corpus"])
-        .arg(&corpus)
-        .stdin(Stdio::null())
-        .output()
-        .expect("run iriq --stats");
+    let stats = output(
+        common::iriq()
+            .args(["--stats", "--json", "--corpus"])
+            .arg(&corpus)
+            .stdin(Stdio::null()),
+    );
     let v: serde_json::Value = serde_json::from_slice(&stats.stdout).expect("stats json");
     assert_eq!(v["observations"], 2, "{v}");
     let _ = std::fs::remove_file(&corpus);
