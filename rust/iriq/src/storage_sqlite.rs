@@ -694,6 +694,12 @@ impl Storage for SqliteStorage {
         let committed = c.execute_batch("COMMIT");
         if committed.is_err() {
             self.value_counts.clear();
+            // Most failed commits end the transaction; one that doesn't (a
+            // deferred constraint) would keep the write lock and refuse every
+            // later batch. The commit error is the one worth reporting.
+            if !c.is_autocommit() {
+                let _ = c.execute_batch("ROLLBACK");
+            }
         }
         committed.map_err(|e| Error::sqlite(&self.path, e))
     }
@@ -941,6 +947,36 @@ mod tests {
         let cause = std::error::Error::source(&err).unwrap().to_string();
         assert!(cause.contains("simulated write failure"), "{cause}");
         assert_eq!(corpus.observed_iri_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn a_failed_commit_ends_its_transaction() {
+        let path = temp_db("failed-commit");
+        let mut corpus = Corpus::open(&path).unwrap();
+        // A deferred foreign-key violation fails COMMIT itself and, unlike most
+        // commit failures, leaves the transaction open.
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE fkp (id INTEGER PRIMARY KEY);
+                 CREATE TABLE fkc (pid INTEGER REFERENCES fkp(id) DEFERRABLE INITIALLY DEFERRED);
+                 CREATE TRIGGER boom AFTER INSERT ON observed_iris WHEN NEW.canonical LIKE '%boom%'
+                 BEGIN INSERT INTO fkc VALUES (999); END;",
+            )
+            .unwrap();
+
+        let err = corpus.observe("https://x.com/boom/1").unwrap_err();
+        let cause = std::error::Error::source(&err).unwrap().to_string();
+        assert!(cause.contains("FOREIGN KEY"), "{cause}");
+
+        corpus
+            .observe("https://x.com/fine/2")
+            .expect("an observation after the failed commit");
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch("BEGIN IMMEDIATE; ROLLBACK;")
+            .expect("the failed commit kept the write lock");
+        assert_eq!(corpus.observed_iri_count().unwrap(), 1);
     }
 
     #[test]
