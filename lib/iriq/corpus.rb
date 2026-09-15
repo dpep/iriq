@@ -54,6 +54,10 @@ module Iriq
         unless HOST_STRATEGIES.include?(host_strategy)
 
       @classifier    = classifier
+      # Stored activations layer onto the base; @activations is the set
+      # @classifier was built from.
+      @base_classifier = classifier
+      @activations     = []
       @host_strategy = host_strategy
       @storage       = storage || Storage::Memory.new(
         classifier: classifier,
@@ -151,29 +155,25 @@ module Iriq
       strategies.flat_map { |s| s.propose(@storage, **opts) }
     end
 
-    # Promote a RecognizerProposal into a live Recognizer for this corpus.
-    #
-    # Mechanics:
-    #   1. Synthesize a SynthesizedRecognizer from the proposal's prefix.
-    #   2. Switch to a per-corpus classifier (if we were sharing the
-    #      module-level DEFAULT) so activation doesn't leak to other
-    #      corpora using the same default singleton.
-    #   3. Register the Recognizer on the classifier — the ensemble
-    #      picks it up on the next classify() call.
-    #   4. Persist the activation in storage so reopens re-apply it.
-    #   5. Reinfer so existing observations get re-classified through
-    #      the new Recognizer.
+    # Promote a RecognizerProposal into a live Recognizer for this corpus:
+    # store the activation, then reinfer existing observations through it.
+    # Both commit in one transaction — a failure leaves neither behind, in
+    # storage or in this corpus's classifier.
     #
     # Returns the synthesized Recognizer.
     def activate_proposal(proposal)
       recognizer = SynthesizedRecognizer.from_proposal(proposal)
-      ensure_per_corpus_classifier!
-      @classifier.register_recognizer(recognizer)
-      if @storage.respond_to?(:record_activated_recognizer)
+      previous = nil
+      batch do
+        previous = [@classifier, @activations]
         @storage.record_activated_recognizer(recognizer.to_dump)
+        reapply_activated_recognizers!
+        reinfer
       end
-      reinfer
+      previous = nil
       recognizer
+    ensure
+      @classifier, @activations = previous if previous
     end
 
     # Convenience: activate every proposal whose confidence clears the
@@ -383,25 +383,23 @@ module Iriq
 
     private
 
-    # If we're still sharing the module-level DEFAULT classifier, switch
-    # to our own copy so register_recognizer doesn't leak into other
-    # corpora using the same default singleton.
-    def ensure_per_corpus_classifier!
-      return if @classifier != SegmentClassifier::DEFAULT
-
-      @classifier = SegmentClassifier.new
-    end
-
-    # On Corpus.open, walk the stored activations and register each one
-    # on this corpus's classifier. Switches to a per-corpus classifier
-    # if any activations exist.
+    # The classifier is a function of the stored activations: the base
+    # classifier when there are none, otherwise a private copy of it holding
+    # exactly the stored set (so nothing leaks into a shared DEFAULT). Rebuilt
+    # only when the set changed, so the classifier keeps its cache.
     def reapply_activated_recognizers!
-      return if @storage.activated_recognizer_count.zero?
+      stored = []
+      @storage.each_activated_recognizer { |dump| stored << dump }
+      return if stored == @activations
 
-      ensure_per_corpus_classifier!
-      @storage.each_activated_recognizer do |dump|
-        @classifier.register_recognizer(SynthesizedRecognizer.from_dump(dump))
+      @classifier = if stored.empty?
+        @base_classifier
+      else
+        @base_classifier.dup.tap do |c|
+          stored.each { |dump| c.register_recognizer(SynthesizedRecognizer.from_dump(dump)) }
+        end
       end
+      @activations = stored
     end
 
     def coerce(input)

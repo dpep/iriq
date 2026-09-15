@@ -18,7 +18,7 @@ describe "Recognizer auto-activation" do
 
       expect(recognizer).to be_a(Iriq::SynthesizedRecognizer)
       expect(recognizer.prefix).to eq("ghp_")
-      expect(corpus.classifier.recognizers.last).to eq(recognizer)
+      expect(corpus.classifier.recognizers.last.to_dump).to eq(recognizer.to_dump)
     end
 
     it "doesn't leak activation into the module-level DEFAULT classifier" do
@@ -66,6 +66,28 @@ describe "Recognizer auto-activation" do
         expect(c2.classifier.recognizers.map { |r| r.respond_to?(:prefix) ? r.prefix : nil }).to include("ghp_")
         expect(c2.classifier.classify("ghp_xyzzy123")).to eq(:ghp)
         c2.close
+      end
+    end
+
+    # The activation row and the reinfer commit together: a stored activation
+    # always has views classified through it.
+    it "stores nothing and keeps the old classifier when the reinfer fails" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "corpus.db")
+        corpus = Iriq::Corpus.open(path)
+        25.times { |i| corpus.observe("https://api.github.com/auth/ghp_aaaa#{i.to_s.rjust(4, '0')}xyzzy") }
+        proposal = corpus.propose_recognizers.first
+        before = corpus.stats_for("api.github.com", "/auth").type_counts
+        SQLite3::Database.new(path) do |db|
+          db.execute("CREATE TRIGGER boom BEFORE INSERT ON host_counts BEGIN SELECT RAISE(ABORT, 'boom'); END")
+        end
+
+        expect { corpus.activate_proposal(proposal) }.to raise_error(Iriq::CorpusError, /boom/)
+
+        expect(corpus.activated_recognizer_count).to eq(0)
+        expect(corpus.classifier.classify("ghp_abcdef123")).not_to eq(:ghp)
+        expect(corpus.stats_for("api.github.com", "/auth").type_counts).to eq(before)
+        corpus.close
       end
     end
   end
