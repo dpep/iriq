@@ -334,20 +334,26 @@ impl Corpus {
     }
 
     /// Run `f` as one backend transaction. On SQLite it commits when `f`
-    /// returns `Ok` and rolls back when `f` returns `Err`; Memory and JSON
-    /// corpora apply each write as it happens.
+    /// returns `Ok`, and rolls back when `f` returns `Err` or panics (the
+    /// panic then continues); Memory and JSON corpora apply each write as it
+    /// happens.
     pub fn batch<T>(&mut self, f: impl FnOnce(&mut Corpus) -> Result<T>) -> Result<T> {
         self.storage.batch_begin()?;
-        match f(self) {
-            Ok(value) => {
+        // Unwind safety: the rollback below is what restores consistency.
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self))) {
+            Ok(Ok(value)) => {
                 self.storage.batch_commit()?;
                 Ok(value)
             }
-            Err(e) => {
-                // `e` is the failure worth reporting; SQLite may already have
-                // ended the transaction, making ROLLBACK itself fail.
+            // The original failure is the one worth reporting; SQLite may
+            // already have ended the transaction, making ROLLBACK itself fail.
+            Ok(Err(e)) => {
                 let _ = self.storage.batch_rollback();
                 Err(e)
+            }
+            Err(panic) => {
+                let _ = self.storage.batch_rollback();
+                std::panic::resume_unwind(panic)
             }
         }
     }

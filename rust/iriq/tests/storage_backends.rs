@@ -122,6 +122,33 @@ fn sqlite_round_trips_query_param_stats() {
 
 #[test]
 #[cfg(feature = "sqlite")]
+fn a_panic_inside_batch_rolls_back_and_later_writes_persist() {
+    let p = temp_path("batch_panic.db");
+    cleanup(&p);
+
+    let mut c = Corpus::open(&p).unwrap();
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = c.batch(|c| -> iriq::Result<()> {
+            c.observe("https://x.com/u/0")?;
+            panic!("bug inside a batch")
+        });
+    }));
+    assert!(panicked.is_err());
+
+    for u in ["https://x.com/u/1", "https://x.com/u/2"] {
+        c.observe(u).unwrap();
+    }
+    c.batch(|c| c.observe("https://x.com/u/3"))
+        .expect("a later batch still works");
+    drop(c);
+
+    // u/0 was rolled back with the panicking batch; everything after persisted.
+    assert_eq!(Corpus::open(&p).unwrap().observed_iri_count(), 3);
+    cleanup(&p);
+}
+
+#[test]
+#[cfg(feature = "sqlite")]
 fn sqlite_resave_to_same_path_is_idempotent() {
     let p = temp_path("resave.db");
     cleanup(&p);

@@ -1,6 +1,10 @@
 // SQLite-backed corpus storage. Mirrors Ruby's storage/sqlite.rb schema
 // byte-for-byte so a corpus created by either runtime opens cleanly in
 // the other.
+//
+// Lock discipline: writers take `&mut self` and reach the connection through
+// `Mutex::get_mut`, so they never lock; readers lock through `conn()` and
+// never call back into user code while holding the guard.
 
 use crate::classifier::{segment_type_from_name, SegmentType, DEFAULT_CLASSIFIER};
 use crate::cluster::{Cluster, MAX_CLUSTER_EXAMPLES};
@@ -15,7 +19,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 const SCHEMA: &str = include_str!("./sqlite_schema.sql");
 const SCHEMA_VERSION: i64 = 4;
@@ -90,6 +94,12 @@ impl SqliteStorage {
             path: path.to_path_buf(),
         })
     }
+
+    /// The connection for a read. Poison is ignored: SQLite, not the Rust
+    /// guard, owns the data's consistency.
+    fn conn(&self) -> MutexGuard<'_, Connection> {
+        self.conn.lock().unwrap_or_else(PoisonError::into_inner)
+    }
 }
 
 /// Converting a rollback-mode database to WAL takes an exclusive lock, and
@@ -124,7 +134,7 @@ impl Storage for SqliteStorage {
     }
 
     fn increment_host(&mut self, host: &str) -> Result<()> {
-        let c = self.conn.lock().unwrap();
+        let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         c.prepare_cached(
             "INSERT INTO host_counts (host, count) VALUES (?, 1) ON CONFLICT(host) DO UPDATE SET count = count + 1",
         )
@@ -133,7 +143,7 @@ impl Storage for SqliteStorage {
         Ok(())
     }
     fn increment_path_length(&mut self, length: usize) -> Result<()> {
-        let c = self.conn.lock().unwrap();
+        let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         c.prepare_cached(
             "INSERT INTO path_length_counts (length, count) VALUES (?, 1) ON CONFLICT(length) DO UPDATE SET count = count + 1",
         )
@@ -142,7 +152,7 @@ impl Storage for SqliteStorage {
         Ok(())
     }
     fn increment_raw_shape(&mut self, shape: &str) -> Result<()> {
-        let c = self.conn.lock().unwrap();
+        let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         c.prepare_cached(
             "INSERT INTO raw_shape_counts (shape, count) VALUES (?, 1) ON CONFLICT(shape) DO UPDATE SET count = count + 1",
         )
@@ -151,7 +161,7 @@ impl Storage for SqliteStorage {
         Ok(())
     }
     fn increment_fingerprint(&mut self, shape: &str) -> Result<()> {
-        let c = self.conn.lock().unwrap();
+        let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         c.prepare_cached(
             "INSERT INTO fingerprint_counts (shape, count) VALUES (?, 1) ON CONFLICT(shape) DO UPDATE SET count = count + 1",
         )
@@ -161,7 +171,7 @@ impl Storage for SqliteStorage {
     }
 
     fn observe_position(&mut self, pos: &Position, value: &str, t: SegmentType) -> Result<()> {
-        let c = self.conn.lock().unwrap();
+        let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         let err = |e| Error::sqlite(&self.path, e);
         let scope = pos.scope.as_str();
         c.prepare_cached(
@@ -210,7 +220,7 @@ impl Storage for SqliteStorage {
         shape: &str,
         iri: &Identifier,
     ) -> Result<()> {
-        let c = self.conn.lock().unwrap();
+        let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         let err = |e| Error::sqlite(&self.path, e);
         c.prepare_cached(
             "INSERT INTO clusters (key, host, scheme, shape, count, ord) \
@@ -294,10 +304,10 @@ impl Storage for SqliteStorage {
     }
 
     fn host_counts(&self) -> HashMap<String, usize> {
-        counts_hash(&self.conn.lock().unwrap(), "host_counts", "host")
+        counts_hash(&self.conn(), "host_counts", "host")
     }
     fn path_length_counts(&self) -> HashMap<usize, usize> {
-        let c = self.conn.lock().unwrap();
+        let c = self.conn();
         let mut out = HashMap::new();
         let mut stmt = c
             .prepare("SELECT length, count FROM path_length_counts")
@@ -311,14 +321,14 @@ impl Storage for SqliteStorage {
         out
     }
     fn raw_shape_counts(&self) -> HashMap<String, usize> {
-        counts_hash(&self.conn.lock().unwrap(), "raw_shape_counts", "shape")
+        counts_hash(&self.conn(), "raw_shape_counts", "shape")
     }
     fn fingerprint_counts(&self) -> HashMap<String, usize> {
-        counts_hash(&self.conn.lock().unwrap(), "fingerprint_counts", "shape")
+        counts_hash(&self.conn(), "fingerprint_counts", "shape")
     }
 
     fn position_stats_for(&self, pos: &Position) -> Option<PositionStats> {
-        let c = self.conn.lock().unwrap();
+        let c = self.conn();
         let total: i64 = c
             .query_row(
                 "SELECT total FROM position_stats WHERE host = ? AND scope = ? AND locator = ?",
@@ -395,7 +405,7 @@ impl Storage for SqliteStorage {
 
     fn each_position_stats(&self, f: &mut dyn FnMut(&Position, &PositionStats)) {
         let keys = {
-            let c = self.conn.lock().unwrap();
+            let c = self.conn();
             let mut stmt = c
                 .prepare("SELECT host, scope, locator FROM position_stats ORDER BY ROWID")
                 .unwrap();
@@ -430,7 +440,7 @@ impl Storage for SqliteStorage {
 
     fn clusters(&self) -> Vec<Cluster> {
         let keys: Vec<String> = {
-            let c = self.conn.lock().unwrap();
+            let c = self.conn();
             let mut stmt = c.prepare("SELECT key FROM clusters ORDER BY ord").unwrap();
             let rows = stmt.query_map([], |r| r.get::<_, String>(0)).unwrap();
             rows.flatten().collect()
@@ -438,7 +448,7 @@ impl Storage for SqliteStorage {
         keys.iter().filter_map(|k| self.cluster_for(k)).collect()
     }
     fn cluster_for(&self, key: &str) -> Option<Cluster> {
-        let c = self.conn.lock().unwrap();
+        let c = self.conn();
         let row: (String, String, String, i64) = c
             .query_row(
                 "SELECT host, scheme, shape, count FROM clusters WHERE key = ?",
@@ -582,39 +592,42 @@ impl Storage for SqliteStorage {
         Some(cluster)
     }
     fn cluster_size(&self) -> usize {
-        let c = self.conn.lock().unwrap();
-        let n: i64 = c
+        let n: i64 = self
+            .conn()
             .query_row("SELECT COUNT(*) FROM clusters", [], |r| r.get(0))
             .unwrap_or(0);
         n as usize
     }
 
     fn record_observation(&mut self, canonical: &str) -> Result<()> {
-        let c = self.conn.lock().unwrap();
+        let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         c.prepare_cached("INSERT INTO observed_iris (canonical) VALUES (?)")
             .and_then(|mut s| s.execute(params![canonical]))
             .map_err(|e| Error::sqlite(&self.path, e))?;
         Ok(())
     }
     fn each_observed_iri(&self, f: &mut dyn FnMut(&str)) {
-        let c = self.conn.lock().unwrap();
-        let mut stmt = c
-            .prepare("SELECT canonical FROM observed_iris ORDER BY id")
-            .unwrap();
-        let rows = stmt.query_map([], |r| r.get::<_, String>(0)).unwrap();
-        for r in rows.flatten() {
-            f(&r);
+        let iris: Vec<String> = {
+            let c = self.conn();
+            let mut stmt = c
+                .prepare("SELECT canonical FROM observed_iris ORDER BY id")
+                .unwrap();
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0)).unwrap();
+            rows.flatten().collect()
+        };
+        for iri in &iris {
+            f(iri);
         }
     }
     fn observed_iri_count(&self) -> usize {
-        let c = self.conn.lock().unwrap();
-        let n: i64 = c
+        let n: i64 = self
+            .conn()
             .query_row("SELECT COUNT(*) FROM observed_iris", [], |r| r.get(0))
             .unwrap_or(0);
         n as usize
     }
     fn clear_materialized_views(&mut self) -> Result<()> {
-        let c = self.conn.lock().unwrap();
+        let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         for q in [
             "DELETE FROM host_counts",
             "DELETE FROM path_length_counts",
@@ -635,7 +648,6 @@ impl Storage for SqliteStorage {
         Ok(())
     }
     fn record_activated_recognizer(&mut self, dump: Value) -> Result<()> {
-        let c = self.conn.lock().unwrap();
         let prefix = dump
             .get("prefix")
             .and_then(|v| v.as_str())
@@ -650,6 +662,7 @@ impl Storage for SqliteStorage {
             .get("specificity")
             .and_then(|v| v.as_f64())
             .unwrap_or(1.0);
+        let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         c.execute(
             "INSERT INTO activated_recognizers (prefix, type, specificity) VALUES (?, ?, ?) \
              ON CONFLICT(prefix) DO UPDATE SET type = excluded.type, specificity = excluded.specificity",
@@ -659,34 +672,32 @@ impl Storage for SqliteStorage {
         Ok(())
     }
     fn each_activated_recognizer(&self, f: &mut dyn FnMut(&Value)) {
-        let c = self.conn.lock().unwrap();
-        let mut stmt = c
-            .prepare("SELECT prefix, type, specificity FROM activated_recognizers ORDER BY prefix")
-            .unwrap();
-        let rows = stmt
-            .query_map([], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, f64>(2)?,
-                ))
-            })
-            .unwrap();
-        for r in rows.flatten() {
+        let rows: Vec<(String, String, f64)> = {
+            let c = self.conn();
+            let mut stmt = c
+                .prepare(
+                    "SELECT prefix, type, specificity FROM activated_recognizers ORDER BY prefix",
+                )
+                .unwrap();
+            let rows = stmt
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .unwrap();
+            rows.flatten().collect()
+        };
+        for (prefix, ty, specificity) in rows {
             let mut m = Map::new();
-            m.insert("prefix".to_string(), Value::String(r.0));
-            m.insert("type".to_string(), Value::String(r.1));
+            m.insert("prefix".to_string(), Value::String(prefix));
+            m.insert("type".to_string(), Value::String(ty));
             m.insert(
                 "specificity".to_string(),
-                Value::Number(serde_json::Number::from_f64(r.2).unwrap()),
+                Value::Number(serde_json::Number::from_f64(specificity).unwrap()),
             );
-            let v = Value::Object(m);
-            f(&v);
+            f(&Value::Object(m));
         }
     }
     fn activated_recognizer_count(&self) -> usize {
-        let c = self.conn.lock().unwrap();
-        let n: i64 = c
+        let n: i64 = self
+            .conn()
             .query_row("SELECT COUNT(*) FROM activated_recognizers", [], |r| {
                 r.get(0)
             })
@@ -695,17 +706,17 @@ impl Storage for SqliteStorage {
     }
 
     fn batch_begin(&mut self) -> Result<()> {
-        let c = self.conn.lock().unwrap();
+        let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         c.execute_batch("BEGIN IMMEDIATE")
             .map_err(|e| Error::sqlite(&self.path, e))
     }
     fn batch_commit(&mut self) -> Result<()> {
-        let c = self.conn.lock().unwrap();
+        let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         c.execute_batch("COMMIT")
             .map_err(|e| Error::sqlite(&self.path, e))
     }
     fn batch_rollback(&mut self) -> Result<()> {
-        let c = self.conn.lock().unwrap();
+        let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         c.execute_batch("ROLLBACK")
             .map_err(|e| Error::sqlite(&self.path, e))
     }
@@ -714,7 +725,7 @@ impl Storage for SqliteStorage {
         Ok(())
     }
     fn close(&mut self) -> Result<()> {
-        let c = self.conn.lock().unwrap();
+        let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         // Checkpointing only compacts the WAL; committed data is already safe.
         let _ = c.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
         Ok(())
@@ -785,14 +796,53 @@ fn mirror_into_memory(src: &SqliteStorage, dst: &mut MemoryStorage) -> Result<()
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::Corpus;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::time::Duration;
+
+    fn temp_db(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("iriq-sqlite-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("c.db")
+    }
+
+    #[test]
+    fn a_panicking_reader_callback_leaves_the_storage_usable() {
+        let mut s = SqliteStorage::open(&temp_db("poison"), 0).unwrap();
+        s.record_observation("https://x.com/1").unwrap();
+        let panicked = catch_unwind(AssertUnwindSafe(|| {
+            s.each_observed_iri(&mut |_| panic!("bug in a callback"));
+        }));
+        assert!(panicked.is_err());
+        s.record_observation("https://x.com/2").unwrap();
+        assert_eq!(s.observed_iri_count(), 2);
+    }
+
+    #[test]
+    fn reader_callbacks_may_reenter_the_storage() {
+        let path = temp_db("reenter");
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut s = SqliteStorage::open(&path, 0).unwrap();
+            s.record_observation("https://x.com/1").unwrap();
+            s.record_activated_recognizer(serde_json::json!({"prefix": "tok_", "type": "tok"}))
+                .unwrap();
+            let mut seen = 0;
+            s.each_observed_iri(&mut |_| seen += s.observed_iri_count());
+            s.each_activated_recognizer(&mut |_| seen += s.activated_recognizer_count());
+            tx.send(seen).unwrap();
+        });
+        let seen = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("a re-entrant read deadlocked");
+        assert_eq!(seen, 2);
+    }
 
     #[test]
     fn a_write_failing_late_in_an_observation_is_reported() {
-        let dir = std::env::temp_dir().join(format!("iriq-sqlite-late-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("c.db");
+        let path = temp_db("late");
         let mut corpus = Corpus::open(&path).unwrap();
         // The source-log insert is the last write an observation makes.
         rusqlite::Connection::open(&path)
@@ -807,6 +857,5 @@ mod tests {
         let cause = std::error::Error::source(&err).unwrap().to_string();
         assert!(cause.contains("simulated write failure"), "{cause}");
         assert_eq!(corpus.observed_iri_count(), 0);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }
