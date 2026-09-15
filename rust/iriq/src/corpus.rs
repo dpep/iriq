@@ -167,18 +167,21 @@ impl Corpus {
     }
 
     /// Activate a proposal as a recognizer on this corpus, then reinfer.
-    /// Activating one the corpus already holds changes nothing.
+    /// Activating one the corpus already holds changes nothing. On SQLite
+    /// the activation and its reinfer commit together or not at all.
     pub fn activate_proposal(&mut self, p: &RecognizerProposal) -> Result<()> {
         // The proposal suggests a type name (e.g. "ghp"). Unknown names
         // become dynamic Custom types, matching Ruby's symbol semantics.
         let ty = segment_type_from_name(&p.suggested_type);
         let dump = SynthesizedRecognizer::from_prefix(p.prefix.clone(), ty).dump();
-        if self.has_activated(&dump)? {
-            return Ok(());
-        }
-        self.storage.record_activated_recognizer(dump)?;
-        self.reapply_activated_recognizers()?;
-        self.reinfer()
+        self.batch(|c| {
+            if c.has_activated(&dump)? {
+                return Ok(());
+            }
+            c.storage.record_activated_recognizer(dump)?;
+            c.reapply_activated_recognizers()?;
+            c.reinfer()
+        })
     }
 
     fn has_activated(&self, dump: &serde_json::Value) -> Result<bool> {
@@ -386,14 +389,21 @@ impl Corpus {
             // The original failure is the one worth reporting; SQLite may
             // already have ended the transaction, making ROLLBACK itself fail.
             Ok(Err(e)) => {
-                let _ = self.storage.batch_rollback();
+                self.rollback_batch();
                 Err(e)
             }
             Err(panic) => {
-                let _ = self.storage.batch_rollback();
+                self.rollback_batch();
                 std::panic::resume_unwind(panic)
             }
         }
+    }
+
+    /// A rollback can take back an activation `f` recorded, so the classifier
+    /// is rebuilt from what storage still holds.
+    fn rollback_batch(&mut self) {
+        let _ = self.storage.batch_rollback();
+        let _ = self.reapply_activated_recognizers();
     }
 
     /// The params of the cluster `input` falls into; empty when that cluster

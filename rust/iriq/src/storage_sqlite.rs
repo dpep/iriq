@@ -997,6 +997,48 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_activation_leaves_no_activation_behind() {
+        let path = temp_db("failed-activation");
+        let mut corpus = Corpus::open(&path).unwrap();
+        for i in 0..25 {
+            corpus
+                .observe(&format!("https://api.github.com/auth/ghp_aaaa{i:04}xyzzy"))
+                .unwrap();
+        }
+        let proposal = corpus
+            .propose_recognizers(crate::ProposalOptions::default())
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("a ghp_ proposal");
+        let conn = Connection::open(&path).unwrap();
+        // Reinfer's first write clears the views.
+        conn.execute_batch(
+            "CREATE TRIGGER no_clear BEFORE DELETE ON clusters \
+             BEGIN SELECT RAISE(ABORT, 'simulated reinfer failure'); END;",
+        )
+        .unwrap();
+        let token = "https://api.github.com/auth/ghp_zzzz9999xyzzy";
+
+        let err = corpus.activate_proposal(&proposal).unwrap_err();
+        let cause = std::error::Error::source(&err).unwrap().to_string();
+        assert!(cause.contains("simulated reinfer failure"), "{cause}");
+        assert_eq!(corpus.activated_recognizer_count().unwrap(), 0);
+        assert!(!corpus.normalize(token).unwrap().contains("{ghp}"));
+
+        conn.execute_batch("DROP TRIGGER no_clear").unwrap();
+        corpus.activate_proposal(&proposal).unwrap();
+        assert_eq!(corpus.activated_recognizer_count().unwrap(), 1);
+        let keys: Vec<String> = corpus
+            .clusters()
+            .unwrap()
+            .into_iter()
+            .map(|c| c.key)
+            .collect();
+        assert_eq!(keys, ["https://api.github.com/auth/{ghp}"]);
+    }
+
+    #[test]
     fn a_failed_commit_ends_its_transaction() {
         let path = temp_db("failed-commit");
         let mut corpus = Corpus::open(&path).unwrap();
