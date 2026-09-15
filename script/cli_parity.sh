@@ -444,6 +444,45 @@ corpus_pair() {
 corpus_pair "JSON storage"   ".json"
 corpus_pair "SQLite storage" ".db"
 
+# A writer gives up once another process has held the corpus lock for the
+# whole wait, and says so. Every writer waits at once against one holder.
+lock_path="$corpus_dir/locked.db"
+lock_out="$corpus_dir/locked"
+echo -n "$corpus_stream" | "$RUST_BIN" --corpus "$lock_path" > /dev/null
+rm -f "$lock_out.held"
+(cd "$REPO_ROOT" && exec bundle exec --gemfile="$REPO_ROOT/Gemfile" ruby -rsqlite3 -e '
+  db = SQLite3::Database.new(ARGV[0])
+  db.execute("BEGIN IMMEDIATE")
+  File.write(ARGV[1], "")
+  sleep 60
+' "$lock_path" "$lock_out.held") &
+lock_holder=$!
+until [[ -f "$lock_out.held" ]]; do sleep 0.05; done
+(cd "$REPO_ROOT" && $RUBY -n --corpus "$lock_path" "https://foo.com/users/9") > "$lock_out.ruby" 2>&1 &
+lock_ruby=$!
+(cd "$REPO_ROOT" && $RUBY -n --json --corpus "$lock_path" "https://foo.com/users/9") > "$lock_out.ruby.json" 2>&1 &
+lock_ruby_json=$!
+"$RUST_BIN" -n --corpus "$lock_path" "https://foo.com/users/9" > "$lock_out.rust" 2>&1 &
+lock_rust=$!
+"$RUST_BIN" -n --json --corpus "$lock_path" "https://foo.com/users/9" > "$lock_out.rust.json" 2>&1 &
+lock_rust_json=$!
+lock_rc=0; wait "$lock_ruby" || lock_rc=$?; echo "exit $lock_rc" >> "$lock_out.ruby"
+lock_rc=0; wait "$lock_ruby_json" || lock_rc=$?; echo "exit $lock_rc" >> "$lock_out.ruby.json"
+lock_rc=0; wait "$lock_rust" || lock_rc=$?; echo "exit $lock_rc" >> "$lock_out.rust"
+lock_rc=0; wait "$lock_rust_json" || lock_rc=$?; echo "exit $lock_rc" >> "$lock_out.rust.json"
+kill "$lock_holder" 2>/dev/null || true
+wait "$lock_holder" 2>/dev/null || true
+for lock_variant in "" ".json"; do
+  if cmp -s "$lock_out.ruby$lock_variant" "$lock_out.rust$lock_variant"; then
+    pass_count=$((pass_count + 1))
+  else
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH: lock held for the whole wait ($lock_variant)"
+    diff "$lock_out.ruby$lock_variant" "$lock_out.rust$lock_variant" | sed 's/^/    /' || true
+  fi
+done
+
 # --reset parity. Seed a corpus, reset it, and compare the stderr notice.
 # Each side seeds + resets the same path in turn so the message (which
 # embeds the path) is identical. --json does not change --reset output.

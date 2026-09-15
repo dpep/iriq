@@ -19,10 +19,13 @@ module Iriq
     #   param_stats(cluster_key, name)                 # one param, without the cluster
     #   each_position_stats { |position, stats| ... }
     #   each_observed_iri { |canonical| ... }
-    #   clear_materialized_views                       # for reinfer
+    #   each_observed_iri_since(mark) { |canonical| ... } # → mark of the last
+    #   clear_materialized_views
+    #   begin_rebuild / install_rebuild / discard_rebuild # for reinfer
     #   clusters / cluster_size
     #
     #   transaction { ... }    # backends may batch within
+    #   turn_over?             # a long batch should commit and let others in
     #   flush                  # commit pending writes (no-op for Memory)
     #   close                  # release resources
     class Memory
@@ -60,6 +63,11 @@ module Iriq
       # Yields false: nothing else writes an in-memory corpus.
       def batch
         yield false
+      end
+
+      # Nothing else waits on an in-memory corpus.
+      def turn_over?
+        false
       end
 
       def flush;  end
@@ -111,6 +119,13 @@ module Iriq
         @observed_iris.each(&block)
       end
 
+      # The observations logged after `mark` (0 for all), in order; returns
+      # the mark of the last one.
+      def each_observed_iri_since(mark, &block)
+        @observed_iris.drop(mark).each(&block)
+        [mark, @observed_iris.size].max
+      end
+
       def observed_iri_count
         @observed_iris.size
       end
@@ -140,6 +155,14 @@ module Iriq
         @position_stats     = {}
         @clusters           = {}
       end
+
+      # Nothing else reads an in-memory corpus mid-rebuild: rebuild in place.
+      def begin_rebuild
+        clear_materialized_views
+      end
+
+      def install_rebuild; end
+      def discard_rebuild; end
 
       # --- Reads ------------------------------------------------------------
 

@@ -53,6 +53,53 @@ describe "SQLite corpus concurrency" do
     end
   end
 
+  # A long ingest commits a turn at a time, so another process's writer gets
+  # the lock between turns instead of waiting the ingest out.
+  it "lets a writer commit between the turns of a long ingest" do
+    require "sqlite3"
+    require "iriq/storage/sqlite"
+    # Short turns, so a small ingest takes many.
+    stub_const("Iriq::Storage::Sqlite::LOCK_TURN", 0.05)
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "corpus.db")
+      Iriq::Corpus.open(path).close
+      urls = Array.new(5000) { |i| "https://ingest.example.com/items/#{i}?page=#{i % 7}" }
+
+      ingest = fork do
+        corpus = Iriq::Corpus.open(path)
+        corpus.observe_all(urls)
+        corpus.close
+        exit!(0)
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        warn "ingest crashed: #{e.class}: #{e.message}"
+        exit!(1)
+      end
+      status  = nil
+      running = -> { (status ||= Process.wait2(ingest, Process::WNOHANG)&.last).nil? }
+      reader  = SQLite3::Database.new(path)
+      # Handshake: the ingest has committed its first turn.
+      sleep 0.01 while running.call && reader.get_first_value("SELECT COUNT(*) FROM observed_iris").zero?
+
+      writer = Iriq::Corpus.open(path)
+      during = 3.times.count do |i|
+        writer.observe("https://writer.example.com/tail/#{i}")
+        running.call
+      end
+      writer.close
+      reader.close
+      status ||= Process.wait2(ingest).last
+
+      expect(status).to be_success
+      expect(during).to eq(3)
+    end
+  end
+
+  it "says so when another process holds the lock for the whole wait" do
+    require "iriq/storage/sqlite"
+    error = Iriq::Storage::Sqlite.corpus_error("/x/c.db", SQLite3::BusyException.new("database is locked"))
+    expect(error.message).to eq("corpus /x/c.db: another process held the corpus lock for over 10s")
+  end
+
   # Each insert into a capped position must count what the other writers
   # committed, so the position ends holding exactly `cap` values.
   it "keeps a position at its value cap while CLI writers interleave" do

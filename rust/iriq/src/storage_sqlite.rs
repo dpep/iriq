@@ -18,12 +18,42 @@ use crate::storage_json::load_counts;
 use crate::storage_memory::MemoryStorage;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{Map, Value};
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
 const SCHEMA: &str = include_str!("./sqlite_schema.sql");
 const SCHEMA_VERSION: i64 = 4;
+
+// Processes share a corpus's write lock by one rule: a writer waits up to
+// LOCK_WAIT for its turn, and none keeps the lock longer than a turn of work.
+const LOCK_WAIT: Duration = Duration::from_secs(10);
+const LOCK_TURN: Duration = Duration::from_secs(1);
+// How long a writer that used a whole turn leaves the lock free: many of a
+// waiter's BUSY_POLL retries, and a fair chance at an older iriq's 100ms ones.
+const TURN_PAUSE: Duration = Duration::from_millis(20);
+// SQLite's own busy_timeout backs off to 100ms between retries, which would
+// mostly miss a TURN_PAUSE.
+const BUSY_POLL: Duration = Duration::from_millis(1);
+
+/// Every table derived from the observation log.
+const VIEW_TABLES: [&str; 13] = [
+    "host_counts",
+    "path_length_counts",
+    "raw_shape_counts",
+    "fingerprint_counts",
+    "position_stats",
+    "position_values",
+    "position_types",
+    "clusters",
+    "cluster_examples",
+    "cluster_segments",
+    "cluster_params",
+    "cluster_param_values",
+    "cluster_param_types",
+];
 
 pub struct SqliteStorage {
     conn: Mutex<Connection>,
@@ -38,6 +68,17 @@ pub struct SqliteStorage {
     /// `PRAGMA data_version` as of this connection's last batch; it changes
     /// when any other connection commits.
     data_version: Option<i64>,
+    /// When the transaction in progress took the write lock.
+    locked_at: Option<Instant>,
+    /// This connection used a whole turn, so it leaves the lock free until then.
+    next_turn: Option<Instant>,
+    /// A rebuild is in progress: TEMP tables named like the views shadow them
+    /// for this connection alone, so every view statement writes the rebuild.
+    rebuilding: bool,
+    /// The rebuild's own transaction, which touches only the TEMP tables. It
+    /// ends before a log read, so the read sees the latest log, and before
+    /// the write lock is taken.
+    rebuild_txn: bool,
 }
 
 /// Somewhere the corpus keeps at most `max_values` distinct values.
@@ -49,11 +90,10 @@ enum ValueSlot {
 
 impl SqliteStorage {
     pub fn open(path: &Path, max_values: usize) -> Result<Self> {
-        let rs_err = |e| Error::sqlite(path, e);
+        let rs_err = |e| corpus_error(path, e);
         let conn = Connection::open(path).map_err(|e| rs_err(without_path(e, path)))?;
-        // PRAGMAs first (busy_timeout before journal_mode).
-        conn.execute_batch("PRAGMA busy_timeout = 30000;")
-            .map_err(rs_err)?;
+        // Before any PRAGMA: journal_mode itself can wait on a lock.
+        conn.busy_handler(Some(wait_for_lock)).map_err(rs_err)?;
         // Before anything writes: a newer build's corpus must be left as it is.
         if let Some(stored) = stored_schema_version(&conn).map_err(rs_err)? {
             if stored > SCHEMA_VERSION {
@@ -124,7 +164,29 @@ impl SqliteStorage {
             depth: 0,
             value_counts: HashMap::new(),
             data_version: None,
+            locked_at: None,
+            next_turn: None,
+            rebuilding: false,
+            rebuild_txn: false,
         })
+    }
+
+    /// Whether remembered value counts can be trusted: under the write lock,
+    /// or while the views written are a rebuild nothing else writes.
+    fn counts_exact(&self) -> bool {
+        self.depth > 0 || self.rebuilding
+    }
+
+    /// Ends a turn that held the write lock; one that used a whole turn
+    /// leaves the lock free a moment before this connection takes it again.
+    fn end_turn(&mut self) {
+        if self
+            .locked_at
+            .take()
+            .is_some_and(|at| at.elapsed() >= LOCK_TURN)
+        {
+            self.next_turn = Some(Instant::now() + TURN_PAUSE);
+        }
     }
 
     /// The connection for a read. Poison is ignored: SQLite, not the Rust
@@ -135,7 +197,7 @@ impl SqliteStorage {
 
     /// Run a read, naming the corpus in any failure.
     fn read<T>(&self, f: impl FnOnce(&Connection) -> rusqlite::Result<T>) -> Result<T> {
-        f(&self.conn()).map_err(|e| Error::sqlite(&self.path, e))
+        f(&self.conn()).map_err(|e| corpus_error(&self.path, e))
     }
 
     fn position_stats_for(&self, pos: &Position) -> Result<Option<PositionStats>> {
@@ -221,23 +283,59 @@ fn stored_schema_version(conn: &Connection) -> rusqlite::Result<Option<i64>> {
 /// either this connection wins the conversion or another process already
 /// converted the file.
 fn enable_wal(conn: &Connection, path: &Path) -> Result<()> {
-    let mut attempts = 0;
+    let deadline = Instant::now() + LOCK_WAIT;
     loop {
         match conn.execute_batch("PRAGMA journal_mode = WAL;") {
             Ok(()) => return Ok(()),
             Err(rusqlite::Error::SqliteFailure(e, _))
-                if attempts < 100
+                if Instant::now() < deadline
                     && matches!(
                         e.code,
                         rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
                     ) =>
             {
-                attempts += 1;
-                std::thread::sleep(std::time::Duration::from_millis(10));
+                std::thread::sleep(Duration::from_millis(10));
             }
-            Err(e) => return Err(Error::sqlite(path, e)),
+            Err(e) => return Err(corpus_error(path, e)),
         }
     }
+}
+
+thread_local! {
+    static LOCK_DEADLINE: Cell<Instant> = Cell::new(Instant::now());
+}
+
+/// The busy handler: SQLite calls it while another connection holds a lock
+/// this one needs, counting retries from 0 for each wait.
+fn wait_for_lock(retries: i32) -> bool {
+    let now = Instant::now();
+    if retries == 0 {
+        LOCK_DEADLINE.set(now + LOCK_WAIT);
+    }
+    if now >= LOCK_DEADLINE.get() {
+        return false;
+    }
+    std::thread::sleep(BUSY_POLL);
+    true
+}
+
+/// A SQLite failure, naming the corpus. Busy only ever means the wait for
+/// another process's lock ran out, so it says that instead of SQLite's
+/// `database is locked`.
+fn corpus_error(path: &Path, e: rusqlite::Error) -> Error {
+    let e = match e {
+        rusqlite::Error::SqliteFailure(code, _)
+            if code.code == rusqlite::ErrorCode::DatabaseBusy =>
+        {
+            let held = format!(
+                "another process held the corpus lock for over {}s",
+                LOCK_WAIT.as_secs()
+            );
+            rusqlite::Error::SqliteFailure(code, Some(held))
+        }
+        e => e,
+    };
+    Error::sqlite(path, e)
 }
 
 impl Storage for SqliteStorage {
@@ -251,7 +349,7 @@ impl Storage for SqliteStorage {
             "INSERT INTO host_counts (host, count) VALUES (?, 1) ON CONFLICT(host) DO UPDATE SET count = count + 1",
         )
         .and_then(|mut s| s.execute(params![host]))
-        .map_err(|e| Error::sqlite(&self.path, e))?;
+        .map_err(|e| corpus_error(&self.path, e))?;
         Ok(())
     }
     fn increment_path_length(&mut self, length: usize) -> Result<()> {
@@ -260,7 +358,7 @@ impl Storage for SqliteStorage {
             "INSERT INTO path_length_counts (length, count) VALUES (?, 1) ON CONFLICT(length) DO UPDATE SET count = count + 1",
         )
         .and_then(|mut s| s.execute(params![length as i64]))
-        .map_err(|e| Error::sqlite(&self.path, e))?;
+        .map_err(|e| corpus_error(&self.path, e))?;
         Ok(())
     }
     fn increment_raw_shape(&mut self, shape: &str) -> Result<()> {
@@ -269,7 +367,7 @@ impl Storage for SqliteStorage {
             "INSERT INTO raw_shape_counts (shape, count) VALUES (?, 1) ON CONFLICT(shape) DO UPDATE SET count = count + 1",
         )
         .and_then(|mut s| s.execute(params![shape]))
-        .map_err(|e| Error::sqlite(&self.path, e))?;
+        .map_err(|e| corpus_error(&self.path, e))?;
         Ok(())
     }
     fn increment_fingerprint(&mut self, shape: &str) -> Result<()> {
@@ -278,13 +376,14 @@ impl Storage for SqliteStorage {
             "INSERT INTO fingerprint_counts (shape, count) VALUES (?, 1) ON CONFLICT(shape) DO UPDATE SET count = count + 1",
         )
         .and_then(|mut s| s.execute(params![shape]))
-        .map_err(|e| Error::sqlite(&self.path, e))?;
+        .map_err(|e| corpus_error(&self.path, e))?;
         Ok(())
     }
 
     fn observe_position(&mut self, pos: &Position, value: &str, t: SegmentType) -> Result<()> {
+        let counts_exact = self.counts_exact();
         let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
-        let err = |e| Error::sqlite(&self.path, e);
+        let err = |e| corpus_error(&self.path, e);
         let scope = pos.scope.as_str();
         c.prepare_cached(
             "INSERT INTO position_stats (host, scope, locator, total) VALUES (?, ?, ?, 1) \
@@ -306,7 +405,7 @@ impl Storage for SqliteStorage {
             .map_err(err)?;
         if updated == 0 {
             let slot = ValueSlot::Position(pos.clone());
-            let remembered = self.value_counts.get(&slot).filter(|_| self.depth > 0);
+            let remembered = self.value_counts.get(&slot).filter(|_| counts_exact);
             let mut card = match remembered {
                 Some(&n) => n,
                 None => c
@@ -328,7 +427,7 @@ impl Storage for SqliteStorage {
                 .map_err(err)?;
                 card += 1;
             }
-            if self.depth > 0 {
+            if counts_exact {
                 self.value_counts.insert(slot, card);
             }
         }
@@ -343,8 +442,9 @@ impl Storage for SqliteStorage {
         shape: &str,
         iri: &Identifier,
     ) -> Result<()> {
+        let counts_exact = self.counts_exact();
         let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
-        let err = |e| Error::sqlite(&self.path, e);
+        let err = |e| corpus_error(&self.path, e);
         // The next ord scans every cluster (ord has no index), so only a new
         // cluster pays for it; ON CONFLICT covers a writer that inserted it since.
         let bumped = c
@@ -420,7 +520,7 @@ impl Storage for SqliteStorage {
                     cluster_key: key.to_string(),
                     name: name.to_string(),
                 };
-                let remembered = self.value_counts.get(&slot).filter(|_| self.depth > 0);
+                let remembered = self.value_counts.get(&slot).filter(|_| counts_exact);
                 let mut card = match remembered {
                     Some(&n) => n,
                     None => c
@@ -440,7 +540,7 @@ impl Storage for SqliteStorage {
                     .map_err(err)?;
                     card += 1;
                 }
-                if self.depth > 0 {
+                if counts_exact {
                     self.value_counts.insert(slot, card);
                 }
             }
@@ -557,7 +657,7 @@ impl Storage for SqliteStorage {
                 value_count: value_count.map(|n| n as usize),
             }))
         };
-        read().map_err(|e| Error::sqlite(&self.path, e))
+        read().map_err(|e| corpus_error(&self.path, e))
     }
 
     fn param_stats_for(&self, cluster_key: &str, name: &str) -> Result<Option<PositionStats>> {
@@ -597,14 +697,14 @@ impl Storage for SqliteStorage {
             load_counts(&mut stats, values, types);
             Ok(Some(stats))
         };
-        read().map_err(|e| Error::sqlite(&self.path, e))
+        read().map_err(|e| corpus_error(&self.path, e))
     }
 
     fn record_observation(&mut self, canonical: &str) -> Result<()> {
         let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         c.prepare_cached("INSERT INTO observed_iris (canonical) VALUES (?)")
             .and_then(|mut s| s.execute(params![canonical]))
-            .map_err(|e| Error::sqlite(&self.path, e))?;
+            .map_err(|e| corpus_error(&self.path, e))?;
         Ok(())
     }
     fn each_observed_iri(&self, f: &mut dyn FnMut(&str)) -> Result<()> {
@@ -617,6 +717,29 @@ impl Storage for SqliteStorage {
             f(iri);
         }
         Ok(())
+    }
+    fn each_observed_iri_since(&self, mark: u64, f: &mut dyn FnMut(&str)) -> Result<u64> {
+        if self.rebuild_txn {
+            let c = self.conn();
+            c.execute_batch("COMMIT")
+                .map_err(|e| corpus_error(&self.path, e))?;
+            c.execute_batch("BEGIN").map_err(|e| {
+                // Without the transaction the rebuild would write one
+                // statement at a time; better to report it.
+                corpus_error(&self.path, e)
+            })?;
+        }
+        let rows: Vec<(i64, String)> = self.read(|c| {
+            let mut stmt = c.prepare_cached(
+                "SELECT id, canonical FROM observed_iris WHERE id > ? ORDER BY id",
+            )?;
+            let rows = stmt.query_map(params![mark as i64], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            rows.collect()
+        })?;
+        for (_, iri) in &rows {
+            f(iri);
+        }
+        Ok(rows.last().map_or(mark, |(id, _)| *id as u64))
     }
     fn observed_iri_count(&self) -> Result<usize> {
         self.read(|c| {
@@ -644,9 +767,65 @@ impl Storage for SqliteStorage {
             "DELETE FROM cluster_param_values",
             "DELETE FROM cluster_param_types",
         ] {
-            c.execute(q, []).map_err(|e| Error::sqlite(&self.path, e))?;
+            c.execute(q, []).map_err(|e| corpus_error(&self.path, e))?;
         }
         Ok(())
+    }
+    // Other connections keep reading and writing the live views meanwhile, so
+    // outside a batch the rebuild needs no write lock until it installs.
+    fn begin_rebuild(&mut self) -> Result<()> {
+        self.discard_rebuild();
+        let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
+        let err = |e| corpus_error(&self.path, e);
+        for table in VIEW_TABLES {
+            // The live table's own definition, so the copy lines up column
+            // for column whichever iriq created the corpus.
+            let sql: String = c
+                .query_row(
+                    "SELECT sql FROM main.sqlite_master WHERE type = 'table' AND name = ?",
+                    [table],
+                    |r| r.get(0),
+                )
+                .map_err(err)?;
+            c.execute_batch(&sql.replacen("CREATE TABLE", "CREATE TEMP TABLE", 1))
+                .map_err(err)?;
+        }
+        if self.depth == 0 {
+            c.execute_batch("BEGIN").map_err(err)?;
+            self.rebuild_txn = true;
+        }
+        self.value_counts.clear();
+        self.rebuilding = true;
+        Ok(())
+    }
+    fn install_rebuild(&mut self) -> Result<()> {
+        debug_assert!(self.depth > 0, "a rebuild installs under the write lock");
+        let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
+        for table in VIEW_TABLES {
+            c.execute_batch(&format!(
+                "DELETE FROM main.{table}; \
+                 INSERT INTO main.{table} SELECT * FROM temp.{table}; \
+                 DROP TABLE temp.{table};"
+            ))
+            .map_err(|e| corpus_error(&self.path, e))?;
+        }
+        self.rebuilding = false;
+        self.value_counts.clear();
+        Ok(())
+    }
+    // Also after an install whose transaction rolled back, which brings the
+    // TEMP tables back.
+    fn discard_rebuild(&mut self) {
+        let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
+        if self.rebuild_txn {
+            let _ = c.execute_batch("ROLLBACK");
+            self.rebuild_txn = false;
+        }
+        for table in VIEW_TABLES {
+            let _ = c.execute_batch(&format!("DROP TABLE IF EXISTS temp.{table}"));
+        }
+        self.rebuilding = false;
+        self.value_counts.clear();
     }
     fn record_activated_recognizer(&mut self, dump: Value) -> Result<()> {
         let prefix = dump
@@ -669,7 +848,7 @@ impl Storage for SqliteStorage {
              ON CONFLICT(prefix) DO UPDATE SET type = excluded.type, specificity = excluded.specificity",
             params![prefix, ty, spec],
         )
-        .map_err(|e| Error::sqlite(&self.path, e))?;
+        .map_err(|e| corpus_error(&self.path, e))?;
         Ok(())
     }
     fn each_activated_recognizer(&self, f: &mut dyn FnMut(&Value)) -> Result<()> {
@@ -710,8 +889,17 @@ impl Storage for SqliteStorage {
             return Ok(false);
         }
         let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
-        c.execute_batch("BEGIN IMMEDIATE")
-            .map_err(|e| Error::sqlite(&self.path, e))?;
+        let err = |e| corpus_error(&self.path, e);
+        if self.rebuild_txn {
+            // A rebuild's writes so far are its own; keep them while waiting.
+            c.execute_batch("COMMIT").map_err(err)?;
+            self.rebuild_txn = false;
+        }
+        if let Some(at) = self.next_turn.take() {
+            std::thread::sleep(at.saturating_duration_since(Instant::now()));
+        }
+        c.execute_batch("BEGIN IMMEDIATE").map_err(err)?;
+        self.locked_at = Some(Instant::now());
         // Under the write lock no one else can commit until we do, so a
         // version read now stays true for the whole batch. An unreadable
         // version counts as changed.
@@ -731,6 +919,7 @@ impl Storage for SqliteStorage {
         if self.depth > 0 {
             return Ok(());
         }
+        self.end_turn();
         let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         let committed = c.execute_batch("COMMIT");
         if committed.is_err() {
@@ -742,17 +931,21 @@ impl Storage for SqliteStorage {
                 let _ = c.execute_batch("ROLLBACK");
             }
         }
-        committed.map_err(|e| Error::sqlite(&self.path, e))
+        committed.map_err(|e| corpus_error(&self.path, e))
     }
     fn batch_rollback(&mut self) -> Result<()> {
         self.depth -= 1;
         if self.depth > 0 {
             return Ok(());
         }
+        self.end_turn();
         self.value_counts.clear();
         let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         c.execute_batch("ROLLBACK")
-            .map_err(|e| Error::sqlite(&self.path, e))
+            .map_err(|e| corpus_error(&self.path, e))
+    }
+    fn turn_over(&self) -> bool {
+        self.depth > 0 && self.locked_at.is_some_and(|at| at.elapsed() >= LOCK_TURN)
     }
 
     fn flush(&mut self) -> Result<()> {
@@ -1068,6 +1261,65 @@ mod tests {
 
         s.close().unwrap();
         assert_eq!(WAITS.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn waiting_out_the_lock_says_another_process_holds_it() {
+        let busy = rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+            Some("database is locked".into()),
+        );
+        let err = corpus_error(Path::new("/x/c.db"), busy);
+        let cause = std::error::Error::source(&err).unwrap().to_string();
+        assert_eq!(cause, "another process held the corpus lock for over 10s");
+    }
+
+    #[test]
+    fn a_rebuild_stays_out_of_sight_until_installed() {
+        let path = temp_db("rebuild");
+        let hosts = |s: &SqliteStorage| {
+            let mut hosts: Vec<String> = s.host_counts().unwrap().into_keys().collect();
+            hosts.sort();
+            hosts
+        };
+        let mut s = SqliteStorage::open(&path, 0).unwrap();
+        s.increment_host("old.com").unwrap();
+        s.begin_rebuild().unwrap();
+        s.increment_host("new.com").unwrap();
+
+        // Meanwhile another connection writes without waiting, and sees only
+        // the live views.
+        let mut other = SqliteStorage::open(&path, 0).unwrap();
+        other.batch_begin().unwrap();
+        other.increment_host("other.com").unwrap();
+        other.batch_commit().unwrap();
+        assert_eq!(hosts(&other), ["old.com", "other.com"]);
+
+        s.batch_begin().unwrap();
+        s.install_rebuild().unwrap();
+        s.batch_commit().unwrap();
+        s.discard_rebuild();
+        assert_eq!(hosts(&other), ["new.com"]);
+        s.increment_host("after.com").unwrap();
+        assert_eq!(hosts(&other), ["after.com", "new.com"]);
+    }
+
+    #[test]
+    fn a_writer_that_used_its_turn_leaves_the_lock_free_before_retaking_it() {
+        let mut s = SqliteStorage::open(&temp_db("turns"), 0).unwrap();
+        s.batch_begin().unwrap();
+        assert!(!s.turn_over());
+        // Stands in for a turn's worth of work.
+        s.locked_at = Some(Instant::now() - LOCK_TURN);
+        assert!(s.turn_over());
+        s.batch_commit().unwrap();
+
+        let released = Instant::now();
+        s.batch_begin().unwrap();
+        assert!(released.elapsed() >= TURN_PAUSE);
+        s.batch_commit().unwrap();
+        // A short turn doesn't pause.
+        assert_eq!(s.next_turn, None);
     }
 
     #[test]

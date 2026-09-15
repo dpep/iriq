@@ -112,27 +112,37 @@ module Iriq
       Observation.new(corpus: self, identifier: iri, cluster_key: addition.key)
     end
 
-    # Drop every materialized view (host counts, position stats, clusters,
-    # …) and rebuild them by replaying the source-IRI log through the
-    # current events + reducers pipeline. Useful for:
+    # Observe every IRI. On SQLite they commit a turn of about a second at a
+    # time, so other processes writing the corpus get the lock in between; a
+    # failure keeps the turns already committed. Inside #batch they all join
+    # its transaction.
+    def observe_all(iris)
+      done = 0
+      while done < iris.size
+        batch do
+          while done < iris.size
+            observe(iris[done])
+            done += 1
+            break if @storage.turn_over?
+          end
+        end
+      end
+      nil
+    end
+
+    # Rebuild every materialized view (host counts, position stats, clusters,
+    # …) by replaying the source-IRI log through the current events +
+    # reducers pipeline. Useful for:
     #
     #   - Tuning thresholds (swap a Corpus constant, call reinfer)
     #   - Swapping the classifier (open the Corpus with a different
     #     classifier, call reinfer — events are re-derived from raw IRIs)
     #   - Recovering after a Reducer-set change
     #
-    # Wrapped in a single backend transaction so a failure mid-replay
-    # leaves the prior views intact.
+    # The views change all at once, keeping what other connections observe
+    # meanwhile; a failure leaves the prior views intact.
     def reinfer
-      batch do
-        iris = []
-        @storage.each_observed_iri { |canonical| iris << canonical }
-        @storage.clear_materialized_views
-        iris.each do |canonical|
-          iri = Parser.parse(canonical)
-          events_for(iri).each { |e| Reducer.apply(e, @storage) }
-        end
-      end
+      rebuild(nil)
       nil
     end
 
@@ -387,44 +397,120 @@ module Iriq
     # Whether this call activated `recognizer`. The dedup check runs under
     # the write lock, so two corpora racing to activate it can't both win.
     def activate(recognizer)
-      dump = recognizer.to_dump
-      previous = nil
-      activated = batch do
-        next false if stored_activations.include?(dump)
+      rebuild(recognizer.to_dump)
+    end
 
-        previous = [@classifier, @activations]
-        @storage.record_activated_recognizer(dump)
+    # Storage's activations changed while a rebuild replayed; they now read
+    # `stored`.
+    class StaleRebuild < StandardError
+      attr_reader :stored
+
+      def initialize(stored)
+        super("activations changed during a rebuild")
+        @stored = stored
+      end
+    end
+
+    # Rebuild every view from the observation log and, given `activation`,
+    # store that recognizer with them: both commit together or not at all.
+    # The replay runs into views only this connection sees, without the write
+    # lock, which it takes just to replay what others observed meanwhile and
+    # install the result. False, changing nothing, when `activation` is
+    # already stored.
+    def rebuild(activation)
+      planned = stored_activations
+      if activation
+        return false if planned.include?(activation)
+
+        planned += [activation]
+      end
+      loop do
+        outcome = begin
+          install_views(build_views(planned), planned, activation)
+        ensure
+          @storage.discard_rebuild
+        end
+        # The rebuild classified with `planned`; storage decides from here.
         reapply_activated_recognizers!
-        reinfer
+        return outcome unless outcome.is_a?(StaleRebuild)
+
+        planned = outcome.stored
+      end
+    rescue StandardError
+      reapply_activated_recognizers! rescue nil
+      raise
+    end
+
+    # Replay the log into a rebuild classified with `activations`, catching
+    # up while each pass replays less than the one before. Returns the log
+    # mark replayed through.
+    def build_views(activations)
+      use_activations(activations)
+      @storage.begin_rebuild
+      mark = 0
+      last_pass = Float::INFINITY
+      loop do
+        replayed, mark = replay_log_since(mark)
+        return mark if replayed.zero? || replayed >= last_pass
+
+        last_pass = replayed
+      end
+    end
+
+    # Under the write lock, record `activation`, replay the log past `mark`
+    # and install the rebuild — unless the stored activations are no longer
+    # the `planned` set the rebuild classified with (a StaleRebuild, returned).
+    def install_views(mark, planned, activation)
+      batch do
+        if activation
+          next false if stored_activations.include?(activation)
+
+          @storage.record_activated_recognizer(activation)
+        end
+        stored = stored_activations
+        raise StaleRebuild, stored unless stored == planned
+
+        use_activations(stored)
+        replay_log_since(mark)
+        @storage.install_rebuild
         true
       end
-      previous = nil
-      activated
-    ensure
-      # A rolled-back activation mustn't linger in the classifier.
-      @classifier, @activations = previous if previous
+    rescue StaleRebuild => e
+      e
+    end
+
+    # Replay the observations logged after `mark`. Returns how many, and the
+    # mark through them.
+    def replay_log_since(mark)
+      iris = []
+      mark = @storage.each_observed_iri_since(mark) { |canonical| iris << canonical }
+      iris.each { |canonical| events_for(Parser.parse(canonical)).each { |e| Reducer.apply(e, @storage) } }
+      [iris.size, mark]
     end
 
     def stored_activations
       [].tap { |stored| @storage.each_activated_recognizer { |dump| stored << dump } }
     end
 
-    # The classifier is a function of the stored activations: the base
-    # classifier when there are none, otherwise a private copy of it holding
-    # exactly the stored set (so nothing leaks into a shared DEFAULT). Rebuilt
-    # only when the set changed, so the classifier keeps its cache.
     def reapply_activated_recognizers!
-      stored = stored_activations
-      return if stored == @activations
+      use_activations(stored_activations)
+    end
 
-      @classifier = if stored.empty?
+    # The classifier is a function of the activations: the base classifier
+    # when there are none, otherwise a private copy of it holding exactly
+    # them (so nothing leaks into a shared DEFAULT). Rebuilt only when the
+    # set changed, so the classifier keeps its cache.
+    def use_activations(activations)
+      return if activations == @activations
+
+      @classifier = if activations.empty?
         @base_classifier
       else
         @base_classifier.dup.tap do |c|
-          stored.each { |dump| c.register_recognizer(SynthesizedRecognizer.from_dump(dump)) }
+          activations.each { |dump| c.register_recognizer(SynthesizedRecognizer.from_dump(dump)) }
         end
       end
-      @activations = stored
+      @activations = activations
     end
 
     def coerce(input)

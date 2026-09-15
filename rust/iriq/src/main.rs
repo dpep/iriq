@@ -998,12 +998,7 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
         (None, Some(c)) => c,
         _ => unreachable!(),
     };
-    working.batch(|c| {
-        for iri in &iris {
-            c.observe_iri(iri)?;
-        }
-        Ok(())
-    })?;
+    working.observe_all(&iris)?;
 
     if opts.stats {
         emit_stats(stdout, working, opts)?;

@@ -142,20 +142,119 @@ impl Corpus {
         Ok(())
     }
 
-    /// Rebuild every view from the observation log, as one transaction: a
-    /// writer's observation lands wholly before or after it, never between the
-    /// log read and the replay.
+    /// Observe every IRI. On SQLite they commit a turn of about a second at a
+    /// time, so other processes writing the corpus get the lock in between; a
+    /// failure keeps the turns already committed. Inside `batch` they all join
+    /// its transaction.
+    pub fn observe_all(&mut self, iris: &[Identifier]) -> Result<()> {
+        let mut done = 0;
+        while done < iris.len() {
+            self.batch(|c| {
+                for iri in &iris[done..] {
+                    c.observe_iri(iri)?;
+                    done += 1;
+                    if c.storage.turn_over() {
+                        break;
+                    }
+                }
+                Ok(())
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Rebuild every view from the observation log. The views change all at
+    /// once, keeping what other connections observe meanwhile.
     pub fn reinfer(&mut self) -> Result<()> {
-        self.batch(|c| {
-            let mut iris = Vec::new();
-            c.storage
-                .each_observed_iri(&mut |iri| iris.push(iri.to_string()))?;
-            c.storage.clear_materialized_views()?;
-            for canonical in iris {
-                c.replay(&parse(&canonical)?)?;
+        self.rebuild(None).map(|_| ())
+    }
+
+    /// Rebuild every view from the observation log and, given `activation`,
+    /// store that recognizer with them: both commit together or not at all.
+    /// The replay runs into views only this connection sees, without the
+    /// write lock, which it takes just to replay what others observed
+    /// meanwhile and install the result. Answers false, changing nothing,
+    /// when `activation` is already stored.
+    fn rebuild(&mut self, activation: Option<serde_json::Value>) -> Result<bool> {
+        let mut planned = self.stored_activations()?;
+        if let Some(a) = &activation {
+            if self.has_activated(a)? {
+                return Ok(false);
             }
-            Ok(())
+            planned.push(a.clone());
+        }
+        loop {
+            let outcome = self
+                .build_views(&planned)
+                .and_then(|mark| self.install_views(mark, &planned, activation.as_ref()));
+            self.storage.discard_rebuild();
+            // The rebuild classified with `planned`; storage decides from here.
+            let reapplied = self.reapply_activated_recognizers();
+            let outcome = outcome?;
+            reapplied?;
+            match outcome {
+                Install::Done(activated) => return Ok(activated),
+                Install::Stale(stored) => planned = stored,
+            }
+        }
+    }
+
+    /// Replay the log into a rebuild classified with `activations`, catching
+    /// up while each pass replays less than the one before; answers the log
+    /// mark replayed through.
+    fn build_views(&mut self, activations: &[serde_json::Value]) -> Result<u64> {
+        self.use_activations(activations.to_vec());
+        self.storage.begin_rebuild()?;
+        let mut mark = 0;
+        let mut last_pass = usize::MAX;
+        loop {
+            let (replayed, through) = self.replay_log_since(mark)?;
+            mark = through;
+            if replayed == 0 || replayed >= last_pass {
+                return Ok(mark);
+            }
+            last_pass = replayed;
+        }
+    }
+
+    /// Under the write lock, record `activation`, replay the log past `mark`
+    /// and install the rebuild — unless the stored activations are no longer
+    /// the `planned` set the rebuild classified with.
+    fn install_views(
+        &mut self,
+        mark: u64,
+        planned: &[serde_json::Value],
+        activation: Option<&serde_json::Value>,
+    ) -> Result<Install> {
+        self.transaction(|c| {
+            if let Some(a) = activation {
+                if c.has_activated(a)? {
+                    return Ok(Outcome::Rollback(Install::Done(false)));
+                }
+                c.storage.record_activated_recognizer(a.clone())?;
+            }
+            let stored = c.stored_activations()?;
+            if stored != planned {
+                return Ok(Outcome::Rollback(Install::Stale(stored)));
+            }
+            c.use_activations(stored);
+            c.replay_log_since(mark)?;
+            c.storage.install_rebuild()?;
+            Ok(Outcome::Commit(Install::Done(true)))
         })
+    }
+
+    /// Replay the observations logged after `mark`, answering how many and
+    /// the mark through them.
+    fn replay_log_since(&mut self, mark: u64) -> Result<(usize, u64)> {
+        let mut iris = Vec::new();
+        let through = self
+            .storage
+            .each_observed_iri_since(mark, &mut |iri| iris.push(iri.to_string()))?;
+        for canonical in &iris {
+            self.replay(&parse(canonical)?)?;
+        }
+        Ok((iris.len(), through))
     }
 
     pub fn observed_iri_count(&self) -> Result<usize> {
@@ -179,15 +278,7 @@ impl Corpus {
         // become dynamic Custom types, matching Ruby's symbol semantics.
         let ty = segment_type_from_name(&p.suggested_type);
         let dump = SynthesizedRecognizer::from_prefix(p.prefix.clone(), ty).dump();
-        self.batch(|c| {
-            if c.has_activated(&dump)? {
-                return Ok(false);
-            }
-            c.storage.record_activated_recognizer(dump)?;
-            c.reapply_activated_recognizers()?;
-            c.reinfer()?;
-            Ok(true)
-        })
+        self.rebuild(Some(dump))
     }
 
     fn has_activated(&self, dump: &serde_json::Value) -> Result<bool> {
@@ -195,6 +286,13 @@ impl Corpus {
         self.storage
             .each_activated_recognizer(&mut |stored| found |= stored == dump)?;
         Ok(found)
+    }
+
+    fn stored_activations(&self) -> Result<Vec<serde_json::Value>> {
+        let mut stored = Vec::new();
+        self.storage
+            .each_activated_recognizer(&mut |v| stored.push(v.clone()))?;
+        Ok(stored)
     }
 
     /// Activate every proposal at or above `confidence_threshold`, returning
@@ -222,23 +320,28 @@ impl Corpus {
     /// the stored set, so a live corpus and its reopened self agree. Rebuilt
     /// only when the set changed, so the classifier keeps its cache.
     fn reapply_activated_recognizers(&mut self) -> Result<()> {
-        let mut stored = Vec::new();
-        self.storage
-            .each_activated_recognizer(&mut |v| stored.push(v.clone()))?;
-        if stored == self.activations {
-            return Ok(());
+        let stored = self.stored_activations()?;
+        self.use_activations(stored);
+        Ok(())
+    }
+
+    fn use_activations(&mut self, activations: Vec<serde_json::Value>) {
+        if activations == self.activations {
+            return;
         }
-        self.classifier = if stored.is_empty() {
+        self.classifier = if activations.is_empty() {
             DEFAULT_CLASSIFIER_ARC.clone()
         } else {
             let classifier = SegmentClassifier::new();
-            for r in stored.iter().filter_map(SynthesizedRecognizer::from_dump) {
+            for r in activations
+                .iter()
+                .filter_map(SynthesizedRecognizer::from_dump)
+            {
                 classifier.register_recognizer(Arc::new(r));
             }
             Arc::new(classifier)
         };
-        self.activations = stored;
-        Ok(())
+        self.activations = activations;
     }
 
     fn events_for_iri(&self, iri: &Identifier) -> Vec<Event> {
@@ -378,6 +481,11 @@ impl Corpus {
     /// A batch classifies with every recognizer activated before it began,
     /// including those another process activated.
     pub fn batch<T>(&mut self, f: impl FnOnce(&mut Corpus) -> Result<T>) -> Result<T> {
+        self.transaction(|c| f(c).map(Outcome::Commit))
+    }
+
+    /// `batch`, where `f` also chooses to roll back without failing.
+    fn transaction<T>(&mut self, f: impl FnOnce(&mut Corpus) -> Result<Outcome<T>>) -> Result<T> {
         if self.storage.batch_begin()? {
             if let Err(e) = self.reapply_activated_recognizers() {
                 let _ = self.storage.batch_rollback();
@@ -386,8 +494,12 @@ impl Corpus {
         }
         // Unwind safety: the rollback below is what restores consistency.
         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self))) {
-            Ok(Ok(value)) => {
+            Ok(Ok(Outcome::Commit(value))) => {
                 self.storage.batch_commit()?;
+                Ok(value)
+            }
+            Ok(Ok(Outcome::Rollback(value))) => {
+                self.rollback_batch();
                 Ok(value)
             }
             // The original failure is the one worth reporting; SQLite may
@@ -555,6 +667,19 @@ fn canonical_form(t: &SegmentType, value: &str) -> Option<String> {
         SegmentType::Currency => canonical_currency(value),
         _ => None,
     }
+}
+
+enum Outcome<T> {
+    Commit(T),
+    Rollback(T),
+}
+
+/// How installing a rebuild ended.
+enum Install {
+    /// Installed; false when the activation was already stored.
+    Done(bool),
+    /// Storage's activations changed since the rebuild began; they now read so.
+    Stale(Vec<serde_json::Value>),
 }
 
 #[derive(Debug, Clone)]
@@ -769,6 +894,78 @@ mod tests {
             .map(|c| format!("{} x{}", c.shape, c.count))
             .collect();
         assert_eq!(shapes, ["/t/{tok} x2"]);
+    }
+
+    #[cfg(feature = "sqlite")]
+    fn scratch_db(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("iriq-corpus-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("c.db")
+    }
+
+    #[cfg(feature = "sqlite")]
+    fn cluster_counts(c: &Corpus) -> Vec<(String, usize)> {
+        let mut counts: Vec<_> = c
+            .clusters()
+            .unwrap()
+            .into_iter()
+            .map(|c| (c.shape, c.count))
+            .collect();
+        counts.sort();
+        counts
+    }
+
+    // The rebuild itself runs apart from the lock, where other connections'
+    // writes land.
+    #[cfg(feature = "sqlite")]
+    #[test]
+    fn a_rebuild_keeps_what_another_connection_observes_while_it_replays() {
+        let path = scratch_db("rebuild-observed");
+        let mut corpus = Corpus::open(&path).unwrap();
+        for i in 0..3 {
+            corpus.observe(&format!("https://x.com/t/{i}")).unwrap();
+        }
+        let planned = corpus.stored_activations().unwrap();
+        let mark = corpus.build_views(&planned).unwrap();
+
+        Corpus::open(&path)
+            .unwrap()
+            .observe("https://x.com/t/99")
+            .unwrap();
+        let installed = corpus.install_views(mark, &planned, None).unwrap();
+        corpus.storage.discard_rebuild();
+
+        assert!(matches!(installed, Install::Done(true)));
+        let live = cluster_counts(&corpus);
+        assert_eq!(live, [("/t/{t_id}".to_string(), 4)]);
+        corpus.reinfer().unwrap();
+        assert_eq!(cluster_counts(&corpus), live);
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[test]
+    fn a_rebuild_starts_over_when_another_connection_activates_while_it_replays() {
+        let path = scratch_db("rebuild-activated");
+        let mut corpus = Corpus::open(&path).unwrap();
+        for tok in ["tok_Ab12Cd", "tok_Ef34Gh"] {
+            corpus.observe(&format!("https://x.com/t/{tok}")).unwrap();
+        }
+        let planned = corpus.stored_activations().unwrap();
+        let mark = corpus.build_views(&planned).unwrap();
+
+        Corpus::open(&path)
+            .unwrap()
+            .activate_proposal(&proposal("tok_", "tok"))
+            .unwrap();
+        let installed = corpus.install_views(mark, &planned, None).unwrap();
+        corpus.storage.discard_rebuild();
+        corpus.reapply_activated_recognizers().unwrap();
+
+        assert!(matches!(installed, Install::Stale(ref stored) if stored.len() == 1));
+        assert_eq!(cluster_counts(&corpus), [("/t/{tok}".to_string(), 2)]);
+        corpus.reinfer().unwrap();
+        assert_eq!(cluster_counts(&corpus), [("/t/{tok}".to_string(), 2)]);
     }
 
     #[test]

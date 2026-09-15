@@ -45,8 +45,33 @@ pub trait Storage: Send + Sync {
 
     fn record_observation(&mut self, canonical: &str) -> Result<()>;
     fn each_observed_iri(&self, f: &mut dyn FnMut(&str)) -> Result<()>;
+    /// The observations logged after `mark` (0 for all), in order, answering
+    /// the mark of the last one visited (`mark` when there are none).
+    fn each_observed_iri_since(&self, mark: u64, f: &mut dyn FnMut(&str)) -> Result<u64> {
+        let mut seen = 0;
+        self.each_observed_iri(&mut |iri| {
+            seen += 1;
+            if seen > mark {
+                f(iri);
+            }
+        })?;
+        Ok(seen.max(mark))
+    }
     fn observed_iri_count(&self) -> Result<usize>;
     fn clear_materialized_views(&mut self) -> Result<()>;
+
+    /// Rebuild the views out of sight: view writes after `begin_rebuild` go
+    /// to fresh, empty views only this handle sees, until `install_rebuild`
+    /// (inside a batch) makes them the corpus's views. `discard_rebuild` drops
+    /// a rebuild not installed and is safe to call when there is none. A
+    /// backend nothing else shares rebuilds in place.
+    fn begin_rebuild(&mut self) -> Result<()> {
+        self.clear_materialized_views()
+    }
+    fn install_rebuild(&mut self) -> Result<()> {
+        Ok(())
+    }
+    fn discard_rebuild(&mut self) {}
 
     fn record_activated_recognizer(&mut self, dump: serde_json::Value) -> Result<()>;
     fn each_activated_recognizer(&self, f: &mut dyn FnMut(&serde_json::Value)) -> Result<()>;
@@ -64,6 +89,11 @@ pub trait Storage: Send + Sync {
     }
     fn batch_rollback(&mut self) -> Result<()> {
         Ok(())
+    }
+    /// Whether the batch in progress has held the corpus's write lock for a
+    /// whole turn, so a long-running writer should commit and let others in.
+    fn turn_over(&self) -> bool {
+        false
     }
 
     fn flush(&mut self) -> Result<()> {

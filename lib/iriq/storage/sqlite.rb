@@ -13,6 +13,24 @@ module Iriq
     class Sqlite
       SCHEMA_VERSION = 4
 
+      # Processes share a corpus's write lock by one rule: a writer waits up
+      # to LOCK_WAIT seconds for its turn, and none keeps the lock longer
+      # than a turn of work.
+      LOCK_WAIT = 10
+      LOCK_TURN = 1.0
+      # How long a writer that used a whole turn leaves the lock free: many
+      # of a waiter's 1ms busy retries, and a fair chance at an older iriq's
+      # 100ms ones.
+      TURN_PAUSE = 0.02
+
+      # Every table derived from the observation log.
+      VIEW_TABLES = %w[
+        host_counts path_length_counts raw_shape_counts fingerprint_counts
+        position_stats position_values position_types
+        clusters cluster_examples cluster_segments
+        cluster_params cluster_param_values cluster_param_types
+      ].freeze
+
       SCHEMA = <<~SQL.freeze
         CREATE TABLE IF NOT EXISTS meta (
           key   TEXT PRIMARY KEY,
@@ -136,7 +154,13 @@ module Iriq
       # disk) reads like every other corpus failure: `corpus PATH: cause`. The
       # gem appends the failing SQL to its message; the cause is the part before.
       def self.corpus_error(path, e)
-        CorpusError.new("corpus #{path}: #{e.message.split(":\n", 2).first}")
+        # Busy only ever means the wait for another process's lock ran out.
+        cause = if e.is_a?(SQLite3::BusyException)
+          "another process held the corpus lock for over #{LOCK_WAIT}s"
+        else
+          e.message.split(":\n", 2).first
+        end
+        CorpusError.new("corpus #{path}: #{cause}")
       end
 
       def initialize(path:, classifier: SegmentClassifier::DEFAULT,
@@ -145,11 +169,10 @@ module Iriq
         @classifier              = classifier
         @max_values_per_position = max_values_per_position
         @db                      = SQLite3::Database.new(path)
-        # busy_timeout MUST come first: other PRAGMAs (journal_mode in
-        # particular) can themselves block on the write lock under
-        # concurrent open, and without busy_timeout set they fail
-        # immediately with SQLITE_BUSY.
-        @db.execute("PRAGMA busy_timeout = 30000")
+        # Before any PRAGMA: journal_mode itself can wait on a lock. SQLite's
+        # own busy_timeout backs off to 100ms between retries, which would
+        # mostly miss a TURN_PAUSE; this one retries every 1ms.
+        @db.busy_handler_timeout = LOCK_WAIT * 1000
         enable_wal!
         @db.execute("PRAGMA synchronous = NORMAL")
         @db.execute("PRAGMA foreign_keys = ON")
@@ -162,6 +185,17 @@ module Iriq
         # PRAGMA data_version when @value_counts was last known exact; it
         # changes only when another connection commits.
         @counts_version = nil
+        # When the transaction in progress took the write lock, and until
+        # when a connection that used a whole turn leaves the lock free.
+        @locked_at      = nil
+        @next_turn      = nil
+        # A rebuild is in progress: TEMP tables named like the views shadow
+        # them for this connection alone, so every view statement writes the
+        # rebuild. Its own transaction touches only those tables; it ends
+        # before a log read, so the read sees the latest log, and before the
+        # write lock is taken.
+        @rebuilding     = false
+        @rebuild_txn    = false
       end
 
       # Checked before SCHEMA runs, so iriq never adds tables to a corpus
@@ -222,7 +256,16 @@ module Iriq
       # reads first can't upgrade once another process commits: SQLite
       # reports busy without consulting busy_timeout.
       private def write_transaction
+        if @rebuild_txn
+          # A rebuild's writes so far are its own; keep them while waiting.
+          @db.commit
+          @rebuild_txn = false
+        end
+        pause = @next_turn && (@next_turn - monotonic_now)
+        @next_turn = nil
+        sleep(pause) if pause&.positive?
         @db.transaction(:immediate)
+        @locked_at      = monotonic_now
         @in_transaction = true
         # Under the write lock no one else can commit until we do, so the
         # version read now holds for the whole transaction. An unknown last
@@ -240,7 +283,63 @@ module Iriq
         @counts_version = nil
         raise corpus_error(e)
       ensure
+        # One that used a whole turn leaves the lock free a moment.
+        @next_turn      = monotonic_now + TURN_PAUSE if @locked_at && monotonic_now - @locked_at >= LOCK_TURN
+        @locked_at      = nil
         @in_transaction = false
+      end
+
+      # Whether the transaction in progress has held the write lock for a
+      # whole turn, so a long-running writer should commit and let others in.
+      def turn_over?
+        !@locked_at.nil? && monotonic_now - @locked_at >= LOCK_TURN
+      end
+
+      # --- Rebuilding the views ---------------------------------------------
+      #
+      # Rebuild out of sight: view writes after begin_rebuild go to fresh,
+      # empty views only this connection sees, until install_rebuild (inside a
+      # transaction) makes them the corpus's views. discard_rebuild drops a
+      # rebuild not installed, and also runs after an install whose
+      # transaction rolled back, which brings the TEMP tables back. Other
+      # connections keep reading and writing the live views meanwhile.
+
+      def begin_rebuild
+        discard_rebuild
+        VIEW_TABLES.each do |table|
+          # The live table's own definition, so the copy lines up column for
+          # column whichever iriq created the corpus.
+          sql = @db.get_first_value("SELECT sql FROM main.sqlite_master WHERE type = 'table' AND name = ?", [table])
+          @db.execute(sql.sub("CREATE TABLE", "CREATE TEMP TABLE"))
+        end
+        unless @in_transaction
+          @db.transaction
+          @rebuild_txn = true
+        end
+        @value_counts.clear
+        @rebuilding = true
+      rescue SQLite3::Exception => e
+        raise corpus_error(e)
+      end
+
+      def install_rebuild
+        VIEW_TABLES.each do |table|
+          @db.execute("DELETE FROM main.#{table}")
+          @db.execute("INSERT INTO main.#{table} SELECT * FROM temp.#{table}")
+          @db.execute("DROP TABLE temp.#{table}")
+        end
+        @rebuilding = false
+        @value_counts.clear
+      end
+
+      def discard_rebuild
+        if @rebuild_txn
+          @db.rollback rescue nil
+          @rebuild_txn = false
+        end
+        VIEW_TABLES.each { |table| @db.execute("DROP TABLE IF EXISTS temp.#{table}") rescue nil }
+        @rebuilding = false
+        @value_counts.clear
       end
 
       # SQLite failures inside a transaction become CorpusErrors; anything else
@@ -315,7 +414,7 @@ module Iriq
         SQL
         if @db.changes.zero?
           where = [host, scope, locator]
-          card = (@in_transaction && @value_counts[where]) || @db.get_first_value(
+          card = (counts_exact? && @value_counts[where]) || @db.get_first_value(
             "SELECT COUNT(*) FROM position_values WHERE host = ? AND scope = ? AND locator = ?", where,
           )
           if card < @max_values_per_position
@@ -325,7 +424,7 @@ module Iriq
             )
             card += 1
           end
-          @value_counts[where] = card if @in_transaction
+          @value_counts[where] = card if counts_exact?
         end
       end
 
@@ -409,6 +508,18 @@ module Iriq
         @db.execute("SELECT canonical FROM observed_iris ORDER BY id") do |row|
           yield row[0]
         end
+      end
+
+      # The observations logged after `mark` (0 for all), in id order;
+      # returns the id of the last one (`mark` when there are none).
+      def each_observed_iri_since(mark)
+        if @rebuild_txn
+          @db.commit
+          @db.transaction
+        end
+        rows = @db.execute("SELECT id, canonical FROM observed_iris WHERE id > ? ORDER BY id", [mark])
+        rows.each { |_id, canonical| yield canonical }
+        rows.empty? ? mark : rows.last[0]
       end
 
       def observed_iri_count
@@ -582,6 +693,16 @@ module Iriq
 
       private
 
+      # Whether remembered value counts can be trusted: under the write lock,
+      # or while the views written are a rebuild nothing else writes.
+      def counts_exact?
+        @in_transaction || @rebuilding
+      end
+
+      def monotonic_now
+        Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      end
+
       # Converting a rollback-mode database to WAL takes an exclusive lock,
       # and SQLite does NOT consult the busy handler for that lock — so
       # concurrent first-opens of a fresh corpus can fail with SQLITE_BUSY
@@ -589,11 +710,11 @@ module Iriq
       # retry briefly — either this connection wins the conversion or
       # another process already converted the file.
       def enable_wal!
-        attempts = 0
+        deadline = monotonic_now + LOCK_WAIT
         begin
           @db.execute("PRAGMA journal_mode = WAL")
         rescue SQLite3::BusyException
-          raise if (attempts += 1) > 100
+          raise if monotonic_now > deadline
 
           sleep 0.01
           retry

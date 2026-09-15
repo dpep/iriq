@@ -432,7 +432,7 @@ module Iriq
 
       corpus ||= Corpus.new(host_strategy: opts[:host_strategy])
       iris = extract_text(utf8!(read_text(args.first)), opts)
-      corpus.batch { iris.each { |iri| corpus.observe(iri) } }
+      corpus.observe_all(iris)
 
       if opts[:stats]
         emit_stats(corpus, opts)

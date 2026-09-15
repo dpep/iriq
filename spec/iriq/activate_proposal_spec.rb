@@ -192,5 +192,30 @@ describe "Recognizer auto-activation" do
       stale.close
       other.close
     end
+
+    # An activation's replay runs without the write lock, so another corpus
+    # can activate one meanwhile; the replay then starts over with both.
+    it "are kept by an activation that was replaying when they committed" do
+      corpus = Iriq::Corpus.open(@path)
+      observe_prefixed(corpus, "api.github.com", "auth", "ghp_")
+      observe_prefixed(corpus, "api.stripe.com", "keys", "sk_")
+      proposals = corpus.propose_recognizers.to_h { |p| [p.prefix, p] }
+      other = Iriq::Corpus.open(@path)
+      meanwhile = false
+      allow(corpus.storage).to receive(:each_observed_iri_since).and_wrap_original do |original, mark, &block|
+        original.call(mark, &block).tap do
+          other.activate_proposal(proposals.fetch("ghp_")) unless meanwhile
+          meanwhile = true
+        end
+      end
+
+      corpus.activate_proposal(proposals.fetch("sk_"))
+
+      expect(corpus.activated_recognizer_count).to eq(2)
+      expect(corpus.stats_for("api.github.com", "/auth").type_counts[:ghp]).to eq(25)
+      expect(corpus.stats_for("api.stripe.com", "/keys").type_counts[:sk]).to eq(25)
+      corpus.close
+      other.close
+    end
   end
 end
