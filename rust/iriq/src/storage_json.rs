@@ -141,6 +141,28 @@ impl Storage for JsonStorage {
 }
 
 pub fn dump_memory_to_json(m: &MemoryStorage, path: &Path) -> Result<()> {
+    let data = serde_json::to_string(&memory_to_value(m))
+        .map_err(|e| Error::io(path, std::io::Error::other(e)))?;
+    // A temp name per write: concurrent writers sharing `<path>.tmp` rename
+    // each other's file away and fail. The last rename still wins.
+    static WRITES: AtomicU64 = AtomicU64::new(0);
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(format!(
+        ".{}.{}.tmp",
+        std::process::id(),
+        WRITES.fetch_add(1, Ordering::Relaxed)
+    ));
+    let write = || -> std::io::Result<()> {
+        std::fs::File::create(&tmp)?.write_all(data.as_bytes())?;
+        std::fs::rename(&tmp, path)
+    };
+    write().map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        Error::io(path, e)
+    })
+}
+
+fn memory_to_value(m: &MemoryStorage) -> Value {
     let mut root = Map::new();
     root.insert(
         "host_counts".to_string(),
@@ -203,26 +225,7 @@ pub fn dump_memory_to_json(m: &MemoryStorage, path: &Path) -> Result<()> {
 
     let activated: Vec<Value> = m.activated_recognizers_ref().to_vec();
     root.insert("activated_recognizers".to_string(), Value::Array(activated));
-
-    let data = serde_json::to_string(&Value::Object(root))
-        .map_err(|e| Error::io(path, std::io::Error::other(e)))?;
-    // A temp name per write: concurrent writers sharing `<path>.tmp` rename
-    // each other's file away and fail. The last rename still wins.
-    static WRITES: AtomicU64 = AtomicU64::new(0);
-    let mut tmp = path.as_os_str().to_owned();
-    tmp.push(format!(
-        ".{}.{}.tmp",
-        std::process::id(),
-        WRITES.fetch_add(1, Ordering::Relaxed)
-    ));
-    let write = || -> std::io::Result<()> {
-        std::fs::File::create(&tmp)?.write_all(data.as_bytes())?;
-        std::fs::rename(&tmp, path)
-    };
-    write().map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        Error::io(path, e)
-    })
+    Value::Object(root)
 }
 
 /// The top-level keys a corpus dump writes (Ruby's `to_dump` writes the same).
@@ -244,17 +247,20 @@ fn position_stats_to_value(s: &PositionStats) -> Value {
         "value_counts".to_string(),
         map_str_usize_to_value(&s.value_counts),
     );
-    let tc: HashMap<String, usize> = s
-        .type_counts
-        .iter()
-        .map(|(t, n)| (t.as_str().to_string(), *n))
-        .collect();
-    o.insert("type_counts".to_string(), map_str_usize_to_value(&tc));
-    o.insert("total".to_string(), Value::Number((s.total as u64).into()));
     o.insert(
-        "max_values".to_string(),
-        Value::Number((s.max_values as u64).into()),
+        "type_counts".to_string(),
+        counts_to_value(s.type_counts.iter().map(|(t, &n)| (t.as_str(), n))),
     );
+    o.insert("total".to_string(), Value::from(s.total));
+    o.insert("max_values".to_string(), Value::from(s.max_values));
+    // Ruby's PositionStats#dump: a range only where there is one. Readers
+    // can't rebuild it exactly from value_counts, which stop at the cap.
+    if s.numeric_count > 0 {
+        o.insert("numeric_count".to_string(), Value::from(s.numeric_count));
+        o.insert("numeric_min".to_string(), Value::from(s.numeric_min));
+        o.insert("numeric_max".to_string(), Value::from(s.numeric_max));
+        o.insert("numeric_sum".to_string(), Value::from(s.numeric_sum));
+    }
     Value::Object(o)
 }
 
@@ -277,20 +283,31 @@ fn cluster_to_value(c: &Cluster) -> Value {
         .map(map_str_usize_to_value)
         .collect();
     o.insert("segment_counts".to_string(), Value::Array(seg));
-    let mut params = Map::new();
-    for (name, stats) in &c.param_stats {
-        params.insert(name.clone(), position_stats_to_value(stats));
-    }
+    let mut params: Vec<_> = c.param_stats.iter().collect();
+    params.sort_unstable_by_key(|&(name, _)| name);
+    let params = params
+        .into_iter()
+        .map(|(name, stats)| (name.clone(), position_stats_to_value(stats)))
+        .collect();
     o.insert("param_stats".to_string(), Value::Object(params));
     Value::Object(o)
 }
 
 fn map_str_usize_to_value(m: &HashMap<String, usize>) -> Value {
-    let mut o = Map::new();
-    for (k, v) in m {
-        o.insert(k.clone(), Value::Number((*v as u64).into()));
-    }
-    Value::Object(o)
+    counts_to_value(m.iter().map(|(k, &n)| (k.as_str(), n)))
+}
+
+/// In key byte order: the maps behind a dump are hashed, and the same corpus
+/// should save to the same bytes.
+fn counts_to_value<'a>(counts: impl IntoIterator<Item = (&'a str, usize)>) -> Value {
+    let mut counts: Vec<_> = counts.into_iter().collect();
+    counts.sort_unstable_by_key(|&(k, _)| k);
+    Value::Object(
+        counts
+            .into_iter()
+            .map(|(k, n)| (k.to_string(), Value::from(n)))
+            .collect(),
+    )
 }
 
 pub fn load_memory_from_json(m: &mut MemoryStorage, data: &[u8], path: &Path) -> Result<()> {
@@ -500,6 +517,20 @@ fn parse_position_stats(obj: &Map<String, Value>) -> PositionStats {
         .map(|(name, n)| (crate::classifier::segment_type_from_name(&name), n))
         .collect();
     load_counts(&mut ps, counts("value_counts"), types);
+    // A stored range wins over the rebuild (Ruby's PositionStats.from_dump);
+    // entries from Rust builds that didn't write one keep the rebuild.
+    let num = |key: &str| obj.get(key).and_then(Value::as_f64);
+    if let (Some(count), Some(min), Some(max), Some(sum)) = (
+        obj.get("numeric_count").and_then(Value::as_u64),
+        num("numeric_min"),
+        num("numeric_max"),
+        num("numeric_sum"),
+    ) {
+        ps.numeric_count = count as usize;
+        ps.numeric_min = min;
+        ps.numeric_max = max;
+        ps.numeric_sum = sum;
+    }
     ps
 }
 
@@ -538,4 +569,113 @@ pub(crate) fn load_counts(
         }
     }
     stats.value_counts = values.into_iter().collect();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ITEMS_KEY: &str = "https://foo.com/items/{item_id}";
+
+    fn items_corpus(n: usize) -> MemoryStorage {
+        let mut m = MemoryStorage::new(0);
+        for i in 1..=n {
+            let iri = parse(&format!("https://foo.com/items/{i}?price={i}.25&q=term{i}")).unwrap();
+            m.increment_host(&format!("h{i}.com")).unwrap();
+            m.add_to_cluster(ITEMS_KEY, "foo.com", "https", "/items/{item_id}", &iri)
+                .unwrap();
+        }
+        m
+    }
+
+    fn keys(v: &Value) -> Vec<&str> {
+        v.as_object().unwrap().keys().map(String::as_str).collect()
+    }
+
+    fn sorted(mut ks: Vec<&str>) -> Vec<&str> {
+        ks.sort_unstable();
+        ks
+    }
+
+    #[test]
+    fn a_numeric_range_is_written_after_the_counts_in_rubys_key_order() {
+        let dump = memory_to_value(&items_corpus(3));
+        let params = &dump["clusterer"]["clusters"][ITEMS_KEY]["param_stats"];
+
+        let price = &params["price"];
+        assert_eq!(
+            keys(price),
+            [
+                "value_counts",
+                "type_counts",
+                "total",
+                "max_values",
+                "numeric_count",
+                "numeric_min",
+                "numeric_max",
+                "numeric_sum"
+            ]
+        );
+        assert_eq!(price["numeric_count"], 3);
+        assert_eq!(price["numeric_min"], 1.25);
+        assert_eq!(price["numeric_max"], 3.25);
+        assert_eq!(price["numeric_sum"], 6.75);
+        // Ruby writes a range only for a stats entry that has one.
+        assert_eq!(
+            keys(&params["q"]),
+            ["value_counts", "type_counts", "total", "max_values"]
+        );
+    }
+
+    #[test]
+    fn counted_maps_are_written_in_key_order() {
+        let dump = memory_to_value(&items_corpus(40));
+        let cluster = &dump["clusterer"]["clusters"][ITEMS_KEY];
+        for map in [
+            &dump["host_counts"],
+            &cluster["segment_counts"][1],
+            &cluster["param_stats"],
+            &cluster["param_stats"]["q"]["value_counts"],
+        ] {
+            assert_eq!(keys(map), sorted(keys(map)), "{map}");
+        }
+    }
+
+    #[test]
+    fn a_stored_range_is_read_back_as_stored() {
+        // A Ruby-written entry whose tracked values can't rebuild its range.
+        let stored: Value = serde_json::from_str(
+            r#"{"value_counts":{"1.25":1},"type_counts":{"float":12},"total":12,"max_values":1,
+                "numeric_count":12,"numeric_min":1.25,"numeric_max":12.25,"numeric_sum":81.0}"#,
+        )
+        .unwrap();
+        let stats = parse_position_stats(stored.as_object().unwrap());
+        assert_eq!(
+            (
+                stats.numeric_count,
+                stats.numeric_min,
+                stats.numeric_max,
+                stats.numeric_sum
+            ),
+            (12, 1.25, 12.25, 81.0)
+        );
+    }
+
+    #[test]
+    fn an_entry_without_a_range_rebuilds_it_from_its_values() {
+        let stored: Value = serde_json::from_str(
+            r#"{"value_counts":{"1.25":1,"3.5":2},"type_counts":{"float":3},"total":3,"max_values":5000}"#,
+        )
+        .unwrap();
+        let stats = parse_position_stats(stored.as_object().unwrap());
+        assert_eq!(
+            (
+                stats.numeric_count,
+                stats.numeric_min,
+                stats.numeric_max,
+                stats.numeric_sum
+            ),
+            (3, 1.25, 3.5, 8.25)
+        );
+    }
 }
