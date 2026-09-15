@@ -4,7 +4,7 @@ use crate::errors::Result;
 use crate::identifier::Identifier;
 use crate::position::Position;
 use crate::position_stats::{PositionStats, DEFAULT_MAX_VALUES_PER_POSITION};
-use crate::storage::Storage;
+use crate::storage::{PositionEvidence, Storage};
 use std::collections::HashMap;
 
 #[derive(Default)]
@@ -113,9 +113,6 @@ impl Storage for MemoryStorage {
     fn fingerprint_counts(&self) -> HashMap<String, usize> {
         self.fingerprint_counts.clone()
     }
-    fn position_stats_for(&self, pos: &Position) -> Option<PositionStats> {
-        self.position_stats.get(pos).cloned()
-    }
     fn each_position_stats(&self, f: &mut dyn FnMut(&Position, &PositionStats)) {
         for k in &self.position_keys {
             if let Some(v) = self.position_stats.get(k) {
@@ -134,6 +131,19 @@ impl Storage for MemoryStorage {
     }
     fn cluster_size(&self) -> usize {
         self.clusters.len()
+    }
+    fn position_evidence(&self, pos: &Position, value: &str) -> Result<Option<PositionEvidence>> {
+        Ok(self
+            .position_stats
+            .get(pos)
+            .map(|s| PositionEvidence::from_stats(s, value)))
+    }
+    fn param_stats_for(&self, cluster_key: &str, name: &str) -> Result<Option<PositionStats>> {
+        Ok(self
+            .clusters
+            .get(cluster_key)
+            .and_then(|c| c.param_stats.get(name))
+            .cloned())
     }
 
     fn record_observation(&mut self, canonical: &str) -> Result<()> {

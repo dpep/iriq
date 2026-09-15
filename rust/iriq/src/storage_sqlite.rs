@@ -13,7 +13,7 @@ use crate::identifier::Identifier;
 use crate::parser::parse;
 use crate::position::{Position, PositionScope};
 use crate::position_stats::{PositionStats, DEFAULT_MAX_VALUES_PER_POSITION};
-use crate::storage::Storage;
+use crate::storage::{PositionEvidence, Storage};
 use crate::storage_json::rebuild_numeric_stats;
 use crate::storage_memory::MemoryStorage;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -112,6 +112,55 @@ impl SqliteStorage {
     /// guard, owns the data's consistency.
     fn conn(&self) -> MutexGuard<'_, Connection> {
         self.conn.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn position_stats_for(&self, pos: &Position) -> Option<PositionStats> {
+        let c = self.conn();
+        let total: i64 = c
+            .query_row(
+                "SELECT total FROM position_stats WHERE host = ? AND scope = ? AND locator = ?",
+                params![pos.host, pos.scope.as_str(), pos.locator],
+                |r| r.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten()?;
+        let mut ps = PositionStats::new(self.max_values);
+        ps.total = total as usize;
+
+        {
+            let mut stmt = c
+                .prepare(
+                    "SELECT value, count FROM position_values WHERE host = ? AND scope = ? AND locator = ?",
+                )
+                .unwrap();
+            let rows = stmt
+                .query_map(params![pos.host, pos.scope.as_str(), pos.locator], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+                })
+                .unwrap();
+            for row in rows.flatten() {
+                ps.value_counts.insert(row.0, row.1 as usize);
+            }
+        }
+        {
+            let mut stmt = c
+                .prepare(
+                    "SELECT type, count FROM position_types WHERE host = ? AND scope = ? AND locator = ?",
+                )
+                .unwrap();
+            let rows = stmt
+                .query_map(params![pos.host, pos.scope.as_str(), pos.locator], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+                })
+                .unwrap();
+            for row in rows.flatten() {
+                ps.type_counts
+                    .insert(segment_type_from_name(&row.0), row.1 as usize);
+            }
+        }
+        rebuild_numeric_stats(&mut ps);
+        Some(ps)
     }
 }
 
@@ -361,55 +410,6 @@ impl Storage for SqliteStorage {
         counts_hash(&self.conn(), "fingerprint_counts", "shape")
     }
 
-    fn position_stats_for(&self, pos: &Position) -> Option<PositionStats> {
-        let c = self.conn();
-        let total: i64 = c
-            .query_row(
-                "SELECT total FROM position_stats WHERE host = ? AND scope = ? AND locator = ?",
-                params![pos.host, pos.scope.as_str(), pos.locator],
-                |r| r.get(0),
-            )
-            .optional()
-            .ok()
-            .flatten()?;
-        let mut ps = PositionStats::new(self.max_values);
-        ps.total = total as usize;
-
-        {
-            let mut stmt = c
-                .prepare(
-                    "SELECT value, count FROM position_values WHERE host = ? AND scope = ? AND locator = ?",
-                )
-                .unwrap();
-            let rows = stmt
-                .query_map(params![pos.host, pos.scope.as_str(), pos.locator], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
-                })
-                .unwrap();
-            for row in rows.flatten() {
-                ps.value_counts.insert(row.0, row.1 as usize);
-            }
-        }
-        {
-            let mut stmt = c
-                .prepare(
-                    "SELECT type, count FROM position_types WHERE host = ? AND scope = ? AND locator = ?",
-                )
-                .unwrap();
-            let rows = stmt
-                .query_map(params![pos.host, pos.scope.as_str(), pos.locator], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
-                })
-                .unwrap();
-            for row in rows.flatten() {
-                ps.type_counts
-                    .insert(segment_type_from_name(&row.0), row.1 as usize);
-            }
-        }
-        rebuild_numeric_stats(&mut ps);
-        Some(ps)
-    }
-
     fn each_position_stats(&self, f: &mut dyn FnMut(&Position, &PositionStats)) {
         let keys = {
             let c = self.conn();
@@ -578,6 +578,92 @@ impl Storage for SqliteStorage {
             .query_row("SELECT COUNT(*) FROM clusters", [], |r| r.get(0))
             .unwrap_or(0);
         n as usize
+    }
+
+    fn position_evidence(&self, pos: &Position, value: &str) -> Result<Option<PositionEvidence>> {
+        let c = self.conn();
+        let key = params![pos.host, pos.scope.as_str(), pos.locator];
+        let read = || -> rusqlite::Result<Option<PositionEvidence>> {
+            let Some(total) = c
+                .prepare_cached(
+                    "SELECT total FROM position_stats WHERE host = ? AND scope = ? AND locator = ?",
+                )?
+                .query_row(key, |r| r.get::<_, i64>(0))
+                .optional()?
+            else {
+                return Ok(None);
+            };
+            let type_counts = c
+                .prepare_cached(
+                    "SELECT type, count FROM position_types WHERE host = ? AND scope = ? AND locator = ?",
+                )?
+                .query_map(key, |r| {
+                    Ok((
+                        segment_type_from_name(&r.get::<_, String>(0)?),
+                        r.get::<_, i64>(1)? as usize,
+                    ))
+                })?
+                .collect::<rusqlite::Result<_>>()?;
+            let cardinality: i64 = c
+                .prepare_cached(
+                    "SELECT COUNT(*) FROM position_values WHERE host = ? AND scope = ? AND locator = ?",
+                )?
+                .query_row(key, |r| r.get(0))?;
+            let value_count: Option<i64> = c
+                .prepare_cached(
+                    "SELECT count FROM position_values WHERE host = ? AND scope = ? AND locator = ? AND value = ?",
+                )?
+                .query_row(params![pos.host, pos.scope.as_str(), pos.locator, value], |r| {
+                    r.get(0)
+                })
+                .optional()?;
+            Ok(Some(PositionEvidence {
+                total: total as usize,
+                type_counts,
+                cardinality: cardinality as usize,
+                value_count: value_count.map(|n| n as usize),
+            }))
+        };
+        read().map_err(|e| Error::sqlite(&self.path, e))
+    }
+
+    fn param_stats_for(&self, cluster_key: &str, name: &str) -> Result<Option<PositionStats>> {
+        let c = self.conn();
+        let read = || -> rusqlite::Result<Option<PositionStats>> {
+            let Some(total) = c
+                .prepare_cached(
+                    "SELECT total FROM cluster_params WHERE cluster_key = ? AND name = ?",
+                )?
+                .query_row(params![cluster_key, name], |r| r.get::<_, i64>(0))
+                .optional()?
+            else {
+                return Ok(None);
+            };
+            let mut stats = PositionStats::new(self.max_values);
+            stats.total = total as usize;
+            stats.value_counts = c
+                .prepare_cached(
+                    "SELECT value, count FROM cluster_param_values WHERE cluster_key = ? AND name = ?",
+                )?
+                .query_map(params![cluster_key, name], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as usize))
+                })?
+                .collect::<rusqlite::Result<_>>()?;
+            stats.type_counts = c
+                .prepare_cached(
+                    "SELECT type, count FROM cluster_param_types WHERE cluster_key = ? AND name = ?",
+                )?
+                .query_map(params![cluster_key, name], |r| {
+                    Ok((
+                        segment_type_from_name(&r.get::<_, String>(0)?),
+                        r.get::<_, i64>(1)? as usize,
+                    ))
+                })?
+                .collect::<rusqlite::Result<_>>()?;
+            rebuild_numeric_stats(&mut stats);
+            Ok(Some(stats))
+        };
+        read().map_err(|e| Error::sqlite(&self.path, e))
     }
 
     fn record_observation(&mut self, canonical: &str) -> Result<()> {

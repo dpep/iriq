@@ -5,7 +5,7 @@ use crate::identifier::Identifier;
 use crate::parser::parse;
 use crate::position::{Position, PositionScope};
 use crate::position_stats::{PositionStats, DEFAULT_MAX_VALUES_PER_POSITION};
-use crate::storage::Storage;
+use crate::storage::{PositionEvidence, Storage};
 use crate::storage_memory::MemoryStorage;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
@@ -89,9 +89,6 @@ impl Storage for JsonStorage {
     fn fingerprint_counts(&self) -> HashMap<String, usize> {
         self.inner.fingerprint_counts()
     }
-    fn position_stats_for(&self, pos: &Position) -> Option<PositionStats> {
-        self.inner.position_stats_for(pos)
-    }
     fn each_position_stats(&self, f: &mut dyn FnMut(&Position, &PositionStats)) {
         self.inner.each_position_stats(f);
     }
@@ -103,6 +100,12 @@ impl Storage for JsonStorage {
     }
     fn cluster_size(&self) -> usize {
         self.inner.cluster_size()
+    }
+    fn position_evidence(&self, pos: &Position, value: &str) -> Result<Option<PositionEvidence>> {
+        self.inner.position_evidence(pos, value)
+    }
+    fn param_stats_for(&self, cluster_key: &str, name: &str) -> Result<Option<PositionStats>> {
+        self.inner.param_stats_for(cluster_key, name)
     }
     fn record_observation(&mut self, canonical: &str) -> Result<()> {
         self.inner.record_observation(canonical)

@@ -1,4 +1,4 @@
-use crate::classifier::SegmentType;
+use crate::classifier::{SegmentClassifier, SegmentType};
 use crate::cluster::Cluster;
 use crate::errors::Result;
 use crate::identifier::Identifier;
@@ -31,11 +31,16 @@ pub trait Storage: Send + Sync {
     fn path_length_counts(&self) -> HashMap<usize, usize>;
     fn raw_shape_counts(&self) -> HashMap<String, usize>;
     fn fingerprint_counts(&self) -> HashMap<String, usize>;
-    fn position_stats_for(&self, pos: &Position) -> Option<PositionStats>;
     fn each_position_stats(&self, f: &mut dyn FnMut(&Position, &PositionStats));
     fn clusters(&self) -> Vec<Cluster>;
     fn cluster_for(&self, key: &str) -> Option<Cluster>;
     fn cluster_size(&self) -> usize;
+    /// What classifying `value` at `pos` reads, without materializing every
+    /// value tracked there.
+    fn position_evidence(&self, pos: &Position, value: &str) -> Result<Option<PositionEvidence>>;
+    /// One query param's stats — narrower than `cluster_for`, which loads the
+    /// cluster's examples and per-segment counts too.
+    fn param_stats_for(&self, cluster_key: &str, name: &str) -> Result<Option<PositionStats>>;
 
     fn record_observation(&mut self, canonical: &str) -> Result<()>;
     fn each_observed_iri(&self, f: &mut dyn FnMut(&str));
@@ -70,6 +75,49 @@ pub trait Storage: Send + Sync {
     }
 }
 
+/// The slice of a position's stats that classifies one value.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct PositionEvidence {
+    pub total: usize,
+    pub type_counts: HashMap<SegmentType, usize>,
+    pub cardinality: usize,
+    /// The probed value's count; `None` when it isn't tracked.
+    pub value_count: Option<usize>,
+}
+
+impl PositionEvidence {
+    pub fn from_stats(stats: &PositionStats, value: &str) -> Self {
+        PositionEvidence {
+            total: stats.total,
+            type_counts: stats.type_counts.clone(),
+            cardinality: stats.cardinality(),
+            value_count: stats.value_counts.get(value).copied(),
+        }
+    }
+
+    /// Same as `PositionStats::variable_fraction`.
+    pub fn variable_fraction(&self, c: &SegmentClassifier) -> f64 {
+        if self.total == 0 {
+            return 0.0;
+        }
+        let v: usize = self
+            .type_counts
+            .iter()
+            .filter(|(t, _)| c.variable(**t))
+            .map(|(_, n)| *n)
+            .sum();
+        (v as f64) / (self.total as f64)
+    }
+
+    /// Same as `PositionStats::value_fraction` for the probed value.
+    pub fn value_fraction(&self) -> f64 {
+        if self.total == 0 {
+            return 0.0;
+        }
+        (self.value_count.unwrap_or(0) as f64) / (self.total as f64)
+    }
+}
+
 /// Pick the backend by file extension. Empty path → in-memory.
 pub fn open_storage(path: &Path, max_values: usize) -> Result<Box<dyn Storage>> {
     if path.as_os_str().is_empty() {
@@ -99,4 +147,91 @@ pub(crate) fn is_sqlite_path(path: &Path) -> bool {
         let e = e.to_ascii_lowercase();
         e == "db" || e == "sqlite" || e == "sqlite3"
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::parse;
+
+    // Small enough that the value cap drops some values.
+    const CAP: usize = 3;
+
+    fn backends(name: &str) -> Vec<(&'static str, Box<dyn Storage>)> {
+        let dir = std::env::temp_dir().join(format!("iriq-evidence-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        #[allow(unused_mut)]
+        let mut all: Vec<(&'static str, Box<dyn Storage>)> = vec![
+            (
+                "memory",
+                Box::new(crate::storage_memory::MemoryStorage::new(CAP)),
+            ),
+            (
+                "json",
+                Box::new(crate::storage_json::JsonStorage::open(&dir.join("c.json"), CAP).unwrap()),
+            ),
+        ];
+        #[cfg(feature = "sqlite")]
+        all.push((
+            "sqlite",
+            Box::new(crate::storage_sqlite::SqliteStorage::open(&dir.join("c.db"), CAP).unwrap()),
+        ));
+        all
+    }
+
+    #[test]
+    fn narrow_reads_agree_with_the_full_reads_they_replace() {
+        let pos = Position::path("x.com", "/teams");
+        let huge = "1".repeat(400);
+        let urls = [
+            "https://x.com/teams/a?page=1&tab=a".to_string(),
+            "https://x.com/teams/a?page=2&tab=b".to_string(),
+            "https://x.com/teams/b?page=2&tab=c".to_string(),
+            "https://x.com/teams/c?page=7&tab=d".to_string(),
+            format!("https://x.com/teams/d?page={huge}&tab=a"),
+        ];
+        for (backend, mut s) in backends("agree") {
+            for (value, ty) in [
+                ("a", SegmentType::Literal),
+                ("a", SegmentType::Literal),
+                ("7", SegmentType::Integer),
+                ("b-c", SegmentType::Slug),
+                (huge.as_str(), SegmentType::Integer),
+                ("7", SegmentType::Integer),
+            ] {
+                s.observe_position(&pos, value, ty).unwrap();
+            }
+            for url in &urls {
+                let iri = parse(url).unwrap();
+                s.add_to_cluster("k", "x.com", "https", "/teams/{team}", &iri)
+                    .unwrap();
+            }
+
+            let unseen = Position::path("x.com", "/nowhere");
+            for p in [&pos, &unseen] {
+                let mut stats = None;
+                s.each_position_stats(&mut |at, st| {
+                    if at == p {
+                        stats = Some(st.clone());
+                    }
+                });
+                // Tracked, dropped at the cap, and never seen.
+                for value in ["a", "7", huge.as_str(), "zzz"] {
+                    let full = stats
+                        .as_ref()
+                        .map(|st| PositionEvidence::from_stats(st, value));
+                    let narrow = s.position_evidence(p, value).unwrap();
+                    assert_eq!(narrow, full, "{backend}: evidence for {value:?} at {p:?}");
+                }
+            }
+            for (key, name) in [("k", "page"), ("k", "tab"), ("k", "nope"), ("nope", "page")] {
+                let full = s
+                    .cluster_for(key)
+                    .and_then(|c| c.param_stats.get(name).cloned());
+                let narrow = s.param_stats_for(key, name).unwrap();
+                assert_eq!(narrow, full, "{backend}: param {name:?} in {key:?}");
+            }
+        }
+    }
 }

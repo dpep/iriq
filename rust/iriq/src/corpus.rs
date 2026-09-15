@@ -12,11 +12,11 @@ use crate::identifier::Identifier;
 use crate::normalizer::{normalize_identifier_with_evidence, NormalizationEvidence};
 use crate::parser::parse;
 use crate::position::Position;
-use crate::position_stats::{PositionStats, DEFAULT_MAX_VALUES_PER_POSITION};
+use crate::position_stats::DEFAULT_MAX_VALUES_PER_POSITION;
 use crate::recognizer_proposal::{propose_recognizers, ProposalOptions, RecognizerProposal};
 use crate::registrable_domain::registrable_domain;
 use crate::shape::{Shape, ShapeRenderOptions};
-use crate::storage::{is_sqlite_path, open_storage, Storage};
+use crate::storage::{is_sqlite_path, open_storage, PositionEvidence, Storage};
 use crate::storage_memory::MemoryStorage;
 use crate::synthesized_recognizer::SynthesizedRecognizer;
 use std::collections::HashMap;
@@ -370,20 +370,20 @@ impl Corpus {
         let Ok(iri) = parse(input) else {
             return Vec::new();
         };
-        let cluster = self.cluster_for_iri(&iri);
+        let cluster = self.storage.cluster_for(&self.cluster_key_for_iri(&iri));
         cluster.map(|c| c.param_summary()).unwrap_or_default()
     }
 
-    fn cluster_for_iri(&self, iri: &Identifier) -> Option<Cluster> {
+    fn cluster_key_for_iri(&self, iri: &Identifier) -> String {
         let hinted = derive_hints(&iri.path_segments, &self.classifier);
         let shape = Shape::from_entries(hinted).render(ShapeRenderOptions::default());
-        let k = cluster_key_for_host(
+        cluster_key_for_host(
             iri,
             &self.classifier,
             Some(shape),
             self.effective_host(&iri.host),
-        );
-        self.storage.cluster_for(&k.key)
+        )
+        .key
     }
 
     fn annotate_segments(&self, iri: &Identifier) -> Vec<Annotated> {
@@ -392,10 +392,21 @@ impl Corpus {
         let mut out = Vec::with_capacity(hinted.len());
         let mut prefix = String::new();
         for entry in &hinted {
-            let stats = self
-                .storage
-                .position_stats_for(&Position::path(keying_host.clone(), prefix.clone()));
-            let cls = classify_segment(entry, stats.as_ref(), &self.classifier);
+            // classify_segment answers this whatever the evidence; skip the read.
+            let cls = if entry.variable && !stable_variable_type(entry.ty) {
+                Classification::VariableIdentifier
+            } else {
+                // Normalize is infallible for now: a failed read is no evidence.
+                let evidence = self
+                    .storage
+                    .position_evidence(
+                        &Position::path(keying_host.clone(), prefix.clone()),
+                        &entry.value,
+                    )
+                    .ok()
+                    .flatten();
+                classify_segment(entry, evidence.as_ref(), &self.classifier)
+            };
             out.push(Annotated {
                 hint: entry.clone(),
                 prefix: prefix.clone(),
@@ -455,29 +466,31 @@ impl NormalizationEvidence for Corpus {
 
 impl Corpus {
     fn render_query_inner(&self, iri: &Identifier) -> String {
-        let cluster = self.cluster_for_iri(iri);
         let mut keys = iri.query_params.keys();
+        if keys.is_empty() {
+            return String::new();
+        }
+        let cluster_key = self.cluster_key_for_iri(iri);
         keys.sort();
         let mut parts = Vec::with_capacity(keys.len());
         for k in keys {
             let v = iri.query_params.get(&k).unwrap_or("").to_string();
-            let t = self.inferred_param_type(cluster.as_ref(), &k, &v);
+            let t = self.inferred_param_type(&cluster_key, &k, &v);
             parts.push(format!("{}={}", k, self.render_param_value(&v, t)));
         }
         parts.join("&")
     }
 
-    fn inferred_param_type(
-        &self,
-        cluster: Option<&Cluster>,
-        name: &str,
-        value: &str,
-    ) -> SegmentType {
-        if let Some(c) = cluster {
-            if let Some(s) = c.param_stats.get(name) {
-                if s.total >= MIN_OBSERVATIONS_FOR_INFERENCE {
-                    return c.param_type(name);
-                }
+    fn inferred_param_type(&self, cluster_key: &str, name: &str, value: &str) -> SegmentType {
+        // Normalize is infallible for now: a failed read is no evidence.
+        if let Some(s) = self
+            .storage
+            .param_stats_for(cluster_key, name)
+            .ok()
+            .flatten()
+        {
+            if s.total >= MIN_OBSERVATIONS_FOR_INFERENCE {
+                return Cluster::param_type_for(name, &s);
             }
         }
         self.classifier.classify(value)
@@ -517,7 +530,7 @@ fn stable_variable_type(t: SegmentType) -> bool {
 
 fn classify_segment(
     entry: &SegmentHint,
-    stats: Option<&PositionStats>,
+    stats: Option<&PositionEvidence>,
     c: &SegmentClassifier,
 ) -> Classification {
     let Some(stats) = stats else {
@@ -536,12 +549,11 @@ fn classify_segment(
         return Classification::VariableIdentifier;
     }
 
-    let value = &entry.value;
     let total = stats.total;
     let variable_frac = stats.variable_fraction(c);
-    let cardinality_frac = (stats.cardinality() as f64) / (total as f64);
+    let cardinality_frac = (stats.cardinality as f64) / (total as f64);
     let enough_data = total >= MIN_OBSERVATIONS_FOR_INFERENCE;
-    let value_frac = stats.value_fraction(value);
+    let value_frac = stats.value_fraction();
 
     if entry.variable {
         if value_frac >= STABLE_LITERAL_THRESHOLD {
@@ -551,7 +563,7 @@ fn classify_segment(
     }
 
     if enough_data && variable_frac >= VARIABLE_DOMINANCE_THRESHOLD {
-        if stats.value_counts.contains_key(value) {
+        if stats.value_count.is_some() {
             return Classification::RareLiteral;
         }
         return Classification::Ambiguous;
@@ -560,35 +572,35 @@ fn classify_segment(
         return Classification::StableLiteral;
     }
     if enough_data && high_cardinality_literal_position(stats, cardinality_frac) {
-        if popular_outlier(stats, value) {
+        if popular_outlier(stats) {
             return Classification::StableLiteral;
         }
         return Classification::CorpusInferredVariable;
     }
-    if stats.cardinality() == 1 {
+    if stats.cardinality == 1 {
         return Classification::StableLiteral;
     }
-    if stats.value_counts.contains_key(value) {
+    if stats.value_count.is_some() {
         return Classification::RareLiteral;
     }
     Classification::Ambiguous
 }
 
-fn high_cardinality_literal_position(stats: &PositionStats, card_frac: f64) -> bool {
+fn high_cardinality_literal_position(stats: &PositionEvidence, card_frac: f64) -> bool {
     if card_frac >= LITERAL_UNIQUENESS_THRESHOLD {
         return true;
     }
     card_frac >= LITERAL_UNIQUENESS_MODERATE_THRESHOLD
-        && stats.cardinality() >= MIN_CARDINALITY_FOR_INFERENCE
+        && stats.cardinality >= MIN_CARDINALITY_FOR_INFERENCE
 }
 
-fn popular_outlier(stats: &PositionStats, value: &str) -> bool {
-    let count = *stats.value_counts.get(value).unwrap_or(&0);
+fn popular_outlier(stats: &PositionEvidence) -> bool {
+    let count = stats.value_count.unwrap_or(0);
     if count < POPULAR_MIN_COUNT {
         return false;
     }
-    let baseline = 1.0 / (stats.cardinality() as f64);
-    stats.value_fraction(value) >= POPULAR_BASELINE_MULTIPLE * baseline
+    let baseline = 1.0 / (stats.cardinality as f64);
+    stats.value_fraction() >= POPULAR_BASELINE_MULTIPLE * baseline
 }
 
 /// The real location a path names, so two spellings of one file compare

@@ -202,10 +202,17 @@ impl Cluster {
     }
 
     pub fn param_type(&self, name: &str) -> SegmentType {
-        let stats = match self.param_stats.get(name) {
-            Some(s) if s.total > 0 => s,
-            _ => return SegmentType::Literal,
-        };
+        match self.param_stats.get(name) {
+            Some(stats) => Self::param_type_for(name, stats),
+            None => SegmentType::Literal,
+        }
+    }
+
+    /// `param_type` for stats read without the rest of the cluster.
+    pub(crate) fn param_type_for(name: &str, stats: &PositionStats) -> SegmentType {
+        if stats.total == 0 {
+            return SegmentType::Literal;
+        }
         let t = stats.dominant_type();
 
         if is_year_position(t, stats) {
