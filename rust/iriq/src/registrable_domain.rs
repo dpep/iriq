@@ -2,8 +2,9 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashSet;
 
+// [0-9], not \d: Ruby's \d is ASCII-only, the regex crate's is Unicode.
 pub(crate) static IPV4_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$").unwrap());
+    Lazy::new(|| Regex::new(r"^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$").unwrap());
 
 static TWO_LABEL_SUFFIXES: Lazy<HashSet<&'static str>> = Lazy::new(|| {
     [

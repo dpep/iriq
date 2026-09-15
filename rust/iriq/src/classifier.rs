@@ -107,11 +107,17 @@ impl serde::Serialize for SegmentType {
 }
 
 // ── Regex patterns ────────────────────────────────────────────────────────
+//
+// Ruby's \d and \s are ASCII-only; the regex crate's are Unicode-aware. The
+// mirrors spell out [0-9] and Ruby's \S ([^ \t\r\n\x0B\x0C]) so a non-ASCII
+// digit or space never matches where Ruby's pattern wouldn't.
 
-static FLOAT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^-?\d+\.\d+$").unwrap());
+static FLOAT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^-?[0-9]+\.[0-9]+$").unwrap());
 static ISO_TIME_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+\-]\d{2}:?\d{2})?$")
-        .unwrap()
+    Regex::new(
+        r"^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}(:[0-9]{2})?(\.[0-9]+)?(Z|[+\-][0-9]{2}:?[0-9]{2})?$",
+    )
+    .unwrap()
 });
 static HASH_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[0-9a-fA-F]{32,}$").unwrap());
 static SLUG_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[a-z0-9]+(?:[-_][a-z0-9]+)+$").unwrap());
@@ -120,9 +126,11 @@ static OPAQUE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[A-Za-z0-9_\-.~]{4,}$
 static IPV6_FULL_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){7}$").unwrap());
 static IPV6_COMPRESSED_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[0-9a-fA-F:]{2,}$").unwrap());
-static URL_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://\S+$").unwrap());
-static SCHEMELESS_URL_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^[a-zA-Z0-9\-]+(?:\.[a-zA-Z0-9\-]+)*\.[a-zA-Z]{2,}/\S*$").unwrap());
+static URL_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://[^ \t\r\n\x0B\x0C]+$").unwrap());
+static SCHEMELESS_URL_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^[a-zA-Z0-9\-]+(?:\.[a-zA-Z0-9\-]+)*\.[a-zA-Z]{2,}/[^ \t\r\n\x0B\x0C]*$").unwrap()
+});
 static EMAIL_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
         r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9](?:[A-Za-z0-9\-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9\-]*[A-Za-z0-9])?)+$",
@@ -131,21 +139,22 @@ static EMAIL_RE: Lazy<Regex> = Lazy::new(|| {
 });
 static BOOLEAN_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(?i:true|false)$").unwrap());
 static VERSION_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^v\d+(?:\.\d+)*(?:[-+][A-Za-z0-9.\-]+)?$").unwrap());
+    Lazy::new(|| Regex::new(r"^v[0-9]+(?:\.[0-9]+)*(?:[-+][A-Za-z0-9.\-]+)?$").unwrap());
 static LOCALE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^([a-z]{2,3})[-_]([A-Za-z0-9]{2,4})$").unwrap());
 static LOCALE_BARE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[a-z]{2}$").unwrap());
 static CURRENCY_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[A-Za-z]{3}$").unwrap());
-static PHONE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\+[ \-.()\d]{7,20}$").unwrap());
-static PHONE_NANP_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^\(?([2-9]\d{2})\)?[ \-.]?([2-9]\d{2})[ \-.]?(\d{4})$").unwrap());
+static PHONE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\+[ \-.()0-9]{7,20}$").unwrap());
+static PHONE_NANP_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^\(?([2-9][0-9]{2})\)?[ \-.]?([2-9][0-9]{2})[ \-.]?([0-9]{4})$").unwrap()
+});
 static FILE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^[A-Za-z0-9][A-Za-z0-9_\-.~]*\.([A-Za-z0-9]{1,8})$").unwrap());
 static COLOR_HEX_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$").unwrap()
 });
 static COORDINATE_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$").unwrap());
+    Lazy::new(|| Regex::new(r"^(-?[0-9]+(?:\.[0-9]+)?),(-?[0-9]+(?:\.[0-9]+)?)$").unwrap());
 static COUNTRY_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[A-Z]{2}$").unwrap());
 static BASE64_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[A-Za-z0-9+/]{16,}={0,2}$").unwrap());
 static JWT_RE: Lazy<Regex> =
@@ -161,12 +170,17 @@ static UUID_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
         .unwrap()
 });
-static INTEGER_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\d+$").unwrap());
-static COMPACT_DATE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\d{8}$").unwrap());
-static DATE_ISO_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\d{4}-\d{2}-\d{2}$").unwrap());
-static DATE_SLASH_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\d{4}/\d{2}/\d{2}$").unwrap());
+static INTEGER_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[0-9]+$").unwrap());
+// Date parts come out as capture groups rather than byte slices, so a match
+// can never be cut mid-character.
+static COMPACT_DATE_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^([0-9]{4})([0-9]{2})([0-9]{2})$").unwrap());
+static DATE_ISO_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^([0-9]{4})-([0-9]{2})-([0-9]{2})$").unwrap());
+static DATE_SLASH_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^([0-9]{4})/([0-9]{2})/([0-9]{2})$").unwrap());
 static DATE_US_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^(\d{1,2})/(\d{1,2})/(\d{4})$").unwrap());
+    Lazy::new(|| Regex::new(r"^([0-9]{1,2})/([0-9]{1,2})/([0-9]{4})$").unwrap());
 static FILE_EXT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\.([A-Za-z0-9]{1,8})$").unwrap());
 
 // ── Allowlists ────────────────────────────────────────────────────────────
@@ -405,39 +419,22 @@ pub fn canonical_date(value: &str) -> Option<String> {
     if let Some(c) = canonical_date_from_forms(value) {
         return Some(c);
     }
-    if COMPACT_DATE_RE.is_match(value) {
-        let (y, m, d) = (&value[0..4], &value[4..6], &value[6..8]);
-        if plausible_date(y, m, d) {
-            return Some(format!("{}-{}-{}", y, m, d));
-        }
-    }
-    None
+    let (_, [y, m, d]) = COMPACT_DATE_RE.captures(value)?.extract();
+    plausible_date(y, m, d).then(|| format!("{y}-{m}-{d}"))
 }
 
 fn canonical_date_from_forms(value: &str) -> Option<String> {
-    if DATE_ISO_RE.is_match(value) {
-        let (y, m, d) = (&value[0..4], &value[5..7], &value[8..10]);
-        if plausible_date(y, m, d) {
-            return Some(value.to_string());
-        }
-        return None;
+    if let Some(caps) = DATE_ISO_RE.captures(value) {
+        let (_, [y, m, d]) = caps.extract();
+        return plausible_date(y, m, d).then(|| value.to_string());
     }
-    if DATE_SLASH_RE.is_match(value) {
-        let (y, m, d) = (&value[0..4], &value[5..7], &value[8..10]);
-        if plausible_date(y, m, d) {
-            return Some(format!("{}-{}-{}", y, m, d));
-        }
-        return None;
+    if let Some(caps) = DATE_SLASH_RE.captures(value) {
+        let (_, [y, m, d]) = caps.extract();
+        return plausible_date(y, m, d).then(|| format!("{y}-{m}-{d}"));
     }
-    if let Some(caps) = DATE_US_RE.captures(value) {
-        let mon = pad2(caps.get(1).unwrap().as_str());
-        let day = pad2(caps.get(2).unwrap().as_str());
-        let year = caps.get(3).unwrap().as_str();
-        if plausible_date(year, &mon, &day) {
-            return Some(format!("{}-{}-{}", year, mon, day));
-        }
-    }
-    None
+    let (_, [mon, day, year]) = DATE_US_RE.captures(value)?.extract();
+    let (mon, day) = (pad2(mon), pad2(day));
+    plausible_date(year, &mon, &day).then(|| format!("{year}-{mon}-{day}"))
 }
 
 fn pad2(s: &str) -> String {
@@ -615,11 +612,9 @@ impl Recognizer for IntegerRecognizer {
                 });
             }
         }
-        if COMPACT_DATE_RE.is_match(segment) {
-            let y: i32 = segment[0..4].parse().unwrap_or(-1);
-            let m: i32 = segment[4..6].parse().unwrap_or(-1);
-            let d: i32 = segment[6..8].parse().unwrap_or(-1);
-            if (1900..=2100).contains(&y) && (1..=12).contains(&m) && (1..=31).contains(&d) {
+        if let Some(caps) = COMPACT_DATE_RE.captures(segment) {
+            let (_, [y, m, d]) = caps.extract();
+            if plausible_date(y, m, d) {
                 return Some(Verdict {
                     ty: SegmentType::Date,
                     confidence: 1.0,

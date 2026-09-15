@@ -1,3 +1,8 @@
+###  Unreleased
+<!-- lane: rust-core -->
+- **Bugfix (Rust): a URL containing non-ASCII digits could crash the CLI.** A path segment or query value mixing ASCII digits with digits from another script (`https://x.com/1०००००००`, `?d=2024-٠١-١٥`) panicked in the classifier (exit 101). Rust now treats "digit" as ASCII `0-9`, as Ruby always has, so those values are plain literals.
+<!-- /lane: rust-core -->
+
 ###  0.34.0  (2026-08-12)
 - **Rust: SQLite is now an optional (default-on) feature.** `cargo install iriq`, the Homebrew formula, and the CLI are unchanged — `default = ["sqlite"]`. Library consumers who only need parsing, extraction, or normalization can now take `iriq = { version = "0.34", default-features = false }` and skip the bundled C SQLite build entirely (`rusqlite` is the crate's only non-Rust dependency). Without the feature, `open_storage` rejects `.db`/`.sqlite`/`.sqlite3` paths with a clear `Unsupported` error and the CLI's auto-default corpus becomes `default.json` instead of `default.db`; Memory and JSON backends are unaffected. No behavior change with default features, so Ruby parity and the shared schema are untouched. CI now gates the no-default-features build (test + clippy) so the configuration can't rot.
 
