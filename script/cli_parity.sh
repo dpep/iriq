@@ -379,6 +379,36 @@ if [[ ! -w "$corpus_dir/readonly" ]]; then
 fi
 chmod 755 "$corpus_dir/readonly"
 
+# An unopenable `.db` that's actually a directory: the path should appear
+# exactly once in the error message in both the human and --json forms.
+mkdir -p "$corpus_dir/dir.db"
+dir_as_db_pair() {
+  local label="$1"
+  shift
+  local ruby_out rust_out
+  ruby_out=$( (cd "$REPO_ROOT" && $RUBY "$@") 2>&1 || true )
+  rust_out=$( "$RUST_BIN" "$@" 2>&1 || true )
+  if [[ "$ruby_out" != "$rust_out" ]]; then
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH: $label"
+    diff <(echo "$ruby_out") <(echo "$rust_out") | sed 's/^/    /' || true
+    return
+  fi
+  local occurrences
+  occurrences=$(grep -o "$corpus_dir/dir.db" <<<"$ruby_out" | wc -l | tr -d ' ')
+  if [[ "$occurrences" == "1" ]]; then
+    pass_count=$((pass_count + 1))
+  else
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH: $label (path appeared $occurrences times, want 1)"
+    echo "  $ruby_out"
+  fi
+}
+dir_as_db_pair "directory named .db (human)" --corpus "$corpus_dir/dir.db" -n "https://x.com/users/1"
+dir_as_db_pair "directory named .db (json)"  --json --corpus "$corpus_dir/dir.db" -n "https://x.com/users/1"
+
 corpus_pair() {
   local label="$1" ext="$2"
   local ruby_path="$corpus_dir/ruby$ext"
