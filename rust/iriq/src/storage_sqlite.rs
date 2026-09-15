@@ -761,7 +761,9 @@ impl Storage for SqliteStorage {
     fn close(&mut self) -> Result<()> {
         let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         // Checkpointing only compacts the WAL; committed data is already safe.
-        let _ = c.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+        // PASSIVE never invokes the busy handler, so exit doesn't wait on
+        // another connection's reader or writer.
+        let _ = c.execute_batch("PRAGMA wal_checkpoint(PASSIVE);");
         Ok(())
     }
     fn save_to(&mut self, path: &Path) -> Result<()> {
@@ -1036,6 +1038,36 @@ mod tests {
             .map(|c| c.key)
             .collect();
         assert_eq!(keys, ["https://api.github.com/auth/{ghp}"]);
+    }
+
+    #[test]
+    fn closing_never_waits_on_other_connections() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static WAITS: AtomicUsize = AtomicUsize::new(0);
+        fn count_wait(_attempt: i32) -> bool {
+            WAITS.fetch_add(1, Ordering::SeqCst);
+            false
+        }
+        let path = temp_db("close-wait");
+        let mut s = SqliteStorage::open(&path, 0).unwrap();
+        s.record_observation("https://x.com/1").unwrap();
+        let reader = Connection::open(&path).unwrap();
+        reader.execute_batch("BEGIN").unwrap();
+        reader
+            .query_row("SELECT COUNT(*) FROM observed_iris", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .unwrap();
+        s.record_observation("https://x.com/2").unwrap();
+        // Stands in for the busy timeout: counts each time close would wait.
+        s.conn
+            .get_mut()
+            .unwrap()
+            .busy_handler(Some(count_wait))
+            .unwrap();
+
+        s.close().unwrap();
+        assert_eq!(WAITS.load(Ordering::SeqCst), 0);
     }
 
     #[test]
