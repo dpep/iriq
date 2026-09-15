@@ -12,6 +12,17 @@ describe Iriq::CLI do
     cli.run(args)
   end
 
+  describe "spec sandbox" do
+    # Guards the suite itself: no example may resolve the developer's real
+    # corpus, whatever IRIQ_* / XDG_* the shell exported.
+    it "never resolves a corpus path under the developer's home" do
+      home = File.expand_path("~")
+      expect(cli.send(:default_corpus_path)).not_to start_with(home)
+      expect(cli.send(:resolve_reset_path, {})).not_to start_with(home)
+      expect(cli.send(:resolve_corpus_path, {})).to be_nil
+    end
+  end
+
   describe "help / usage / version" do
     it "prints usage with no args" do
       expect(run).to eq(0)
