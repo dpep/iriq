@@ -1,7 +1,8 @@
-//! A position keeps at most `max_values_per_position` distinct values. A
-//! writer that remembers how many a position holds (instead of counting per
-//! new value) must still honor the cap when other processes write the same
-//! `.db`, and must notice when another process clears the views.
+//! A position, and each query param of a cluster, keeps at most
+//! `max_values_per_position` distinct values. A writer that remembers how many
+//! a slot holds (instead of counting per new value) must still honor the cap
+//! when other processes write the same `.db`, and must notice when another
+//! process clears the views.
 #![cfg(feature = "sqlite")]
 
 use iriq::Corpus;
@@ -52,6 +53,43 @@ fn slot(path: &Path) -> (usize, usize) {
     (tracked as usize, total as usize)
 }
 
+/// The most distinct values any cluster tracks for its `q` param.
+fn param_slot(path: &Path) -> usize {
+    let n: i64 = Connection::open(path)
+        .unwrap()
+        .query_row(
+            "SELECT COALESCE(MAX(n), 0) FROM \
+             (SELECT COUNT(*) AS n FROM cluster_param_values WHERE name = 'q' GROUP BY cluster_key)",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    n as usize
+}
+
+#[test]
+fn a_clear_by_another_connection_reopens_the_capped_param() {
+    let path = corpus_with_cap("clear-param", 3);
+    let mut corpus = Corpus::open(&path).unwrap();
+    corpus
+        .batch(|c| {
+            for v in ["a", "b", "c", "d"] {
+                c.observe(&format!("https://x.com/s?q={v}"))?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(param_slot(&path), 3);
+
+    Connection::open(&path)
+        .unwrap()
+        .execute("DELETE FROM cluster_param_values", [])
+        .unwrap();
+
+    corpus.batch(|c| c.observe("https://x.com/s?q=e")).unwrap();
+    assert_eq!(param_slot(&path), 1, "the cleared param took no new value");
+}
+
 #[test]
 fn a_clear_by_another_connection_reopens_the_capped_slot() {
     let path = corpus_with_cap("clear", 3);
@@ -89,7 +127,7 @@ fn value_cap_writer_process() {
     // Every writer takes its first count of the slot before any can fill it;
     // otherwise one writer fills the cap and the rest never insert at all.
     corpus
-        .batch(|c| c.observe(&format!("https://x.com/t/w{id}first")))
+        .batch(|c| c.observe(&format!("https://x.com/t/w{id}first?q=w{id}first")))
         .unwrap();
     std::fs::write(format!("{path}.ready.{id}"), b"").unwrap();
     let go = PathBuf::from(format!("{path}.go"));
@@ -99,7 +137,7 @@ fn value_cap_writer_process() {
     for i in 1..OBSERVATIONS_PER_WRITER {
         // One transaction per observation, then a pause so writers interleave.
         corpus
-            .batch(|c| c.observe(&format!("https://x.com/t/w{id}v{i}")))
+            .batch(|c| c.observe(&format!("https://x.com/t/w{id}v{i}?q=w{id}v{i}")))
             .unwrap();
         std::thread::sleep(Duration::from_micros(500));
     }
@@ -129,4 +167,5 @@ fn concurrent_writer_processes_never_exceed_the_value_cap() {
     }
 
     assert_eq!(slot(&path), (CAP, WRITERS * OBSERVATIONS_PER_WRITER));
+    assert_eq!(param_slot(&path), CAP);
 }

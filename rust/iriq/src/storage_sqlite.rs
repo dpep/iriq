@@ -31,13 +31,20 @@ pub struct SqliteStorage {
     path: PathBuf,
     /// Batches open on this connection; the first is the transaction.
     depth: usize,
-    /// Tracked values per position, counted inside a batch so each new value
+    /// Tracked values per slot, counted inside a batch so each new value
     /// needn't re-count them. Exact only while this connection holds the
     /// write lock and, across batches, while `data_version` still matches.
-    value_counts: HashMap<Position, usize>,
+    value_counts: HashMap<ValueSlot, usize>,
     /// `PRAGMA data_version` as of this connection's last batch; it changes
     /// when any other connection commits.
     data_version: Option<i64>,
+}
+
+/// Somewhere the corpus keeps at most `max_values` distinct values.
+#[derive(PartialEq, Eq, Hash)]
+enum ValueSlot {
+    Position(Position),
+    Param { cluster_key: String, name: String },
 }
 
 impl SqliteStorage {
@@ -283,7 +290,8 @@ impl Storage for SqliteStorage {
             .and_then(|mut s| s.execute(params![pos.host, scope, pos.locator, value]))
             .map_err(err)?;
         if updated == 0 {
-            let remembered = self.value_counts.get(pos).filter(|_| self.depth > 0);
+            let slot = ValueSlot::Position(pos.clone());
+            let remembered = self.value_counts.get(&slot).filter(|_| self.depth > 0);
             let mut card = match remembered {
                 Some(&n) => n,
                 None => c
@@ -306,7 +314,7 @@ impl Storage for SqliteStorage {
                 card += 1;
             }
             if self.depth > 0 {
-                self.value_counts.insert(pos.clone(), card);
+                self.value_counts.insert(slot, card);
             }
         }
         Ok(())
@@ -393,18 +401,32 @@ impl Storage for SqliteStorage {
                 .and_then(|mut s| s.execute(params![key, name, v]))
                 .map_err(err)?;
             if updated == 0 {
-                let card: i64 = c
-                    .prepare_cached(
-                        "SELECT COUNT(*) FROM cluster_param_values WHERE cluster_key = ? AND name = ?",
-                    )
-                    .and_then(|mut s| s.query_row(params![key, name], |r| r.get(0)))
-                    .map_err(err)?;
-                if (card as usize) < self.max_values {
+                let slot = ValueSlot::Param {
+                    cluster_key: key.to_string(),
+                    name: name.to_string(),
+                };
+                let remembered = self.value_counts.get(&slot).filter(|_| self.depth > 0);
+                let mut card = match remembered {
+                    Some(&n) => n,
+                    None => c
+                        .prepare_cached(
+                            "SELECT COUNT(*) FROM cluster_param_values WHERE cluster_key = ? AND name = ?",
+                        )
+                        .and_then(|mut s| {
+                            s.query_row(params![key, name], |r| r.get::<_, i64>(0))
+                        })
+                        .map_err(err)? as usize,
+                };
+                if card < self.max_values {
                     c.prepare_cached(
                         "INSERT INTO cluster_param_values (cluster_key, name, value, count) VALUES (?, ?, ?, 1)",
                     )
                     .and_then(|mut s| s.execute(params![key, name, v]))
                     .map_err(err)?;
+                    card += 1;
+                }
+                if self.depth > 0 {
+                    self.value_counts.insert(slot, card);
                 }
             }
         }
