@@ -323,3 +323,150 @@ fn fixture_corpus_normalize() {
         );
     }
 }
+
+// ─── Param numeric range and file kinds (params_for) ────────────────────────
+
+#[derive(Deserialize)]
+struct NumericExpect {
+    #[serde(rename = "type")]
+    ty: String,
+    count: usize,
+    min: Option<f64>,
+    max: Option<f64>,
+    avg: Option<f64>,
+}
+
+#[derive(Deserialize)]
+struct ParamsFx<T> {
+    query: String,
+    inputs: Vec<String>,
+    expected: HashMap<String, T>,
+}
+
+fn params_after<T>(fx: &ParamsFx<T>) -> HashMap<String, ParamSummary> {
+    let mut c = Corpus::new();
+    for u in &fx.inputs {
+        c.observe(u).unwrap();
+    }
+    let rows = c.params_for(&fx.query);
+    assert_eq!(rows.len(), fx.expected.len(), "param count");
+    rows.into_iter().map(|r| (r.name.clone(), r)).collect()
+}
+
+#[test]
+fn fixture_numeric_range() {
+    let fx: ParamsFx<NumericExpect> = load("numeric_range.json");
+    let got = params_after(&fx);
+    for (name, want) in &fx.expected {
+        let p = &got[name];
+        assert_eq!(p.ty.as_str(), want.ty, "{name} type");
+        assert_eq!(p.count, want.count, "{name} count");
+        // Ruby omits the range when no value is finite.
+        let range = (p.numeric_count > 0).then_some((p.min, p.max, p.avg));
+        let want_range = want
+            .min
+            .map(|min| (min, want.max.unwrap(), want.avg.unwrap()));
+        assert_eq!(range, want_range, "{name} min/max/avg");
+    }
+}
+
+#[derive(Deserialize)]
+struct FileKindExpect {
+    #[serde(rename = "type")]
+    ty: String,
+    kind_distribution: HashMap<String, f64>,
+}
+
+#[test]
+fn fixture_file_kind_distribution() {
+    let fx: ParamsFx<FileKindExpect> = load("file_kind_distribution.json");
+    let got = params_after(&fx);
+    for (name, want) in &fx.expected {
+        let p = &got[name];
+        assert_eq!(p.ty.as_str(), want.ty, "{name} type");
+        let kinds: HashMap<String, f64> = p
+            .kind_distribution
+            .iter()
+            .map(|(k, v)| (k.as_str().to_string(), *v))
+            .collect();
+        assert_eq!(kinds, want.kind_distribution, "{name} kind_distribution");
+    }
+}
+
+// ─── Explain trace (the `-e` rows) ──────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct TraceCase {
+    input: String,
+    hints: bool,
+    trace: serde_json::Value,
+}
+
+#[derive(Deserialize)]
+struct TraceFx {
+    cases: Vec<TraceCase>,
+}
+
+#[test]
+fn fixture_trace() {
+    let fx: TraceFx = load("trace.json");
+    for case in &fx.cases {
+        let iri = parse(&case.input).unwrap();
+        let got = serde_json::to_value(iriq::trace_identifier(&iri, case.hints)).unwrap();
+        assert_eq!(
+            got, case.trace,
+            "trace {:?} hints={}",
+            case.input, case.hints
+        );
+    }
+}
+
+// ─── canonical_date and registrable_domain ─────────────────────────────────
+
+#[derive(Deserialize)]
+struct CanonicalDateCase {
+    input: String,
+    canonical: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CanonicalDateFx {
+    cases: Vec<CanonicalDateCase>,
+}
+
+#[test]
+fn fixture_canonical_date() {
+    let fx: CanonicalDateFx = load("canonical_date.json");
+    for case in &fx.cases {
+        assert_eq!(
+            iriq::canonical_date(&case.input),
+            case.canonical,
+            "canonical_date {:?}",
+            case.input
+        );
+    }
+}
+
+#[derive(Deserialize)]
+struct RegistrableCase {
+    host: String,
+    registrable: String,
+}
+
+#[derive(Deserialize)]
+struct RegistrableFx {
+    cases: Vec<RegistrableCase>,
+}
+
+#[test]
+fn fixture_registrable_domain() {
+    let fx: RegistrableFx = load("registrable_domain.json");
+    for case in &fx.cases {
+        assert_eq!(
+            iriq::registrable_domain(&case.host),
+            case.registrable,
+            "registrable_domain {:?}",
+            case.host
+        );
+    }
+}
