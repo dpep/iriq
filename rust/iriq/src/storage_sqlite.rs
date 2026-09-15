@@ -50,7 +50,7 @@ enum ValueSlot {
 impl SqliteStorage {
     pub fn open(path: &Path, max_values: usize) -> Result<Self> {
         let rs_err = |e| Error::sqlite(path, e);
-        let conn = Connection::open(path).map_err(rs_err)?;
+        let conn = Connection::open(path).map_err(|e| rs_err(without_path(e, path)))?;
         // PRAGMAs first (busy_timeout before journal_mode).
         conn.execute_batch("PRAGMA busy_timeout = 30000;")
             .map_err(rs_err)?;
@@ -175,6 +175,21 @@ impl SqliteStorage {
             load_counts(&mut ps, values, types);
             Ok(Some(ps))
         })
+    }
+}
+
+/// rusqlite appends the path to a failed open's message; `Error::Sqlite`
+/// already names it.
+fn without_path(e: rusqlite::Error, path: &Path) -> rusqlite::Error {
+    match e {
+        rusqlite::Error::SqliteFailure(code, Some(msg)) => {
+            let msg = match msg.strip_suffix(&format!(": {}", path.display())) {
+                Some(bare) => bare.to_string(),
+                None => msg,
+            };
+            rusqlite::Error::SqliteFailure(code, Some(msg))
+        }
+        e => e,
     }
 }
 

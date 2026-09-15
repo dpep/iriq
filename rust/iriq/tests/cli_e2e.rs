@@ -50,13 +50,22 @@ fn corpus_errors_name_the_corpus_and_honor_json() {
     std::fs::write(&notes, r#"{"foo": 1}"#).unwrap();
     std::fs::write(&broken, r#"{"host_counts": "#).unwrap();
 
-    for (path, reason) in [
+    #[allow(unused_mut)]
+    let mut cases = vec![
         (
-            &notes,
+            notes.clone(),
             "not an iriq corpus (no corpus keys at the top level)",
         ),
-        (&broken, "not valid JSON"),
-    ] {
+        (broken.clone(), "not valid JSON"),
+    ];
+    #[cfg(feature = "sqlite")]
+    {
+        // The path is named once, even where SQLite's own message would repeat it.
+        let not_a_file = dir.join("dir.db");
+        std::fs::create_dir_all(&not_a_file).unwrap();
+        cases.push((not_a_file, "unable to open database file"));
+    }
+    for (path, reason) in &cases {
         let p = path.to_str().unwrap();
         let message = format!("corpus {p}: {reason}");
         let (_, err, ok) = run_full(&["--corpus", p, "-n", "https://foo.com/x"], "");
