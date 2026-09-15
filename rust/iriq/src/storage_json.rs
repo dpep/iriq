@@ -11,6 +11,7 @@ use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// JSON-backed corpus storage. Wraps a `MemoryStorage` with load/save
 /// against a file. On-disk format matches Ruby + Go byte-for-byte
@@ -27,11 +28,19 @@ impl JsonStorage {
             inner: MemoryStorage::new(max_values),
             path: path.to_path_buf(),
         };
-        if let Ok(meta) = std::fs::metadata(path) {
-            if meta.len() > 0 {
-                let data = std::fs::read(path).map_err(|e| Error::io(path, e))?;
-                load_memory_from_json(&mut s.inner, &data, path)?;
+        match std::fs::read(path) {
+            Ok(data) if data.is_empty() => {}
+            Ok(data) => load_memory_from_json(&mut s.inner, &data, path)?,
+            // A corpus that doesn't exist yet is created on save, so fail now
+            // (naming it) if there is nowhere to create it.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let dir = path
+                    .parent()
+                    .filter(|d| !d.as_os_str().is_empty())
+                    .unwrap_or(Path::new("."));
+                std::fs::metadata(dir).map_err(|e| Error::io(path, e))?;
             }
+            Err(e) => return Err(Error::io(path, e)),
         }
         Ok(s)
     }
@@ -194,14 +203,37 @@ pub fn dump_memory_to_json(m: &MemoryStorage, path: &Path) -> Result<()> {
 
     let data = serde_json::to_string(&Value::Object(root))
         .map_err(|e| Error::io(path, std::io::Error::other(e)))?;
+    // A temp name per write: concurrent writers sharing `<path>.tmp` rename
+    // each other's file away and fail. The last rename still wins.
+    static WRITES: AtomicU64 = AtomicU64::new(0);
     let mut tmp = path.as_os_str().to_owned();
-    tmp.push(".tmp");
+    tmp.push(format!(
+        ".{}.{}.tmp",
+        std::process::id(),
+        WRITES.fetch_add(1, Ordering::Relaxed)
+    ));
     let write = || -> std::io::Result<()> {
         std::fs::File::create(&tmp)?.write_all(data.as_bytes())?;
         std::fs::rename(&tmp, path)
     };
-    write().map_err(|e| Error::io(path, e))
+    write().map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        Error::io(path, e)
+    })
 }
+
+/// The top-level keys a corpus dump writes (Ruby's `to_dump` writes the same).
+const CORPUS_KEYS: [&str; 9] = [
+    "host_counts",
+    "path_length_counts",
+    "raw_shape_counts",
+    "fingerprint_counts",
+    "max_values_per_position",
+    "position_stats",
+    "clusterer",
+    "observed_iris",
+    "activated_recognizers",
+];
 
 fn position_stats_to_value(s: &PositionStats) -> Value {
     let mut o = Map::new();
@@ -264,6 +296,14 @@ pub fn load_memory_from_json(m: &mut MemoryStorage, data: &[u8], path: &Path) ->
     let obj = root
         .as_object()
         .ok_or_else(|| Error::corrupt(path, "root not an object"))?;
+    // `{}` is an empty corpus; any other object must be one we wrote, or a
+    // save would overwrite someone else's JSON file.
+    if !obj.is_empty() && !CORPUS_KEYS.iter().any(|k| obj.contains_key(*k)) {
+        return Err(Error::corrupt(
+            path,
+            "not an iriq corpus (no corpus keys at the top level)",
+        ));
+    }
 
     // Note: MemoryStorage owns the inner maps; we use the trait methods that
     // increment one-by-one (since there's no direct setter). For loading,

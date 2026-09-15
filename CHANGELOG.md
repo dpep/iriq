@@ -22,6 +22,10 @@
   - **Update changed signatures.** `normalize_identifier(&iri, hints)` and `trace_identifier(&iri, hints)` no longer take a classifier. `cross_host_shapes(&corpus, n)` is now `corpus.cross_host_shapes(n)`. `Corpus::activate_proposal` returns `Result<()>`, and `activate_proposals_above` returns the `RecognizerProposal`s it activated.
   - **Adjust for `#[non_exhaustive]`.** It now covers `Extractor`, `Identifier`, `Kind`, `Position`, `PositionScope`, `Classification`, `CorpusEntry`, `HostStrategy`, `CrossHostShape`, `RecognizerProposal`, `ProposalOptions`, `SegmentHint`, `TraceResult` and `TraceRow`. Build `Extractor` and `ProposalOptions` from `::new()` / `::default()` and assign fields, and add a `_ =>` arm when matching these enums.
   - **New:** `Corpus` implements `Debug`, and `segment_type_from_name` and `CustomType` are exported at the root.
+- **Bugfix (Rust, JSON corpora): three ways a `.json` corpus failed badly.**
+  - Concurrent saves to one file crashed (`No such file or directory`), because every writer renamed the same `<path>.tmp`. Each write now uses its own temp file. The last writer still wins: treat a `.json` corpus as single-writer, or use `.db` for concurrent observers.
+  - A JSON file that isn't a corpus opened as an empty corpus and was overwritten on save. Opening an object with none of the corpus's top-level keys now fails with `iriq: corpus <path>: not an iriq corpus (no corpus keys at the top level)` and exits 1, leaving the file untouched. An empty object `{}` is still an empty corpus.
+  - A corpus in a directory that doesn't exist opened fine and failed only at save, with an error that didn't name the file. It now fails at open with `iriq: corpus <path>: No such file or directory (os error 2)`.
 <!-- /lane: rust-storage -->
 
 ###  0.34.0  (2026-08-12)

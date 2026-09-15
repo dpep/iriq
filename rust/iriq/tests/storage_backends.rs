@@ -185,6 +185,61 @@ fn exporting_to_a_sqlite_path_is_refused() {
     assert!(!target.exists(), "wrote an unopenable file");
 }
 
+// ── JSON backend ─────────────────────────────────────────────────────────────
+
+#[test]
+fn a_json_object_without_corpus_keys_is_refused() {
+    let p = temp_path("not_a_corpus.json");
+    std::fs::write(&p, br#"{"name":"not a corpus"}"#).unwrap();
+
+    let err = Corpus::open(&p).expect_err("opened a JSON file that isn't a corpus");
+    assert!(matches!(err, iriq::Error::Corrupt { .. }), "{err:?}");
+    assert_eq!(std::fs::read(&p).unwrap(), br#"{"name":"not a corpus"}"#);
+    cleanup(&p);
+}
+
+#[test]
+fn an_empty_json_object_is_an_empty_corpus() {
+    let p = temp_path("empty_object.json");
+    std::fs::write(&p, b"{}").unwrap();
+
+    assert_eq!(Corpus::open(&p).unwrap().observed_iri_count(), 0);
+    cleanup(&p);
+}
+
+#[test]
+fn a_json_corpus_in_a_missing_directory_fails_at_open_naming_it() {
+    let dir = temp_path("missing_dir");
+    let _ = std::fs::remove_dir_all(&dir);
+    let p = dir.join("c.json");
+
+    let err = Corpus::open(&p).expect_err("opened a corpus with nowhere to save it");
+    assert!(matches!(err, iriq::Error::Io { .. }), "{err:?}");
+    assert!(err.to_string().contains(p.to_str().unwrap()), "{err}");
+}
+
+#[test]
+fn concurrent_json_saves_to_one_path_all_succeed() {
+    let p = temp_path("concurrent_save.json");
+    cleanup(&p);
+
+    std::thread::scope(|s| {
+        for _ in 0..8 {
+            s.spawn(|| {
+                let mut c = Corpus::new();
+                c.observe("https://x.com/users/1").unwrap();
+                for _ in 0..50 {
+                    c.save(&p).expect("a concurrent save failed");
+                }
+            });
+        }
+    });
+
+    // Last writer wins; whichever it was, the file is a whole corpus.
+    assert_eq!(Corpus::open(&p).unwrap().observed_iri_count(), 1);
+    cleanup(&p);
+}
+
 #[test]
 #[cfg(feature = "sqlite")]
 fn sqlite_resave_to_same_path_is_idempotent() {
