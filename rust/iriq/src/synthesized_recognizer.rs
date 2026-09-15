@@ -56,7 +56,9 @@ impl SynthesizedRecognizer {
 
 impl Recognizer for SynthesizedRecognizer {
     fn try_classify(&self, segment: &str) -> Option<Verdict> {
-        if !segment.starts_with(&self.prefix) {
+        // Ruby's `\A<prefix>[A-Za-z0-9]+\z`: the whole segment, ASCII suffix.
+        let suffix = segment.strip_prefix(self.prefix.as_str())?;
+        if suffix.is_empty() || !suffix.bytes().all(|b| b.is_ascii_alphanumeric()) {
             return None;
         }
         Some(Verdict {
@@ -64,5 +66,35 @@ impl Recognizer for SynthesizedRecognizer {
             confidence: 1.0,
             specificity: self.specificity,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn matches_the_prefix_then_ascii_alphanumerics_only() {
+        let r = SynthesizedRecognizer::from_prefix(
+            "ghp_",
+            crate::classifier::segment_type_from_name("ghp"),
+        );
+        // Ruby's SynthesizedRecognizer#try on each segment.
+        let cases = [
+            ("ghp_abc123", true),
+            ("ghp_ABC", true),
+            ("ghp_abc-def", false),
+            ("ghp_a.b", false),
+            ("ghp_", false),
+            ("ghp_x_y", false),
+            ("GHP_abc", false),
+            ("xghp_abc", false),
+            ("ghp_é1", false),
+            ("ghp_abc\n", false),
+            ("ghp_١٢", false),
+        ];
+        for (segment, matches) in cases {
+            assert_eq!(r.try_classify(segment).is_some(), matches, "{segment:?}");
+        }
     }
 }
