@@ -1345,12 +1345,90 @@ fn emit_param_summary<W: Write>(stdout: &mut W, c: &Cluster) {
     }
 }
 
+// Ruby's `format_num` (lib/iriq/cli.rb): a whole value prints as its exact
+// integer (`Float#to_i`), anything else as `Float#round(2).to_s`.
 fn format_num(n: f64) -> String {
     if n == n.trunc() {
-        format!("{}", n as i64)
+        // `to_i` has no negative zero.
+        return if n == 0.0 {
+            "0".to_string()
+        } else {
+            format!("{n:.0}")
+        };
+    }
+    ruby_float_to_s(ruby_round2(n))
+}
+
+// `Float#to_s` (flo_to_s in Ruby's numeric.c) for a `ruby_round2` result, which
+// is zero or at least 0.01 in magnitude, so never Ruby's small-exponent form.
+fn ruby_float_to_s(r: f64) -> String {
+    if r != r.trunc() {
+        // Both runtimes print the shortest round-tripping digits, but when the
+        // value sits exactly between two candidates Ruby keeps the even last
+        // digit and `{}` does not; exact formatting at that length matches Ruby.
+        let shortest = r.to_string();
+        let decimals = shortest.split_once('.').map_or(0, |(_, f)| f.len());
+        return format!("{r:.decimals$}");
+    }
+    let int = format!("{:.0}", r.abs());
+    if int.len() <= f64::DIGITS as usize {
+        return format!("{r:.1}");
+    }
+    // Past DBL_DIG integer digits Ruby switches to `d.ddde+XX`.
+    let digits = int.trim_end_matches('0');
+    let (lead, rest) = digits.split_at(1);
+    let rest = if rest.is_empty() { "0" } else { rest };
+    let sign = if r < 0.0 { "-" } else { "" };
+    format!("{sign}{lead}.{rest}e+{:02}", int.len() - 1)
+}
+
+// `Float#round(2)`: flo_round and round_half_up in Ruby's numeric.c.
+fn ruby_round2(x: f64) -> f64 {
+    const NDIGITS: i32 = 2;
+    const FLOAT_DIG: i32 = f64::DIGITS as i32 + 2;
+    const SCALE: f64 = 100.0;
+    let binexp = frexp_exponent(x);
+    // float_round_overflow: x * 100 is already an integer.
+    let low_decimal_exp = if binexp > 0 {
+        binexp / 4
     } else {
-        let rounded = (n * 100.0).round() / 100.0;
-        format!("{}", rounded)
+        binexp / 3 - 1
+    };
+    if NDIGITS >= FLOAT_DIG - low_decimal_exp {
+        return x;
+    }
+    // float_round_underflow: too small to reach the second decimal.
+    let high_decimal_exp = if binexp > 0 {
+        binexp / 3 + 1
+    } else {
+        binexp / 4
+    };
+    if NDIGITS < -high_decimal_exp {
+        return 0.0;
+    }
+    let mut f = (x * SCALE).round();
+    // x * 100 can round below the half; this re-checks against x itself.
+    if x > 0.0 {
+        if (f + 0.5) / SCALE <= x {
+            f += 1.0;
+        }
+    } else if (f - 0.5) / SCALE >= x {
+        f -= 1.0;
+    }
+    f / SCALE
+}
+
+// The exponent C's frexp reports: x = m * 2^exp with 0.5 <= |m| < 1.
+fn frexp_exponent(x: f64) -> i32 {
+    if x == 0.0 {
+        return 0;
+    }
+    let biased = ((x.to_bits() >> 52) & 0x7ff) as i32;
+    if biased == 0 {
+        // Subnormal: scale into the normal range first.
+        frexp_exponent(x * 2f64.powi(54)) - 54
+    } else {
+        biased - 1022
     }
 }
 
@@ -1869,4 +1947,39 @@ fn emit_error<W: Write>(
         let _ = writeln!(stderr, "iriq: {}", message);
     }
     exit
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_num;
+
+    #[test]
+    fn format_num_matches_ruby() {
+        // Each expectation is Ruby's `Iriq::CLI#format_num` output for the value.
+        let cases: &[(f64, &str)] = &[
+            (18446744073709551616.0, "18446744073709551616"),
+            (1e23, "99999999999999991611392"),
+            (6004799503160661.0, "6004799503160661"),
+            (0.0, "0"),
+            (-0.0, "0"),
+            (3.5, "3.5"),
+            (0.75, "0.75"),
+            (4.998, "5.0"),
+            (0.001, "0.0"),
+            (-0.004, "-0.0"),
+            (-0.00001, "0.0"),
+            (1.005, "1.01"),
+            (2.675, "2.68"),
+            (-0.125, "-0.13"),
+            (1234.565, "1234.57"),
+            (4503599627370495.5, "4503599627370495.5"),
+            // Exactly between the two shortest candidates, .12 and .13.
+            (92_132_193_871_992.0 + 0.125, "92132193871992.12"),
+            (2983624634074204.5, "2.983624634074205e+15"),
+            (-4123968251008709.5, "-4.12396825100871e+15"),
+        ];
+        for &(n, want) in cases {
+            assert_eq!(format_num(n), want, "format_num({n:e})");
+        }
+    }
 }

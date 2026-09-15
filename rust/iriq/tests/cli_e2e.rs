@@ -265,6 +265,18 @@ fn reset_deletes_the_corpus_and_tolerates_a_missing_one() {
     );
 }
 
+#[test]
+fn cluster_ranges_print_numbers_beyond_i64_exactly() {
+    let urls = "https://u64.com/p?v=18446744073709551616\n\
+                https://u64.com/p?v=18446744073709551617\n\
+                https://u64.com/p?v=99999999999999999999999\n";
+    let out = run(&["cluster"], urls);
+    assert!(
+        out.contains("18446744073709551616..99999999999999991611392  avg 33345631162715802173440"),
+        "{out}"
+    );
+}
+
 // ── errors & meta ────────────────────────────────────────────────────────────
 
 #[test]

@@ -34,6 +34,10 @@
   - The CLI detects a terminal with `std::io::IsTerminal` instead of an `unsafe` Unix-only `isatty` call.
 <!-- /lane: rust-storage -->
 
+<!-- lane: rust-cli -->
+- **Bugfix (Rust): the human cluster view printed some numbers wrong.** A numeric param past 2^63 (`?v=18446744073709551616`) printed `9223372036854775807..9223372036854775807  avg 9223372036854775807`; it now prints the exact value, as Ruby does (`18446744073709551616..99999999999999991611392`). Averages and ranges also round and print like Ruby's `format_num` everywhere else: a non-whole value that rounds to a whole number keeps its `.0` (`avg 3.0`, was `avg 3`), a rounded `-0.004` prints `-0.0`, `1.005` rounds to `1.01`, and values past 15 digits use Ruby's `e+15` notation. `--json` output is unchanged.
+<!-- /lane: rust-cli -->
+
 ###  0.34.0  (2026-08-12)
 - **Rust: SQLite is now an optional (default-on) feature.** `cargo install iriq`, the Homebrew formula, and the CLI are unchanged — `default = ["sqlite"]`. Library consumers who only need parsing, extraction, or normalization can now take `iriq = { version = "0.34", default-features = false }` and skip the bundled C SQLite build entirely (`rusqlite` is the crate's only non-Rust dependency). Without the feature, `open_storage` rejects `.db`/`.sqlite`/`.sqlite3` paths with a clear `Unsupported` error and the CLI's auto-default corpus becomes `default.json` instead of `default.db`; Memory and JSON backends are unaffected. No behavior change with default features, so Ruby parity and the shared schema are untouched. CI now gates the no-default-features build (test + clippy) so the configuration can't rot.
 
