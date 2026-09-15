@@ -305,13 +305,21 @@ impl Storage for SqliteStorage {
     ) -> Result<()> {
         let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         let err = |e| Error::sqlite(&self.path, e);
-        c.prepare_cached(
-            "INSERT INTO clusters (key, host, scheme, shape, count, ord) \
-             VALUES (?, ?, ?, ?, 1, (SELECT COALESCE(MAX(ord), 0) + 1 FROM clusters)) \
-             ON CONFLICT(key) DO UPDATE SET count = count + 1",
-        )
-        .and_then(|mut s| s.execute(params![key, host, scheme, shape]))
-        .map_err(err)?;
+        // The next ord scans every cluster (ord has no index), so only a new
+        // cluster pays for it; ON CONFLICT covers a writer that inserted it since.
+        let bumped = c
+            .prepare_cached("UPDATE clusters SET count = count + 1 WHERE key = ?")
+            .and_then(|mut s| s.execute(params![key]))
+            .map_err(err)?;
+        if bumped == 0 {
+            c.prepare_cached(
+                "INSERT INTO clusters (key, host, scheme, shape, count, ord) \
+                 VALUES (?, ?, ?, ?, 1, (SELECT COALESCE(MAX(ord), 0) + 1 FROM clusters)) \
+                 ON CONFLICT(key) DO UPDATE SET count = count + 1",
+            )
+            .and_then(|mut s| s.execute(params![key, host, scheme, shape]))
+            .map_err(err)?;
+        }
 
         let examples_count: i64 = c
             .prepare_cached("SELECT COUNT(*) FROM cluster_examples WHERE cluster_key = ?")
@@ -965,5 +973,37 @@ mod tests {
             (stats.numeric_count, stats.numeric_min, stats.numeric_max),
             (1, 1.0, 1.0)
         );
+    }
+
+    #[test]
+    fn a_cluster_keeps_its_first_seen_order_as_it_grows() {
+        let mut s = SqliteStorage::open(&temp_db("ord"), 0).unwrap();
+        for url in [
+            "https://a.com/1",
+            "https://b.com/1",
+            "https://a.com/2",
+            "https://c.com/1",
+        ] {
+            let iri = parse(url).unwrap();
+            s.add_to_cluster(&iri.host, &iri.host, "https", "/{id}", &iri)
+                .unwrap();
+        }
+        let listed: Vec<(String, usize)> =
+            s.clusters().into_iter().map(|c| (c.key, c.count)).collect();
+        assert_eq!(
+            listed,
+            [
+                ("a.com".into(), 2),
+                ("b.com".into(), 1),
+                ("c.com".into(), 1)
+            ]
+        );
+        let ords: Vec<i64> = {
+            let c = s.conn();
+            let mut stmt = c.prepare("SELECT ord FROM clusters ORDER BY ord").unwrap();
+            let rows = stmt.query_map([], |r| r.get(0)).unwrap();
+            rows.map(|r| r.unwrap()).collect()
+        };
+        assert_eq!(ords, [1, 2, 3]);
     }
 }
