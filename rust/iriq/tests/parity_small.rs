@@ -101,3 +101,14 @@ fn param_distributions_keep_rubys_key_order() {
     assert_eq!(f["type"], "file");
     assert_eq!(keys(&f["kind_distribution"]), ["document", "image"]);
 }
+
+#[test]
+fn segment_values_list_by_descending_count_then_value() {
+    let stdin: String = ["5", "6", "11", "5", "6", "11", "11", "3"]
+        .iter()
+        .map(|v| format!("https://foo.com/users/{v}\n"))
+        .collect();
+    let clusters = cluster_json_lines(&stdin);
+    let users = cluster(&clusters, "/users/{user_id}");
+    assert_eq!(keys(&users["segments"][1]["values"]), ["11", "5", "6", "3"]);
+}

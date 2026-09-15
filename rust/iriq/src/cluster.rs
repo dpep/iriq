@@ -57,7 +57,8 @@ pub const HTTP_STATUS_MAX_DISTINCT: usize = 30;
 pub struct SegmentPositionStat {
     pub position: usize,
     pub stable: bool,
-    pub values: HashMap<String, usize>,
+    /// By descending count, then value.
+    pub values: Vec<(String, usize)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -137,10 +138,17 @@ impl Cluster {
         self.segment_counts
             .iter()
             .enumerate()
-            .map(|(i, counts)| SegmentPositionStat {
-                position: i,
-                stable: counts.len() == 1,
-                values: counts.clone(),
+            .map(|(i, counts)| {
+                // Not storage order: SQLite reads values back sorted, JSON
+                // and memory in first-seen order.
+                let mut values: Vec<(String, usize)> =
+                    counts.iter().map(|(v, &n)| (v.clone(), n)).collect();
+                values.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+                SegmentPositionStat {
+                    position: i,
+                    stable: counts.len() == 1,
+                    values,
+                }
             })
             .collect()
     }

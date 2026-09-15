@@ -98,17 +98,19 @@ module Iriq
       end
     end
 
-    # Per-position summary:
+    # Per-position summary, values by descending count then value:
     #   [
     #     { position: 0, stable: true,  values: { "users" => 3 } },
     #     { position: 1, stable: false, values: { "1" => 1, "2" => 1, "3" => 1 } },
     #   ]
+    # Not storage order: SQLite reads values back sorted, memory and JSON
+    # in first-seen order.
     def segment_stats
       @segment_counts.each_with_index.map do |counts, i|
         {
           position: i,
           stable:   counts.size == 1,
-          values:   counts.dup,
+          values:   counts.sort_by { |v, n| [-n, v] }.to_h,
         }
       end
     end
