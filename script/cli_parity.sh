@@ -299,6 +299,8 @@ run_pair "invalid utf-8 stdin json"      "$bad_utf8" -C --json -n
 # untouched), and a SQLite corpus from a newer schema.
 printf '{"foo": 1}' > "$corpus_dir/notes.json"
 run_pair "refuse non-corpus json"      "" --corpus "$corpus_dir/notes.json" -n "https://foo.com/x"
+# Recreate it: a runtime that wrongly accepts the file also overwrites it.
+printf '{"foo": 1}' > "$corpus_dir/notes.json"
 run_pair "refuse non-corpus json json" "" --json --corpus "$corpus_dir/notes.json" -n "https://foo.com/x"
 if [[ "$(cat "$corpus_dir/notes.json")" == '{"foo": 1}' ]]; then
   pass_count=$((pass_count + 1))
@@ -617,6 +619,8 @@ host_strategy_pair "--host=reg collapses subdomains"         reg
 host_strategy_pair "--host=registrable collapses subdomains" registrable
 host_strategy_pair "--host=full keeps subdomains"            full
 host_strategy_pair "--host=none ignores host"                none
+# --host applies to the throwaway -C corpus too (it used to be ignored there).
+run_pair "--host reg with -C" $'https://api.foo.com/users/1\nhttps://app.foo.com/users/2\n' -C --host reg cluster
 
 # Default-corpus resolution via IRIQ_CORPUS. The harness globally exports
 # IRIQ_NO_CORPUS=1; these scenarios undo it per invocation and point
