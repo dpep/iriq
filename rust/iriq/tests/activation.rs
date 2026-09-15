@@ -59,6 +59,39 @@ fn custom_type_survives_sqlite_reopen() {
 }
 
 #[test]
+#[cfg(feature = "sqlite")]
+fn activate_above_reports_only_recognizers_it_newly_activated() {
+    let dir = std::env::temp_dir().join(format!("iriq-activation-held-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("held.db");
+    let _ = std::fs::remove_file(&path);
+    observe_pat_stream(&mut Corpus::open(&path).unwrap());
+    // Held but never reinferred, so the views still propose it.
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(
+            "INSERT INTO activated_recognizers (prefix, type, specificity) VALUES ('ghp_', 'ghp', 0.3)",
+            [],
+        )
+        .unwrap();
+
+    let mut c = Corpus::open(&path).unwrap();
+    assert_eq!(
+        c.propose_recognizers(ProposalOptions::default())
+            .unwrap()
+            .len(),
+        1
+    );
+    let activated = c
+        .activate_proposals_above(0.9, ProposalOptions::default())
+        .unwrap();
+    assert!(activated.is_empty(), "{activated:?}");
+    assert_eq!(c.activated_recognizer_count().unwrap(), 1);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn interning_returns_the_same_custom_instance() {
     let a = segment_type_from_name("ghp");
     let b = segment_type_from_name("ghp");

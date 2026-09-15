@@ -170,17 +170,23 @@ impl Corpus {
     /// Activating one the corpus already holds changes nothing. On SQLite
     /// the activation and its reinfer commit together or not at all.
     pub fn activate_proposal(&mut self, p: &RecognizerProposal) -> Result<()> {
+        self.activate(p).map(|_| ())
+    }
+
+    /// `activate_proposal`, answering whether `p` was newly activated.
+    fn activate(&mut self, p: &RecognizerProposal) -> Result<bool> {
         // The proposal suggests a type name (e.g. "ghp"). Unknown names
         // become dynamic Custom types, matching Ruby's symbol semantics.
         let ty = segment_type_from_name(&p.suggested_type);
         let dump = SynthesizedRecognizer::from_prefix(p.prefix.clone(), ty).dump();
         self.batch(|c| {
             if c.has_activated(&dump)? {
-                return Ok(());
+                return Ok(false);
             }
             c.storage.record_activated_recognizer(dump)?;
             c.reapply_activated_recognizers()?;
-            c.reinfer()
+            c.reinfer()?;
+            Ok(true)
         })
     }
 
@@ -192,7 +198,7 @@ impl Corpus {
     }
 
     /// Activate every proposal at or above `confidence_threshold`, returning
-    /// the proposals activated.
+    /// the proposals newly activated; one the corpus already held is left out.
     pub fn activate_proposals_above(
         &mut self,
         confidence_threshold: f64,
@@ -200,11 +206,9 @@ impl Corpus {
     ) -> Result<Vec<RecognizerProposal>> {
         let mut activated = Vec::new();
         for p in self.propose_recognizers(opts)? {
-            if p.confidence < confidence_threshold {
-                continue;
+            if p.confidence >= confidence_threshold && self.activate(&p)? {
+                activated.push(p);
             }
-            self.activate_proposal(&p)?;
-            activated.push(p);
         }
         Ok(activated)
     }
