@@ -130,7 +130,7 @@ module Iriq
 
           RecognizerProposal.new(
             prefix:            prefix,
-            suggested_type:    prefix.chomp("_").to_sym,
+            suggested_type:    suggested_type_for(prefix),
             positions:         acc[:positions].to_a,
             hosts:             acc[:hosts],
             coverage:          coverage,
@@ -144,7 +144,19 @@ module Iriq
         }.sort_by { |p| [-p.confidence, p.prefix] }
       end
 
+      # Placeholder names iriq already means something by. `ip` is the
+      # ipv4/ipv6 display umbrella, not a classifier type.
+      RESERVED_TYPE_NAMES = (SegmentClassifier::TYPES + %i[ip]).freeze
+
       private
+
+      # A proposal never takes a built-in name — activating `literal_` as
+      # :literal would turn every matching value into a fixed literal — so
+      # those get an `_id` suffix (`literal_` → :literal_id).
+      def suggested_type_for(prefix)
+        name = prefix.chomp("_").to_sym
+        RESERVED_TYPE_NAMES.include?(name) ? :"#{name}_id" : name
+      end
 
       def empty_accumulator
         {

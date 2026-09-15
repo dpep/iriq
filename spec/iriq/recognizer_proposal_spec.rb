@@ -53,6 +53,19 @@ describe "Recognizer proposals" do
       expect(corpus.propose_recognizers(strategies: [])).to eq([])
     end
 
+    it "never names a proposal after a built-in type" do
+      # `literal_` would otherwise propose (and activate) :literal, flipping
+      # every matching value into a fixed literal.
+      25.times { |i| corpus.observe("https://api.x.com/t/literal_Zz#{i.to_s.rjust(2, '0')}") }
+
+      p = corpus.propose_recognizers.first
+      expect(p.prefix).to eq("literal_")
+      expect(p.suggested_type).to eq(:literal_id)
+
+      corpus.activate_proposal(p)
+      expect(corpus.classifier.classify("literal_Zz99")).to eq(:literal_id)
+    end
+
     it "doesn't propose for plain slugs (no `<prefix>_` shape)" do
       30.times { |i| corpus.observe("https://foo.com/posts/red-team-member-#{i}") }
       expect(corpus.propose_recognizers).to be_empty
