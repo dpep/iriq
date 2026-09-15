@@ -138,10 +138,10 @@ The corpus only acts on evidence: it changes a shape only at a position or
 param it has seen at least 5 times. Until then, `-n` prints exactly what `-C`
 would. Dates and currencies always print canonically (`2024-01-15`, `USD`).
 
-The default corpus lives at `$XDG_DATA_HOME/iriq/default.db` (Linux),
-`~/Library/Application Support/iriq/default.db` (macOS), or
-`%LOCALAPPDATA%/iriq/default.db` (Windows). First-run creation prints a
-one-line stderr notice. Three knobs control it:
+The default corpus lives at `$XDG_DATA_HOME/iriq/default.db`, or
+`~/.local/share/iriq/default.db` when `XDG_DATA_HOME` is unset (macOS and
+Linux alike; `%LOCALAPPDATA%/iriq/default.db` on Windows). First-run creation
+prints a one-line stderr notice. Three knobs control it:
 
 ```sh
 $ iriq --no-corpus -n https://foo.com/users/123    # one-shot ephemeral; or -C

@@ -1,3 +1,13 @@
+###  Unreleased
+
+#### What you must do
+
+- **macOS: move your corpus, or point `IRIQ_CORPUS` at it.** The default corpus is now `~/.local/share/iriq/default.db` (or `$XDG_DATA_HOME/iriq/default.db` when that's set), not `~/Library/Application Support/iriq/default.db`. iriq doesn't move it: the first run of this version starts an empty corpus and prints `created corpus at …`. To keep what yours has learned, before that run: `mkdir -p ~/.local/share && mv ~/Library/Application\ Support/iriq ~/.local/share/iriq`. Or set `IRIQ_CORPUS=~/Library/Application\ Support/iriq/default.db`. Linux is unaffected; Windows is unchanged.
+
+#### Changed
+
+- **The default corpus follows XDG on macOS too:** `$XDG_DATA_HOME/iriq` if set and non-empty, else `~/.local/share/iriq`; `%LOCALAPPDATA%\iriq` on Windows. `--corpus` and `IRIQ_CORPUS` still override it. The Ruby CLI on Windows no longer honors `XDG_DATA_HOME`, matching the Rust CLI.
+
 ###  0.35.0  (2026-09-15)
 
 A hardening round. Rust library consumers have migration work; CLI users mostly get fixes, plus a few rules made explicit.
