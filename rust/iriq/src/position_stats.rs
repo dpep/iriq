@@ -48,7 +48,9 @@ impl PositionStats {
         if t != SegmentType::Integer && t != SegmentType::Float {
             return;
         }
-        let Ok(n) = value.parse::<f64>() else {
+        // A 310+ digit value overflows to ±inf; it still counts as an
+        // observation, but would poison min/max/avg (and JSON) as a range stat.
+        let Some(n) = value.parse::<f64>().ok().filter(|n| n.is_finite()) else {
             return;
         };
         if self.numeric_count == 0 || n < self.numeric_min {
@@ -111,5 +113,34 @@ impl PositionStats {
             };
         }
         best.map(|(t, _)| t).unwrap_or(SegmentType::Literal)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn non_finite_numbers_count_as_observations_but_not_as_range_stats() {
+        // 400 digits overflows f64 to ±inf.
+        let huge = "1".repeat(400);
+        let mut stats = PositionStats::new(0);
+        stats.observe(&huge, SegmentType::Integer);
+        assert_eq!(
+            stats.numeric_count, 0,
+            "an all-infinite position has no range"
+        );
+
+        stats.observe("1", SegmentType::Integer);
+        stats.observe(&format!("-{huge}.5"), SegmentType::Float);
+        stats.observe("3.5", SegmentType::Float);
+        assert_eq!(stats.total, 4);
+        assert_eq!(stats.type_counts[&SegmentType::Integer], 2);
+        assert_eq!(stats.cardinality(), 4);
+        assert_eq!(
+            (stats.numeric_count, stats.numeric_min, stats.numeric_max),
+            (2, 1.0, 3.5)
+        );
+        assert_eq!(stats.numeric_avg(), 2.25);
     }
 }
