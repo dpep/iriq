@@ -115,7 +115,11 @@ pub fn registrable_domain(host: &str) -> String {
     if host.is_empty() || IPV4_RE.is_match(host) {
         return host.to_string();
     }
-    let labels: Vec<&str> = host.split('.').collect();
+    // Ruby's String#split drops trailing empty fields: "foo.com." → [foo, com].
+    let mut labels: Vec<&str> = host.split('.').collect();
+    while labels.last() == Some(&"") {
+        labels.pop();
+    }
     if labels.len() <= 2 {
         return host.to_string();
     }
@@ -124,4 +128,29 @@ pub fn registrable_domain(host: &str) -> String {
         return labels[labels.len() - 3..].join(".");
     }
     labels[labels.len() - 2..].join(".")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::registrable_domain;
+
+    #[test]
+    fn matches_ruby_on_trailing_and_empty_labels() {
+        // Expectations are Ruby's RegistrableDomain.for output.
+        let cases = [
+            ("api.foo.com.", "foo.com"),
+            ("www.foo.co.uk.", "foo.co.uk"),
+            ("x.y.z...", "y.z"),
+            ("foo.com.", "foo.com."),
+            ("a.b..", "a.b.."),
+            ("a..b", ".b"),
+            (".com", ".com"),
+            ("..", ".."),
+            ("", ""),
+            ("http://v1.2.3-rc.1.io:8080/1_00/../...", "./"),
+        ];
+        for (host, want) in cases {
+            assert_eq!(registrable_domain(host), want, "{host:?}");
+        }
+    }
 }
