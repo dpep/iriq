@@ -242,6 +242,9 @@ pub enum FileKind {
     Video,
     Archive,
     Code,
+    /// A `kind_distribution` bucket for values whose extension isn't in the
+    /// allowlist. `file_kind` never returns it.
+    Unknown,
 }
 
 impl FileKind {
@@ -257,6 +260,7 @@ impl FileKind {
             FileKind::Video => "video",
             FileKind::Archive => "archive",
             FileKind::Code => "code",
+            FileKind::Unknown => "unknown",
         }
     }
 }

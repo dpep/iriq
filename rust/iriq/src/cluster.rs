@@ -314,20 +314,15 @@ pub fn file_kind_distribution(stats: &PositionStats) -> HashMap<FileKind, f64> {
     if total == 0 {
         return HashMap::new();
     }
-    let mut counts: HashMap<Option<FileKind>, usize> = HashMap::new();
+    let mut counts: HashMap<FileKind, usize> = HashMap::new();
     for (v, n) in &stats.value_counts {
-        let k = file_kind(v);
-        *counts.entry(k).or_insert(0) += *n;
+        let kind = file_kind(v).unwrap_or(FileKind::Unknown);
+        *counts.entry(kind).or_insert(0) += *n;
     }
-    let mut out = HashMap::new();
-    for (k, n) in counts {
-        // Unknown values are bucketed separately in Ruby under :unknown;
-        // here we filter to known kinds. (Phase 1 omitted this nuance; phase 2 keeps it.)
-        if let Some(kind) = k {
-            out.insert(kind, round_frac((n as f64) / (total as f64)));
-        }
-    }
-    out
+    counts
+        .into_iter()
+        .map(|(kind, n)| (kind, round_frac((n as f64) / (total as f64))))
+        .collect()
 }
 
 // The enum's member values — the established ones (seen enough to be real),
@@ -447,4 +442,23 @@ pub fn placeholder_for(e: &SegmentHint) -> String {
         return format!("{{{}}}", e.hint);
     }
     format!("{{{}}}", e.ty.as_str())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kind_distribution_buckets_unrecognized_extensions_as_unknown() {
+        let mut stats = PositionStats::new(0);
+        for v in ["b.pdf", "b.pdf", "b.pdf", "c.zzz"] {
+            stats.observe(v, SegmentType::File);
+        }
+        let dist: HashMap<&str, f64> = file_kind_distribution(&stats)
+            .into_iter()
+            .map(|(k, v)| (k.as_str(), v))
+            .collect();
+        // Ruby: {"document" => 0.75, "unknown" => 0.25}
+        assert_eq!(dist, HashMap::from([("document", 0.75), ("unknown", 0.25)]));
+    }
 }

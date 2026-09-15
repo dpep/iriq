@@ -4,6 +4,7 @@
 - **Bugfix (Rust): non-ASCII digits and spaces classified differently from Ruby.** `?v=1.٥` was `{float}` and `?v=v𝟎` was `{version}` (Ruby: literal); `?u=http://x.com/a<NBSP>b` stayed literal (Ruby: `{url}`, since only ASCII whitespace ends a URL); `registrable_domain("١.٢.٣.٤")` was treated as an IPv4 literal. Rust now matches Ruby on all of these.
 - **Bugfix (Rust): `--host reg` merged unrelated sites whose hostnames end in a dot.** `api.foo.com.` and `api.bar.com.` both keyed as `com.`; they now key as `foo.com` and `bar.com`, as in Ruby. A corpus built with `--host reg` from such hosts keeps its old `com.` clusters until rebuilt with `--host reg --reinfer`.
 - **Bugfix (Rust): hosts ending a word in capital sigma lowercased differently from Ruby.** `https://ΑΣ-x.com/` parsed to host `ας-x.com` (final-form sigma); it is now `ασ-x.com`, as in Ruby, so both runtimes cluster such hosts under the same key.
+- **Bugfix (Rust): `kind_distribution` dropped values with an unrecognized extension.** A `file` param seen as `b.pdf` ×3 and `c.zzz` reported `{"document":0.75}`; it now reports `{"document":0.75,"unknown":0.25}` like Ruby. Library consumers: `FileKind` gains an `Unknown` variant, used only as that bucket (`file_kind` never returns it).
 <!-- /lane: rust-core -->
 
 ###  0.34.0  (2026-08-12)
