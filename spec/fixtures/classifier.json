@@ -331,6 +331,18 @@
     {
       "input": "",
       "type": "literal"
+    },
+    {
+      "input": "1०००००००",
+      "type": "literal"
+    },
+    {
+      "input": "2024-٠١-١٥",
+      "type": "literal"
+    },
+    {
+      "input": "1.٥",
+      "type": "literal"
     }
   ]
 }

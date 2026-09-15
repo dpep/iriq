@@ -114,6 +114,21 @@
       "input": "https://foo.com/orders?country=US&color=%23fff",
       "hints": true,
       "output": "https://foo.com/orders?color={color}&country={country}"
+    },
+    {
+      "input": "https://x.com/1०००००००",
+      "hints": true,
+      "output": "https://x.com/1०००००००"
+    },
+    {
+      "input": "https://a.com/x?d=2024-٠١-١٥",
+      "hints": true,
+      "output": "https://a.com/x?d=2024-٠١-١٥"
+    },
+    {
+      "input": "https://a.com/x?v=1.٥",
+      "hints": true,
+      "output": "https://a.com/x?v=1.٥"
     }
   ]
 }

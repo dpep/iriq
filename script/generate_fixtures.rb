@@ -45,6 +45,10 @@ PARSER_INPUTS = [
   "https://foo.com:99999/x",
   "https://EXÄMPLE.com/x",
   "https://РОССИЯ.рф/x",
+  # Per-character downcase: a word-final Σ becomes σ, not final-sigma ς.
+  "https://ΑΣ-x.com/users/1",
+  # Fully-qualified (trailing-dot) host survives parsing verbatim.
+  "https://api.foo.com./x",
 ].freeze
 
 CLASSIFIER_INPUTS = [
@@ -78,6 +82,8 @@ CLASSIFIER_INPUTS = [
   "US", "CA", "GB", "XX", "OK",
   "TWFuIGlzIGRpc3Rpbmd1aXNoZWQ=", "AAAAAAAAAAAAAA+/==",
   "こんにちは", "",
+  # Digit classes are ASCII: Unicode Nd digits are not integers/dates/floats.
+  "1०००००००", "2024-٠١-١٥", "1.٥",
 ].freeze
 
 INFLECTOR_INPUTS = %w[
@@ -117,6 +123,10 @@ NORMALIZE_INPUTS = [
   ["https://foo.com/ui?bg=%23ff00ff",                        true],
   ["https://foo.com/maps?coords=37.7749,-122.4194",          true],
   ["https://foo.com/orders?country=US&color=%23fff",         true],
+  # Unicode Nd digits are not ASCII \d: no integer/date/float from them.
+  ["https://x.com/1०००००००",                                 true],
+  ["https://a.com/x?d=2024-٠١-١٥",                           true],
+  ["https://a.com/x?v=1.٥",                                  true],
 ].freeze
 
 PATH_SHAPE_INPUTS = [
@@ -387,5 +397,32 @@ write_fixture("numeric_range", {
   "inputs"   => numeric_inputs,
   "expected" => numeric_expected,
 })
+
+# Registrable domain — the host key under --host registrable. Trailing-dot
+# (fully-qualified) and non-ASCII hosts are the known divergence edges.
+REGISTRABLE_HOSTS = [
+  "api.foo.com", "api.foo.com.", "foo.com", "a.b.example.co.uk",
+  "news.example.co.uk.", "localhost", "127.0.0.1", "ασ-x.com", "api.ασ-x.com",
+].freeze
+registrable_cases = REGISTRABLE_HOSTS.map do |host|
+  { "host" => host, "registrable" => Iriq::RegistrableDomain.for(host) }
+end
+write_fixture("registrable_domain", { "cases" => registrable_cases })
+
+# Explain trace (the `-e` rows). Symbols are round-tripped through JSON so the
+# fixture holds exactly what `iriq -e -j` prints. Pins: already-canonical
+# date/currency rows print the value with no note; host is omitted, not null,
+# when the IRI has none.
+TRACE_INPUTS = [
+  ["https://a.com/events/2024-01-15/USD?currency=EUR&since=2024-01-15", true],
+  ["https://shop.com/pricing/usd?currency=eur",                          true],
+  ["https://foo.com/api/v1/probe/192.168.1.1",                           true],
+  ["https://foo.com/users/123/orders/456",                               false],
+  ["urn:isbn:0451450523",                                                true],
+].freeze
+trace_cases = TRACE_INPUTS.map do |(input, hints)|
+  { "input" => input, "hints" => hints, "trace" => JSON.parse(JSON.generate(Iriq::Trace.for(input, hints: hints))) }
+end
+write_fixture("trace", { "cases" => trace_cases })
 
 puts "Done."

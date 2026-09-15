@@ -1,0 +1,40 @@
+{
+  "cases": [
+    {
+      "host": "api.foo.com",
+      "registrable": "foo.com"
+    },
+    {
+      "host": "api.foo.com.",
+      "registrable": "foo.com"
+    },
+    {
+      "host": "foo.com",
+      "registrable": "foo.com"
+    },
+    {
+      "host": "a.b.example.co.uk",
+      "registrable": "example.co.uk"
+    },
+    {
+      "host": "news.example.co.uk.",
+      "registrable": "example.co.uk"
+    },
+    {
+      "host": "localhost",
+      "registrable": "localhost"
+    },
+    {
+      "host": "127.0.0.1",
+      "registrable": "127.0.0.1"
+    },
+    {
+      "host": "ασ-x.com",
+      "registrable": "ασ-x.com"
+    },
+    {
+      "host": "api.ασ-x.com",
+      "registrable": "ασ-x.com"
+    }
+  ]
+}

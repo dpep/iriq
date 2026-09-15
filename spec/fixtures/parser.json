@@ -385,6 +385,41 @@
         "nss": null,
         "canonical": "https://россия.рф/x"
       }
+    },
+    {
+      "input": "https://ΑΣ-x.com/users/1",
+      "identifier": {
+        "original": "https://ΑΣ-x.com/users/1",
+        "kind": "url",
+        "scheme": "https",
+        "host": "ασ-x.com",
+        "port": null,
+        "path_segments": [
+          "users",
+          "1"
+        ],
+        "query_params": {},
+        "fragment": null,
+        "nss": null,
+        "canonical": "https://ασ-x.com/users/1"
+      }
+    },
+    {
+      "input": "https://api.foo.com./x",
+      "identifier": {
+        "original": "https://api.foo.com./x",
+        "kind": "url",
+        "scheme": "https",
+        "host": "api.foo.com.",
+        "port": null,
+        "path_segments": [
+          "x"
+        ],
+        "query_params": {},
+        "fragment": null,
+        "nss": null,
+        "canonical": "https://api.foo.com./x"
+      }
     }
   ]
 }

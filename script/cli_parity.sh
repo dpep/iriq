@@ -220,6 +220,99 @@ run_pair "file arg -n"       "" -n "$url_file"
 run_pair "stdin sentinel cluster -" $'https://foo.com/users/1\nhttps://foo.com/users/2\n' cluster -
 run_pair "stdin sentinel -n -" $'https://foo.com/users/1\n' -n -
 
+# Explain rows agree with the normalized line for already-canonical values,
+# and JSON omits fields that don't apply (host on a URN) rather than null.
+run_pair "explain already-canonical date+currency" "" -e "https://a.com/events/2024-01-15/USD?currency=EUR"
+run_pair "explain json urn omits host"             "" -e -j "urn:isbn:0451450523"
+run_pair "normalize currency ascii-only upcase"    "" -n "https://shop.com/price?currency=uſd"
+
+# Corpus-backed single runs: each runtime gets its own fresh corpus file. The
+# "created corpus at PATH" notice embeds that per-side path, so only stdout is
+# compared here.
+fresh_corpus_pair() {
+  local label="$1" stdin="$2" ext="$3"
+  shift 3
+  local ruby_path="$corpus_dir/ruby-fresh$ext"
+  local rust_path="$corpus_dir/rust-fresh$ext"
+  rm -f "$ruby_path" "$ruby_path-wal" "$ruby_path-shm" "$rust_path" "$rust_path-wal" "$rust_path-shm"
+  local ruby_out rust_out
+  ruby_out=$(echo -n "$stdin" | (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" "$@") 2>/dev/null || true)
+  rust_out=$(echo -n "$stdin" | "$RUST_BIN" --corpus "$rust_path" "$@" 2>/dev/null || true)
+  if [[ "$ruby_out" == "$rust_out" ]]; then
+    pass_count=$((pass_count + 1))
+  else
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH: $label"
+    echo "  args:  $*"
+    diff <(echo "$ruby_out") <(echo "$rust_out") | sed 's/^/    /' || true
+  fi
+}
+
+# -N is honored with a corpus, and a first observation renders exactly as -C
+# (currency upcase, param-name hints, no single-sample stable literals).
+fresh_corpus_pair "corpus -n -N keeps hints off" "" .db -n -N "https://foo.com/users/123"
+fresh_corpus_pair "corpus first observation matches -C" "" .db -n "https://shop.com/pricing/usd?currency=eur&phone=unknown"
+fresh_corpus_pair "corpus first observation slug/version match -C" "" .db -n "https://foo.com/api/v1/posts/abc-123"
+
+# Numeric params too long to be finite: excluded from min/max/avg, no crash,
+# and the JSON corpus still saves.
+huge=$(printf '1%.0s' {1..400})
+inf_stream="https://inf.com/p?v=$huge"$'\n'"https://inf.com/p?v=-$huge"$'\n'"https://inf.com/p?v=3"$'\n'
+fresh_corpus_pair "cluster -j non-finite numeric (json corpus)" "$inf_stream" .json cluster -j
+fresh_corpus_pair "cluster human non-finite numeric"            "$inf_stream" .json cluster
+
+# A bare filename (no ./) that exists is read as a file. Both runtimes must run
+# from the same directory for the relative name to resolve, so this can't use
+# run_pair (which runs Ruby from REPO_ROOT).
+bare_file_pair() {
+  local label="$1"
+  shift
+  local ruby_out rust_out
+  ruby_out=$( (cd "$corpus_dir" && $RUBY -C "$@" < /dev/null) 2>&1 || true )
+  rust_out=$( (cd "$corpus_dir" && "$RUST_BIN" -C "$@" < /dev/null) 2>&1 || true )
+  if [[ "$ruby_out" == "$rust_out" ]]; then
+    pass_count=$((pass_count + 1))
+  else
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH: $label"
+    echo "  args:  $*"
+    diff <(echo "$ruby_out") <(echo "$rust_out") | sed 's/^/    /' || true
+  fi
+}
+bare_file_pair "bare filename -n"      -n urls.txt
+bare_file_pair "bare filename --stats" urls.txt --stats
+
+# Missing files say so (path-like argument, or anything after `cluster`).
+run_pair "missing ./file"            "" -C ./definitely-missing.txt
+run_pair "missing /file -n"          "" -C -n /definitely/missing.log
+run_pair "missing cluster file json" "" -C --json cluster ./definitely-missing.txt
+
+# Invalid UTF-8 input is a clean error, streaming or slurped, human or JSON.
+bad_utf8=$'https://foo.com/users/1\nhttps://foo.com/\xff/x\n'
+run_pair "invalid utf-8 stdin -n"        "$bad_utf8" -C -n
+run_pair "invalid utf-8 stdin url list"  "$bad_utf8" -C
+run_pair "invalid utf-8 stdin json"      "$bad_utf8" -C --json -n
+
+# Corpus files iriq refuses: a JSON object with no corpus keys (left
+# untouched), and a SQLite corpus from a newer schema.
+printf '{"foo": 1}' > "$corpus_dir/notes.json"
+run_pair "refuse non-corpus json"      "" --corpus "$corpus_dir/notes.json" -n "https://foo.com/x"
+run_pair "refuse non-corpus json json" "" --json --corpus "$corpus_dir/notes.json" -n "https://foo.com/x"
+if [[ "$(cat "$corpus_dir/notes.json")" == '{"foo": 1}' ]]; then
+  pass_count=$((pass_count + 1))
+else
+  fail_count=$((fail_count + 1))
+  echo; echo "MISMATCH: refused non-corpus json was modified"
+fi
+(cd "$REPO_ROOT" && bundle exec ruby -rsqlite3 -e '
+  db = SQLite3::Database.new(ARGV[0])
+  db.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)")
+  db.execute("INSERT INTO meta VALUES (?, ?)", ["schema_version", "99"])
+' "$corpus_dir/future.db")
+run_pair "refuse newer sqlite schema" "" --corpus "$corpus_dir/future.db" -n "https://foo.com/x"
+
 corpus_pair() {
   local label="$1" ext="$2"
   local ruby_path="$corpus_dir/ruby$ext"
