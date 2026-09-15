@@ -171,9 +171,9 @@ impl Cluster {
                     min: 0.0,
                     max: 0.0,
                     avg: 0.0,
-                    value_distribution: HashMap::new(),
-                    subtype_distribution: HashMap::new(),
-                    kind_distribution: HashMap::new(),
+                    value_distribution: Vec::new(),
+                    subtype_distribution: Vec::new(),
+                    kind_distribution: Vec::new(),
                 };
                 if row.ty == SegmentType::Enum {
                     row.values = enum_values(stats);
@@ -279,56 +279,60 @@ pub struct ParamSummary {
     pub min: f64,
     pub max: f64,
     pub avg: f64,
-    pub value_distribution: HashMap<String, f64>,
-    pub subtype_distribution: HashMap<SegmentType, f64>,
-    pub kind_distribution: HashMap<FileKind, f64>,
+    // Ordered as Ruby's hashes are, so JSON output keys match.
+    pub value_distribution: Vec<(String, f64)>,
+    pub subtype_distribution: Vec<(SegmentType, f64)>,
+    pub kind_distribution: Vec<(FileKind, f64)>,
 }
 
 fn round_frac(f: f64) -> f64 {
     (f * 10000.0).round() / 10000.0
 }
 
-pub fn value_distribution(stats: &PositionStats) -> HashMap<String, f64> {
+/// Each tracked value's share of observations, by descending count then value.
+pub fn value_distribution(stats: &PositionStats) -> Vec<(String, f64)> {
     if stats.total == 0 {
-        return HashMap::new();
+        return Vec::new();
     }
-    stats
-        .value_counts
-        .iter()
-        .map(|(v, n)| (v.clone(), round_frac((*n as f64) / (stats.total as f64))))
+    let mut counts: Vec<(&String, usize)> =
+        stats.value_counts.iter().map(|(v, &n)| (v, n)).collect();
+    counts.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+    counts
+        .into_iter()
+        .map(|(v, n)| (v.clone(), round_frac((n as f64) / (stats.total as f64))))
         .collect()
 }
 
+/// The share of each of `subtypes` that occurred, in the order given.
 pub fn subtype_distribution(
     stats: &PositionStats,
     subtypes: &[SegmentType],
-) -> HashMap<SegmentType, f64> {
+) -> Vec<(SegmentType, f64)> {
     if stats.total == 0 {
-        return HashMap::new();
+        return Vec::new();
     }
-    let mut out = HashMap::new();
-    for t in subtypes {
-        let n = *stats.type_counts.get(t).unwrap_or(&0);
-        if n > 0 {
-            out.insert(t.clone(), round_frac((n as f64) / (stats.total as f64)));
-        }
-    }
-    out
+    subtypes
+        .iter()
+        .filter_map(|t| {
+            let n = *stats.type_counts.get(t)?;
+            (n > 0).then(|| (t.clone(), round_frac((n as f64) / (stats.total as f64))))
+        })
+        .collect()
 }
 
-pub fn file_kind_distribution(stats: &PositionStats) -> HashMap<FileKind, f64> {
-    if stats.value_counts.is_empty() {
-        return HashMap::new();
-    }
+/// Tracked values bucketed by file kind, by descending count then kind name.
+pub fn file_kind_distribution(stats: &PositionStats) -> Vec<(FileKind, f64)> {
     let total: usize = stats.value_counts.values().sum();
     if total == 0 {
-        return HashMap::new();
+        return Vec::new();
     }
     let mut counts: HashMap<FileKind, usize> = HashMap::new();
     for (v, n) in &stats.value_counts {
         let kind = file_kind(v).unwrap_or(FileKind::Unknown);
         *counts.entry(kind).or_insert(0) += *n;
     }
+    let mut counts: Vec<(FileKind, usize)> = counts.into_iter().collect();
+    counts.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.as_str().cmp(b.0.as_str())));
     counts
         .into_iter()
         .map(|(kind, n)| (kind, round_frac((n as f64) / (total as f64))))
@@ -464,12 +468,12 @@ mod tests {
         for v in ["b.pdf", "b.pdf", "b.pdf", "c.zzz"] {
             stats.observe(v, SegmentType::File);
         }
-        let dist: HashMap<&str, f64> = file_kind_distribution(&stats)
+        let dist: Vec<(&str, f64)> = file_kind_distribution(&stats)
             .into_iter()
             .map(|(k, v)| (k.as_str(), v))
             .collect();
         // Ruby: {"document" => 0.75, "unknown" => 0.25}
-        assert_eq!(dist, HashMap::from([("document", 0.75), ("unknown", 0.25)]));
+        assert_eq!(dist, [("document", 0.75), ("unknown", 0.25)]);
     }
 
     #[test]
