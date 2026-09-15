@@ -1,4 +1,6 @@
-use crate::classifier::{canonical_date, segment_type_from_name, SegmentClassifier, SegmentType};
+use crate::classifier::{
+    canonical_date, display_type, segment_type_from_name, SegmentClassifier, SegmentType,
+};
 use crate::cluster::ParamSummary;
 use crate::cluster::{placeholder_for, Cluster};
 use crate::clusterer::cluster_key_for_host;
@@ -432,7 +434,7 @@ impl Corpus {
             if !a.hint.hint.is_empty() {
                 return format!("{{{}}}", a.hint.hint);
             }
-            return format!("{{{}}}", a.hint.ty.as_str());
+            return format!("{{{}}}", display_type(a.hint.ty));
         }
         let mut last_literal = String::new();
         for part in a.prefix.split('/') {
@@ -496,7 +498,7 @@ impl Corpus {
             }
         }
         if self.classifier.variable(t) {
-            return format!("{{{}}}", t.as_str());
+            return format!("{{{}}}", display_type(t));
         }
         value.to_string()
     }

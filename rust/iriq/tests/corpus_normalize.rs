@@ -61,6 +61,22 @@ fn promotion_survives_save_and_reopen() {
 }
 
 #[test]
+fn ip_addresses_render_as_ip_like_mechanical_normalize() {
+    // Mechanical normalize (and Ruby) collapse IPv4 and IPv6 into one `{ip}`
+    // placeholder; the corpus path must not leak the subtype.
+    let c = Corpus::new();
+    assert_eq!(
+        c.normalize("https://a.com/hosts/10.0.0.1").unwrap(),
+        "https://a.com/hosts/{ip}"
+    );
+    let query = c.normalize("https://a.com/lookup?addr=10.0.0.1").unwrap();
+    assert!(
+        query.contains("{ip}") && !query.contains("{ipv4}"),
+        "{query}"
+    );
+}
+
+#[test]
 fn low_cardinality_literal_stays_literal() {
     // A slot that always holds the same literal must NOT be promoted, however
     // many times it's seen.
