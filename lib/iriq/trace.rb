@@ -31,8 +31,9 @@ module Iriq
         input:      iri.canonical,
         normalized: normalized,
         scheme:     iri.scheme,
-        host:       iri.host,
       }
+      # Fields that don't apply are omitted, not null (matches parse JSON).
+      out[:host] = iri.host if iri.host
       out[:port] = iri.port if iri.port
 
       if iri.urn?
@@ -84,25 +85,24 @@ module Iriq
         payload: { type: entry[:type], variable: entry[:variable], hint: entry[:hint] },
       )
 
+      # The canonical policy applies even when the value is already canonical
+      # (that's what makes the row print the value, not a placeholder); only
+      # the note is reserved for an actual rewrite.
       if entry[:variable]
         if entry[:type] == :date && (canon = SegmentClassifier.canonical_date(entry[:value]))
-          if canon != entry[:value]
-            records << Evidence.segment(
-              index: idx, value: entry[:value],
-              source:  :policy,
-              payload: { rule: :canonical_date, before: entry[:value], after: canon },
-              notes:   ["canonical date (#{entry[:value]} → #{canon})"],
-            )
-          end
+          records << Evidence.segment(
+            index: idx, value: entry[:value],
+            source:  :policy,
+            payload: { rule: :canonical_date, before: entry[:value], after: canon },
+            notes:   canon == entry[:value] ? [] : ["canonical date (#{entry[:value]} → #{canon})"],
+          )
         elsif entry[:type] == :currency && (canon = SegmentClassifier.canonical_currency(entry[:value]))
-          if canon != entry[:value]
-            records << Evidence.segment(
-              index: idx, value: entry[:value],
-              source:  :policy,
-              payload: { rule: :canonical_currency, before: entry[:value], after: canon },
-              notes:   ["currency upcase (#{entry[:value]} → #{canon})"],
-            )
-          end
+          records << Evidence.segment(
+            index: idx, value: entry[:value],
+            source:  :policy,
+            payload: { rule: :canonical_currency, before: entry[:value], after: canon },
+            notes:   canon == entry[:value] ? [] : ["currency upcase (#{entry[:value]} → #{canon})"],
+          )
         else
           extra = placeholder_decoration_evidence(entry, segments, idx, classifier, hints)
           records.concat(extra)
@@ -162,23 +162,19 @@ module Iriq
       )
 
       if effective == :date && (canon = SegmentClassifier.canonical_date(value))
-        if canon != value
-          records << Evidence.segment(
-            index: name, value: value,
-            source:  :policy,
-            payload: { rule: :canonical_date, before: value, after: canon },
-            notes:   ["canonical date (#{value} → #{canon})"],
-          )
-        end
+        records << Evidence.segment(
+          index: name, value: value,
+          source:  :policy,
+          payload: { rule: :canonical_date, before: value, after: canon },
+          notes:   canon == value ? [] : ["canonical date (#{value} → #{canon})"],
+        )
       elsif effective == :currency && (canon = SegmentClassifier.canonical_currency(value))
-        if canon != value
-          records << Evidence.segment(
-            index: name, value: value,
-            source:  :policy,
-            payload: { rule: :canonical_currency, before: value, after: canon },
-            notes:   ["currency upcase (#{value} → #{canon})"],
-          )
-        end
+        records << Evidence.segment(
+          index: name, value: value,
+          source:  :policy,
+          payload: { rule: :canonical_currency, before: value, after: canon },
+          notes:   canon == value ? [] : ["currency upcase (#{value} → #{canon})"],
+        )
       elsif effective == :ipv4 || effective == :ipv6
         records << Evidence.segment(
           index: name, value: value,
