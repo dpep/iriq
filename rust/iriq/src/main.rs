@@ -174,17 +174,18 @@ fn run<R: Read, W: Write, E: Write>(
         }
     };
     if opts.help {
-        let _ = write!(stdout, "{}", USAGE);
-        return 0;
+        let written = write!(stdout, "{}", USAGE).map(|()| 0);
+        return finish(&mut stdout, &mut stderr, opts.json, written);
     }
     if opts.version {
-        let _ = writeln!(stdout, "{}", iriq::VERSION);
-        return 0;
+        let written = writeln!(stdout, "{}", iriq::VERSION).map(|()| 0);
+        return finish(&mut stdout, &mut stderr, opts.json, written);
     }
 
     // `completion <shell>` short-circuits.
     if args.first().map(|s| s.as_str()) == Some("completion") {
-        return cmd_completion(&mut stdout, &mut stderr, &args[1..], opts.json);
+        let code = cmd_completion(&mut stdout, &mut stderr, &args[1..], opts.json);
+        return finish(&mut stdout, &mut stderr, opts.json, code);
     }
 
     let mut args = args;
@@ -216,8 +217,8 @@ fn run<R: Read, W: Write, E: Write>(
     }
 
     if args.is_empty() && !batch_mode && !opts.reinfer && !opts.propose && !opts.cross_host_shapes {
-        let _ = write!(stdout, "{}", USAGE);
-        return 0;
+        let written = write!(stdout, "{}", USAGE).map(|()| 0);
+        return finish(&mut stdout, &mut stderr, opts.json, written);
     }
 
     let corpus_path = resolve_corpus_path(&opts);
@@ -273,6 +274,7 @@ fn run<R: Read, W: Write, E: Write>(
         cmd_summary(&mut stdout, &mut stderr, &args, &opts, corpus.as_mut())
     };
 
+    // Saved even when stdout failed: everything read so far was observed.
     if let Some(mut c) = corpus {
         if let Some(ref path) = corpus_path {
             if let Err(e) = c.save(path) {
@@ -282,7 +284,23 @@ fn run<R: Read, W: Write, E: Write>(
         }
         let _ = c.close();
     }
-    code
+    finish(&mut stdout, &mut stderr, opts.json, code)
+}
+
+// Flush what a command wrote and turn a stdout failure into the exit status. A
+// reader that went away (`iriq -n | head -1`) ends iriq quietly with the status
+// a SIGPIPE death reports, as Ruby's CLI does; anything else is an error.
+fn finish<W: Write, E: Write>(
+    stdout: &mut W,
+    stderr: &mut E,
+    json: bool,
+    outcome: io::Result<u8>,
+) -> u8 {
+    match outcome.and_then(|code| stdout.flush().map(|()| code)) {
+        Ok(code) => code,
+        Err(e) if e.kind() == io::ErrorKind::BrokenPipe => 141,
+        Err(e) => emit_error(stderr, json, "stdout_error", &format!("stdout: {e}"), "", 1),
+    }
 }
 
 // Library errors name what failed and keep the cause in source().
@@ -615,28 +633,28 @@ fn cmd_summary<W: Write, E: Write>(
     args: &[String],
     opts: &Opts,
     corpus: Option<&mut Corpus>,
-) -> u8 {
+) -> io::Result<u8> {
     if args.is_empty() {
-        return emit_error(
+        return Ok(emit_error(
             stderr,
             opts.json,
             "missing_argument",
             "missing argument <input>",
             "",
             1,
-        );
+        ));
     }
     let iri = match parse(&args[0]) {
         Ok(i) => i,
         Err(e) => {
-            return emit_error(
+            return Ok(emit_error(
                 stderr,
                 opts.json,
                 "parse_error",
                 e.message(),
                 &format!("iriq: {}", e),
                 2,
-            );
+            ));
         }
     };
     // Observe the input, then keep an immutable handle so the Normalize
@@ -646,7 +664,7 @@ fn cmd_summary<W: Write, E: Write>(
         Some(c) => {
             if let Err(e) = c.observe_iri(&iri) {
                 let _ = writeln!(stderr, "iriq: {}", describe(&e));
-                return 1;
+                return Ok(1);
             }
             Some(&*c)
         }
@@ -662,7 +680,7 @@ fn cmd_summary<W: Write, E: Write>(
     if opts.json {
         if sections.len() == 1 {
             let payload = section_payload(&iri, sections[0], opts, corpus);
-            write_json(stdout, &payload);
+            write_json(stdout, &payload)?;
         } else {
             // Multi-section JSON: fixed key order parse / canonical / normalize / explain.
             let mut payload = serde_json::Map::new();
@@ -671,13 +689,13 @@ fn cmd_summary<W: Write, E: Write>(
                     payload.insert(s.to_string(), section_payload(&iri, *sec, opts, corpus));
                 }
             }
-            write_json(stdout, &Value::Object(payload));
+            write_json(stdout, &Value::Object(payload))?;
         }
-        return 0;
+        return Ok(0);
     }
 
-    emit_sections_human(stdout, &iri, &sections, opts, corpus);
-    0
+    emit_sections_human(stdout, &iri, &sections, opts, corpus)?;
+    Ok(0)
 }
 
 // Corpus-informed when a corpus is loaded; mechanical otherwise. This is what
@@ -753,48 +771,49 @@ fn emit_sections_human<W: Write>(
     sections: &[Section],
     opts: &Opts,
     corpus: Option<&Corpus>,
-) {
+) -> io::Result<()> {
     let multi = sections.len() > 1;
     for (i, sec) in sections.iter().enumerate() {
         if i > 0 {
-            let _ = writeln!(stdout);
+            writeln!(stdout)?;
         }
         if multi {
-            let _ = writeln!(stdout, "# {}", sec.name());
+            writeln!(stdout, "# {}", sec.name())?;
         }
         match sec {
-            Section::Parse => emit_parse_human(stdout, iri),
+            Section::Parse => emit_parse_human(stdout, iri)?,
             Section::Canonical => {
-                let _ = writeln!(stdout, "{}", iri.canonical());
+                writeln!(stdout, "{}", iri.canonical())?;
             }
             Section::Normalize => {
-                let _ = writeln!(stdout, "{}", normalize_section(iri, opts, corpus));
+                writeln!(stdout, "{}", normalize_section(iri, opts, corpus))?;
             }
             Section::Explain => {
-                emit_explain_human(stdout, &trace_identifier(iri, opts.hints));
+                emit_explain_human(stdout, &trace_identifier(iri, opts.hints))?;
             }
         }
     }
+    Ok(())
 }
 
-fn emit_parse_human<W: Write>(stdout: &mut W, iri: &Identifier) {
-    let _ = writeln!(stdout, "original:      {}", iri.original);
-    let _ = writeln!(stdout, "kind:          {}", iri.kind.as_str());
+fn emit_parse_human<W: Write>(stdout: &mut W, iri: &Identifier) -> io::Result<()> {
+    writeln!(stdout, "original:      {}", iri.original)?;
+    writeln!(stdout, "kind:          {}", iri.kind.as_str())?;
     if !iri.scheme.is_empty() {
-        let _ = writeln!(stdout, "scheme:        {}", iri.scheme);
+        writeln!(stdout, "scheme:        {}", iri.scheme)?;
     }
     if !iri.host.is_empty() {
-        let _ = writeln!(stdout, "host:          {}", iri.host);
+        writeln!(stdout, "host:          {}", iri.host)?;
     }
     if let Some(port) = iri.port {
-        let _ = writeln!(stdout, "port:          {}", port);
+        writeln!(stdout, "port:          {}", port)?;
     }
     if !iri.path_segments.is_empty() {
-        let _ = writeln!(
+        writeln!(
             stdout,
             "path_segments: {}",
             inspect_strings(&iri.path_segments)
-        );
+        )?;
     }
     if !iri.query_params.is_empty() {
         // Ruby renders the Hash via #inspect: insertion order, spaced
@@ -807,15 +826,16 @@ fn emit_parse_human<W: Write>(stdout: &mut W, iri: &Identifier) {
                 None => format!("{:?} => nil", k),
             })
             .collect();
-        let _ = writeln!(stdout, "query_params:  {{{}}}", parts.join(", "));
+        writeln!(stdout, "query_params:  {{{}}}", parts.join(", "))?;
     }
     if !iri.fragment.is_empty() {
-        let _ = writeln!(stdout, "fragment:      {}", iri.fragment);
+        writeln!(stdout, "fragment:      {}", iri.fragment)?;
     }
     if !iri.nss.is_empty() {
-        let _ = writeln!(stdout, "nss:           {}", iri.nss);
+        writeln!(stdout, "nss:           {}", iri.nss)?;
     }
-    let _ = writeln!(stdout, "canonical:     {}", iri.canonical());
+    writeln!(stdout, "canonical:     {}", iri.canonical())?;
+    Ok(())
 }
 
 fn inspect_strings(ss: &[String]) -> String {
@@ -826,20 +846,25 @@ fn inspect_strings(ss: &[String]) -> String {
     format!("[{}]", parts.join(", "))
 }
 
-fn emit_explain_human<W: Write>(stdout: &mut W, tr: &TraceResult) {
-    let _ = writeln!(stdout, "{}", tr.normalized);
-    emit_trace_section(stdout, "path", &tr.path);
+fn emit_explain_human<W: Write>(stdout: &mut W, tr: &TraceResult) -> io::Result<()> {
+    writeln!(stdout, "{}", tr.normalized)?;
+    emit_trace_section(stdout, "path", &tr.path)?;
     if !tr.query.is_empty() {
-        emit_trace_section(stdout, "query", &tr.query);
+        emit_trace_section(stdout, "query", &tr.query)?;
     }
+    Ok(())
 }
 
-fn emit_trace_section<W: Write>(stdout: &mut W, label: &str, rows: &[iriq::TraceRow]) {
+fn emit_trace_section<W: Write>(
+    stdout: &mut W,
+    label: &str,
+    rows: &[iriq::TraceRow],
+) -> io::Result<()> {
     if rows.is_empty() {
-        return;
+        return Ok(());
     }
-    let _ = writeln!(stdout);
-    let _ = writeln!(stdout, "{}:", label);
+    writeln!(stdout)?;
+    writeln!(stdout, "{}:", label)?;
     let (mut nw, mut tw, mut ow) = (0usize, 0usize, 0usize);
     for r in rows {
         let l = row_label(r);
@@ -853,7 +878,7 @@ fn emit_trace_section<W: Write>(stdout: &mut W, label: &str, rows: &[iriq::Trace
         } else {
             format!("  ({})", r.notes.join("; "))
         };
-        let _ = writeln!(
+        writeln!(
             stdout,
             "  {:<nw$}  {:<tw$}  {:<ow$}{}",
             row_label(r),
@@ -863,8 +888,9 @@ fn emit_trace_section<W: Write>(stdout: &mut W, label: &str, rows: &[iriq::Trace
             nw = nw,
             tw = tw,
             ow = ow,
-        );
+        )?;
     }
+    Ok(())
 }
 
 fn row_label(r: &iriq::TraceRow) -> String {
@@ -885,7 +911,7 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
     opts: &Opts,
     corpus: Option<&mut Corpus>,
     explicit_cluster: bool,
-) -> u8 {
+) -> io::Result<u8> {
     // Per-IRI sections (-n/-p/-c/-e) without --corpus are independent line to
     // line, so we stream: read input lazily, extract per line, emit each IRI as
     // it arrives (flushed for live `tail -f | iriq -n`). The corpus-informed
@@ -899,7 +925,7 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
         Ok(t) => t,
         Err(e) => {
             let _ = writeln!(stderr, "iriq: {}", e);
-            return 1;
+            return Ok(1);
         }
     };
     let mut extractor = Extractor::new();
@@ -926,7 +952,7 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
     });
     if let Err(e) = observed {
         let _ = writeln!(stderr, "iriq: {}", describe(&e));
-        return 1;
+        return Ok(1);
     }
 
     if !opts.sections.is_empty() {
@@ -938,19 +964,19 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
         } else {
             None
         };
-        emit_per_iri_sections(stdout, &iris, opts, real_corpus);
-        return 0;
+        emit_per_iri_sections(stdout, &iris, opts, real_corpus)?;
+        return Ok(0);
     }
     if opts.stats {
-        emit_stats(stdout, working, opts);
-        return 0;
+        emit_stats(stdout, working, opts)?;
+        return Ok(0);
     }
     if explicit_cluster || iris.len() >= LARGE_BATCH_THRESHOLD {
-        emit_clusters(stdout, &working.clusters(), opts);
-        return 0;
+        emit_clusters(stdout, &working.clusters(), opts)?;
+        return Ok(0);
     }
-    emit_url_list(stdout, &iris, opts);
-    0
+    emit_url_list(stdout, &iris, opts)?;
+    Ok(0)
 }
 
 fn read_text<R: Read>(stdin: &mut R, args: &[String]) -> std::io::Result<String> {
@@ -967,7 +993,7 @@ fn emit_per_iri_sections<W: Write>(
     iris: &[Identifier],
     opts: &Opts,
     corpus: Option<&Corpus>,
-) {
+) -> io::Result<()> {
     if opts.json {
         let mut payloads: Vec<Value> = Vec::with_capacity(iris.len());
         for iri in iris {
@@ -983,8 +1009,8 @@ fn emit_per_iri_sections<W: Write>(
                 payloads.push(Value::Object(m));
             }
         }
-        emit_json_array(stdout, &payloads, opts);
-        return;
+        emit_json_array(stdout, &payloads, opts)?;
+        return Ok(());
     }
 
     if opts.sections.len() == 1
@@ -993,38 +1019,39 @@ fn emit_per_iri_sections<W: Write>(
         for iri in iris {
             match opts.sections[0] {
                 Section::Canonical => {
-                    let _ = writeln!(stdout, "{}", iri.canonical());
+                    writeln!(stdout, "{}", iri.canonical())?;
                 }
                 Section::Normalize => {
-                    let _ = writeln!(stdout, "{}", normalize_section(iri, opts, corpus));
+                    writeln!(stdout, "{}", normalize_section(iri, opts, corpus))?;
                 }
                 _ => {}
             }
         }
-        return;
+        return Ok(());
     }
 
     for (i, iri) in iris.iter().enumerate() {
         if i > 0 {
-            let _ = writeln!(stdout);
+            writeln!(stdout)?;
         }
-        let _ = writeln!(stdout, "# {}", iri.canonical());
+        writeln!(stdout, "# {}", iri.canonical())?;
         for (j, sec) in opts.sections.iter().enumerate() {
             if j > 0 {
-                let _ = writeln!(stdout);
+                writeln!(stdout)?;
             }
             match sec {
-                Section::Parse => emit_parse_human(stdout, iri),
+                Section::Parse => emit_parse_human(stdout, iri)?,
                 Section::Canonical => {
-                    let _ = writeln!(stdout, "{}", iri.canonical());
+                    writeln!(stdout, "{}", iri.canonical())?;
                 }
                 Section::Normalize => {
-                    let _ = writeln!(stdout, "{}", normalize_section(iri, opts, corpus));
+                    writeln!(stdout, "{}", normalize_section(iri, opts, corpus))?;
                 }
-                Section::Explain => emit_explain_human(stdout, &trace_identifier(iri, opts.hints)),
+                Section::Explain => emit_explain_human(stdout, &trace_identifier(iri, opts.hints))?,
             }
         }
     }
+    Ok(())
 }
 
 // Stream the per-IRI sections output (no --corpus): read input one line at a
@@ -1039,7 +1066,7 @@ fn stream_per_iri_sections<R: Read, W: Write, E: Write>(
     stderr: &mut E,
     args: &[String],
     opts: &Opts,
-) -> u8 {
+) -> io::Result<u8> {
     let mut extractor = Extractor::new();
     extractor.scheme_less = opts.scheme_less;
     let mut reader: Box<dyn BufRead + '_> = if args.is_empty() || args[0] == "-" {
@@ -1049,7 +1076,7 @@ fn stream_per_iri_sections<R: Read, W: Write, E: Write>(
             Ok(f) => Box::new(BufReader::new(f)),
             Err(e) => {
                 let _ = writeln!(stderr, "iriq: {}", e);
-                return 1;
+                return Ok(1);
             }
         }
     };
@@ -1067,29 +1094,34 @@ fn stream_per_iri_sections<R: Read, W: Write, E: Write>(
                     if buffered_json {
                         collected.push(iri);
                     } else {
-                        emit_one_iri_section(stdout, &iri, i, opts);
+                        emit_one_iri_section(stdout, &iri, i, opts)?;
                         i += 1;
-                        let _ = stdout.flush();
+                        stdout.flush()?;
                     }
                 }
             }
             Err(e) => {
                 let _ = writeln!(stderr, "iriq: {}", e);
-                return 1;
+                return Ok(1);
             }
         }
     }
     if buffered_json {
-        emit_per_iri_sections(stdout, &collected, opts, None);
+        emit_per_iri_sections(stdout, &collected, opts, None)?;
     }
-    0
+    Ok(0)
 }
 
 // Emit one IRI's sections in human or NDJSON form (i is its global index,
 // controlling the blank-line separator). The buffered JSON-array case is
 // handled by emit_per_iri_sections. Mirrors the human/NDJSON branches there
 // exactly, with no corpus (the streaming path is the no-`--corpus` case).
-fn emit_one_iri_section<W: Write>(stdout: &mut W, iri: &Identifier, i: usize, opts: &Opts) {
+fn emit_one_iri_section<W: Write>(
+    stdout: &mut W,
+    iri: &Identifier,
+    i: usize,
+    opts: &Opts,
+) -> io::Result<()> {
     if opts.ndjson {
         let payload = if opts.sections.len() == 1 {
             section_payload(iri, opts.sections[0], opts, None)
@@ -1102,8 +1134,8 @@ fn emit_one_iri_section<W: Write>(stdout: &mut W, iri: &Identifier, i: usize, op
             }
             Value::Object(m)
         };
-        let _ = writeln!(stdout, "{}", serde_json::to_string(&payload).unwrap());
-        return;
+        writeln!(stdout, "{}", serde_json::to_string(&payload).unwrap())?;
+        return Ok(());
     }
 
     if opts.sections.len() == 1
@@ -1111,35 +1143,36 @@ fn emit_one_iri_section<W: Write>(stdout: &mut W, iri: &Identifier, i: usize, op
     {
         match opts.sections[0] {
             Section::Canonical => {
-                let _ = writeln!(stdout, "{}", iri.canonical());
+                writeln!(stdout, "{}", iri.canonical())?;
             }
             Section::Normalize => {
-                let _ = writeln!(stdout, "{}", normalize_section(iri, opts, None));
+                writeln!(stdout, "{}", normalize_section(iri, opts, None))?;
             }
             _ => {}
         }
-        return;
+        return Ok(());
     }
 
     if i > 0 {
-        let _ = writeln!(stdout);
+        writeln!(stdout)?;
     }
-    let _ = writeln!(stdout, "# {}", iri.canonical());
+    writeln!(stdout, "# {}", iri.canonical())?;
     for (j, sec) in opts.sections.iter().enumerate() {
         if j > 0 {
-            let _ = writeln!(stdout);
+            writeln!(stdout)?;
         }
         match sec {
-            Section::Parse => emit_parse_human(stdout, iri),
+            Section::Parse => emit_parse_human(stdout, iri)?,
             Section::Canonical => {
-                let _ = writeln!(stdout, "{}", iri.canonical());
+                writeln!(stdout, "{}", iri.canonical())?;
             }
             Section::Normalize => {
-                let _ = writeln!(stdout, "{}", normalize_section(iri, opts, None));
+                writeln!(stdout, "{}", normalize_section(iri, opts, None))?;
             }
-            Section::Explain => emit_explain_human(stdout, &trace_identifier(iri, opts.hints)),
+            Section::Explain => emit_explain_human(stdout, &trace_identifier(iri, opts.hints))?,
         }
     }
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -1149,7 +1182,7 @@ struct UrlCount {
     first: usize,
 }
 
-fn emit_url_list<W: Write>(stdout: &mut W, iris: &[Identifier], opts: &Opts) {
+fn emit_url_list<W: Write>(stdout: &mut W, iris: &[Identifier], opts: &Opts) -> io::Result<()> {
     let mut counts: HashMap<String, UrlCount> = HashMap::new();
     let mut order: Vec<String> = Vec::new();
     for (i, iri) in iris.iter().enumerate() {
@@ -1187,33 +1220,34 @@ fn emit_url_list<W: Write>(stdout: &mut W, iris: &[Identifier], opts: &Opts) {
                 Value::Object(m)
             })
             .collect();
-        emit_json_array(stdout, &arr, opts);
-        return;
+        emit_json_array(stdout, &arr, opts)?;
+        return Ok(());
     }
 
     let all_unique = entries.iter().all(|c| c.count == 1);
     for c in &entries {
         if all_unique {
-            let _ = writeln!(stdout, "{}", c.url);
+            writeln!(stdout, "{}", c.url)?;
         } else {
-            let _ = writeln!(stdout, "[{}] {}", c.count, c.url);
+            writeln!(stdout, "[{}] {}", c.count, c.url)?;
         }
     }
+    Ok(())
 }
 
-fn emit_clusters<W: Write>(stdout: &mut W, clusters: &[Cluster], opts: &Opts) {
+fn emit_clusters<W: Write>(stdout: &mut W, clusters: &[Cluster], opts: &Opts) -> io::Result<()> {
     let mut sorted: Vec<&Cluster> = clusters.iter().collect();
     sorted.sort_by_key(|c| std::cmp::Reverse(c.count));
 
     if opts.json {
         let arr: Vec<Value> = sorted.iter().map(|c| cluster_json(c)).collect();
-        emit_json_array(stdout, &arr, opts);
-        return;
+        emit_json_array(stdout, &arr, opts)?;
+        return Ok(());
     }
 
     for (i, c) in sorted.iter().enumerate() {
         if i > 0 {
-            let _ = writeln!(stdout);
+            writeln!(stdout)?;
         }
         let host = if c.host.is_empty() {
             "(urn)"
@@ -1225,17 +1259,18 @@ fn emit_clusters<W: Write>(stdout: &mut W, clusters: &[Cluster], opts: &Opts) {
         } else {
             raw_shape_for(c)
         };
-        let _ = writeln!(stdout, "[{}] {}  {}", c.count, host, shape);
+        writeln!(stdout, "[{}] {}  {}", c.count, host, shape)?;
         let limit = c.examples.len().min(3);
         for e in &c.examples[..limit] {
-            let _ = writeln!(stdout, "    {}", e.canonical());
+            writeln!(stdout, "    {}", e.canonical())?;
         }
         let remaining = c.count.saturating_sub(limit);
         if remaining > 0 {
-            let _ = writeln!(stdout, "    + {} more", remaining);
+            writeln!(stdout, "    + {} more", remaining)?;
         }
-        emit_param_summary(stdout, c);
+        emit_param_summary(stdout, c)?;
     }
+    Ok(())
 }
 
 fn raw_shape_for(c: &Cluster) -> String {
@@ -1350,10 +1385,10 @@ fn float_map<I: IntoIterator<Item = (String, f64)>>(pairs: I) -> Value {
     Value::Object(o)
 }
 
-fn emit_param_summary<W: Write>(stdout: &mut W, c: &Cluster) {
+fn emit_param_summary<W: Write>(stdout: &mut W, c: &Cluster) -> io::Result<()> {
     let rows = c.param_summary();
     if rows.is_empty() {
-        return;
+        return Ok(());
     }
     let width = rows.iter().map(|r| r.name.len()).max().unwrap_or(0);
     for r in rows {
@@ -1370,14 +1405,15 @@ fn emit_param_summary<W: Write>(stdout: &mut W, c: &Cluster) {
             r.cardinality,
             (r.presence * 100.0 + 0.5) as u32
         ));
-        let _ = writeln!(
+        writeln!(
             stdout,
             "    {:<width$}  {}",
             r.name,
             parts.join("  "),
             width = width
-        );
+        )?;
     }
+    Ok(())
 }
 
 // Ruby's `format_num` (lib/iriq/cli.rb): a whole value prints as its exact
@@ -1474,22 +1510,22 @@ fn cmd_stats<W: Write, E: Write>(
     stderr: &mut E,
     corpus: Option<&Corpus>,
     opts: &Opts,
-) -> u8 {
+) -> io::Result<u8> {
     let Some(c) = corpus else {
-        return emit_error(
+        return Ok(emit_error(
             stderr,
             opts.json,
             "missing_argument",
             "missing argument <--corpus>",
             "",
             1,
-        );
+        ));
     };
-    emit_stats(stdout, c, opts);
-    0
+    emit_stats(stdout, c, opts)?;
+    Ok(0)
 }
 
-fn emit_stats<W: Write>(stdout: &mut W, corpus: &Corpus, opts: &Opts) {
+fn emit_stats<W: Write>(stdout: &mut W, corpus: &Corpus, opts: &Opts) -> io::Result<()> {
     let hosts_full = corpus.host_counts();
     let observations: usize = hosts_full.values().copied().sum();
     let hosts = top_n_map(&hosts_full, TOP_N_STATS);
@@ -1511,23 +1547,24 @@ fn emit_stats<W: Write>(stdout: &mut W, corpus: &Corpus, opts: &Opts) {
         out.insert("hosts".to_string(), kv_to_value(&hosts));
         out.insert("shapes".to_string(), kv_to_value(&shapes));
         out.insert("raw_shapes".to_string(), kv_to_value(&raw));
-        write_json(stdout, &Value::Object(out));
-        return;
+        write_json(stdout, &Value::Object(out))?;
+        return Ok(());
     }
 
-    let _ = writeln!(stdout, "observations: {}", observations);
-    let _ = writeln!(stdout, "clusters:     {}", corpus.size());
-    let _ = writeln!(stdout);
-    let _ = writeln!(stdout, "top hosts:");
+    writeln!(stdout, "observations: {}", observations)?;
+    writeln!(stdout, "clusters:     {}", corpus.size())?;
+    writeln!(stdout)?;
+    writeln!(stdout, "top hosts:")?;
     for (k, v) in &hosts {
-        let _ = writeln!(stdout, "  {:>6}  {}", v, k);
+        writeln!(stdout, "  {:>6}  {}", v, k)?;
     }
-    let _ = writeln!(stdout);
-    let _ = writeln!(stdout, "top shapes:");
+    writeln!(stdout)?;
+    writeln!(stdout, "top shapes:")?;
     let shape_rows = if opts.hints { &shapes } else { &raw };
     for (k, v) in shape_rows {
-        let _ = writeln!(stdout, "  {:>6}  {}", v, k);
+        writeln!(stdout, "  {:>6}  {}", v, k)?;
     }
+    Ok(())
 }
 
 fn top_n_map(m: &HashMap<String, usize>, n: usize) -> Vec<(String, usize)> {
@@ -1552,22 +1589,22 @@ fn cmd_reinfer<W: Write, E: Write>(
     stderr: &mut E,
     corpus: Option<&mut Corpus>,
     opts: &Opts,
-) -> u8 {
+) -> io::Result<u8> {
     let Some(c) = corpus else {
-        return emit_error(
+        return Ok(emit_error(
             stderr,
             opts.json,
             "missing_argument",
             "missing argument <--corpus>",
             "",
             1,
-        );
+        ));
     };
     let n = c.observed_iri_count();
     let before = c.size();
     if let Err(e) = c.reinfer() {
         let _ = writeln!(stderr, "iriq: {}", describe(&e));
-        return 1;
+        return Ok(1);
     }
     let after = c.size();
     let noun = if n == 1 {
@@ -1576,12 +1613,12 @@ fn cmd_reinfer<W: Write, E: Write>(
         "observations"
     };
     let clusters = if after == 1 { "cluster" } else { "clusters" };
-    let _ = writeln!(
+    writeln!(
         stdout,
         "reinferred {} {}: {} → {} {}",
         n, noun, before, after, clusters
-    );
-    0
+    )?;
+    Ok(0)
 }
 
 fn cmd_propose<W: Write, E: Write>(
@@ -1589,16 +1626,16 @@ fn cmd_propose<W: Write, E: Write>(
     stderr: &mut E,
     corpus: Option<&mut Corpus>,
     opts: &Opts,
-) -> u8 {
+) -> io::Result<u8> {
     let Some(c) = corpus else {
-        return emit_error(
+        return Ok(emit_error(
             stderr,
             opts.json,
             "missing_argument",
             "missing argument <--corpus>",
             "",
             1,
-        );
+        ));
     };
     let mut popts = ProposalOptions::default();
     popts.min_observations = opts.propose_min_obs;
@@ -1608,21 +1645,21 @@ fn cmd_propose<W: Write, E: Write>(
         match c.activate_proposals_above(opts.activate_above, popts) {
             Ok(activated) => {
                 if activated.is_empty() {
-                    let _ = writeln!(
+                    writeln!(
                         stdout,
                         "no proposals at or above coverage {}",
                         opts.activate_above
-                    );
-                    return 0;
+                    )?;
+                    return Ok(0);
                 }
                 for r in activated {
-                    let _ = writeln!(stdout, "activated: {} ({})", r.suggested_type, r.prefix);
+                    writeln!(stdout, "activated: {} ({})", r.suggested_type, r.prefix)?;
                 }
-                return 0;
+                return Ok(0);
             }
             Err(e) => {
                 let _ = writeln!(stderr, "iriq: {}", describe(&e));
-                return 1;
+                return Ok(1);
             }
         }
     }
@@ -1630,36 +1667,36 @@ fn cmd_propose<W: Write, E: Write>(
     let proposals = c.propose_recognizers(popts);
     if opts.json {
         let arr: Vec<Value> = proposals.iter().map(proposal_json).collect();
-        write_json(stdout, &Value::Array(arr));
-        return 0;
+        write_json(stdout, &Value::Array(arr))?;
+        return Ok(0);
     }
     if proposals.is_empty() {
-        let _ = writeln!(
+        writeln!(
             stdout,
             "no recognizer proposals ({} observations scanned)",
             c.observed_iri_count()
-        );
-        return 0;
+        )?;
+        return Ok(0);
     }
     for (i, p) in proposals.iter().enumerate() {
         if i > 0 {
-            let _ = writeln!(stdout);
+            writeln!(stdout)?;
         }
-        let _ = writeln!(stdout, "proposal: {} ({})", p.suggested_type, p.prefix);
-        let _ = writeln!(stdout, "  strategy:    {}", p.strategy);
-        let _ = writeln!(stdout, "  coverage:    {:.2}", p.coverage);
-        let _ = writeln!(stdout, "  confidence:  {:.2}", p.confidence);
-        let _ = writeln!(stdout, "  observations: {}", p.observation_count);
-        let _ = writeln!(stdout, "  hosts:       {}", p.hosts.join(", "));
-        let _ = writeln!(stdout, "  positions:   {}", p.positions.len());
+        writeln!(stdout, "proposal: {} ({})", p.suggested_type, p.prefix)?;
+        writeln!(stdout, "  strategy:    {}", p.strategy)?;
+        writeln!(stdout, "  coverage:    {:.2}", p.coverage)?;
+        writeln!(stdout, "  confidence:  {:.2}", p.confidence)?;
+        writeln!(stdout, "  observations: {}", p.observation_count)?;
+        writeln!(stdout, "  hosts:       {}", p.hosts.join(", "))?;
+        writeln!(stdout, "  positions:   {}", p.positions.len())?;
         let samples = if p.sample_values.len() > 3 {
             &p.sample_values[..3]
         } else {
             &p.sample_values[..]
         };
-        let _ = writeln!(stdout, "  samples:     {}", samples.join(", "));
+        writeln!(stdout, "  samples:     {}", samples.join(", "))?;
     }
-    0
+    Ok(0)
 }
 
 fn proposal_json(p: &RecognizerProposal) -> Value {
@@ -1718,16 +1755,16 @@ fn cmd_cross_host_shapes<W: Write, E: Write>(
     stderr: &mut E,
     corpus: Option<&Corpus>,
     opts: &Opts,
-) -> u8 {
+) -> io::Result<u8> {
     let Some(c) = corpus else {
-        return emit_error(
+        return Ok(emit_error(
             stderr,
             opts.json,
             "missing_argument",
             "missing argument <--corpus>",
             "",
             1,
-        );
+        ));
     };
     let shapes = c.cross_host_shapes(opts.min_hosts);
     if opts.json {
@@ -1751,18 +1788,18 @@ fn cmd_cross_host_shapes<W: Write, E: Write>(
                 Value::Object(o)
             })
             .collect();
-        write_json(stdout, &Value::Array(arr));
-        return 0;
+        write_json(stdout, &Value::Array(arr))?;
+        return Ok(0);
     }
     if shapes.is_empty() {
         let size = c.size();
         let noun = if size == 1 { "cluster" } else { "clusters" };
-        let _ = writeln!(stdout, "no cross-host shapes ({} {} scanned)", size, noun);
-        return 0;
+        writeln!(stdout, "no cross-host shapes ({} {} scanned)", size, noun)?;
+        return Ok(0);
     }
     for s in shapes {
         let noun = if s.host_count() == 1 { "host" } else { "hosts" };
-        let _ = writeln!(
+        writeln!(
             stdout,
             "{}  ({} {}: {})  obs={}",
             s.shape,
@@ -1770,9 +1807,9 @@ fn cmd_cross_host_shapes<W: Write, E: Write>(
             noun,
             s.hosts.join(", "),
             s.observation_count
-        );
+        )?;
     }
-    0
+    Ok(0)
 }
 
 // ── Completion ──────────────────────────────────────────────────────────────
@@ -1782,28 +1819,28 @@ fn cmd_completion<W: Write, E: Write>(
     stderr: &mut E,
     args: &[String],
     json_mode: bool,
-) -> u8 {
+) -> io::Result<u8> {
     let default_shell = default_shell();
     let shell = args.first().map(|s| s.as_str()).unwrap_or(&default_shell);
     match shell {
         "bash" => {
-            let _ = write!(stdout, "{}", BASH_COMPLETION);
+            write!(stdout, "{}", BASH_COMPLETION)?;
         }
         "zsh" => {
-            let _ = write!(stdout, "{}", ZSH_COMPLETION);
+            write!(stdout, "{}", ZSH_COMPLETION)?;
         }
         _ => {
-            return emit_error(
+            return Ok(emit_error(
                 stderr,
                 json_mode,
                 "unknown_shell",
                 &format!("unknown shell {:?} (try bash or zsh)", shell),
                 "",
                 1,
-            );
+            ));
         }
     }
-    0
+    Ok(0)
 }
 
 // Mirrors the Ruby CLI: with no shell argument, infer from $SHELL
@@ -1951,18 +1988,20 @@ _iriq "$@"
 
 // ── JSON helpers ─────────────────────────────────────────────────────────────
 
-fn write_json<W: Write>(stdout: &mut W, v: &Value) {
-    let _ = writeln!(stdout, "{}", serde_json::to_string(v).unwrap());
+fn write_json<W: Write>(stdout: &mut W, v: &Value) -> io::Result<()> {
+    writeln!(stdout, "{}", serde_json::to_string(v).unwrap())?;
+    Ok(())
 }
 
-fn emit_json_array<W: Write>(stdout: &mut W, arr: &[Value], opts: &Opts) {
+fn emit_json_array<W: Write>(stdout: &mut W, arr: &[Value], opts: &Opts) -> io::Result<()> {
     if opts.ndjson {
         for v in arr {
-            let _ = writeln!(stdout, "{}", serde_json::to_string(v).unwrap());
+            writeln!(stdout, "{}", serde_json::to_string(v).unwrap())?;
         }
     } else {
-        write_json(stdout, &Value::Array(arr.to_vec()));
+        write_json(stdout, &Value::Array(arr.to_vec()))?;
     }
+    Ok(())
 }
 
 fn emit_error<W: Write>(
@@ -1986,7 +2025,37 @@ fn emit_error<W: Write>(
 
 #[cfg(test)]
 mod tests {
-    use super::format_num;
+    use super::{format_num, run};
+    use std::io::{self, Write};
+
+    struct FailingStdout(io::ErrorKind);
+
+    impl Write for FailingStdout {
+        fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+            Err(self.0.into())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Err(self.0.into())
+        }
+    }
+
+    fn run_with_stdout_failing(kind: io::ErrorKind) -> (u8, String) {
+        let argv = ["-C", "-n", "https://foo.com/users/1"].map(String::from);
+        let mut stderr = Vec::new();
+        let code = run(io::empty(), FailingStdout(kind), &mut stderr, &argv);
+        (code, String::from_utf8(stderr).unwrap())
+    }
+
+    #[test]
+    fn a_broken_pipe_exits_quietly_and_other_stdout_failures_are_errors() {
+        assert_eq!(
+            run_with_stdout_failing(io::ErrorKind::BrokenPipe),
+            (141, String::new())
+        );
+        let (code, stderr) = run_with_stdout_failing(io::ErrorKind::StorageFull);
+        assert_eq!(code, 1, "{stderr}");
+        assert!(stderr.starts_with("iriq: stdout: "), "{stderr}");
+    }
 
     #[test]
     fn format_num_matches_ruby() {
