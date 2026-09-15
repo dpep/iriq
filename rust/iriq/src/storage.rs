@@ -1,10 +1,11 @@
 use crate::classifier::SegmentType;
 use crate::cluster::Cluster;
-use crate::errors::ParseError;
+use crate::errors::{ParseError, Result};
 use crate::identifier::Identifier;
 use crate::position::Position;
 use crate::position_stats::PositionStats;
 use std::collections::HashMap;
+use std::path::Path;
 
 /// Persistence layer behind a Corpus. Phase-2 ships Memory, JSON, and
 /// SQLite (optional via feature). Backends update materialized views and
@@ -64,42 +65,41 @@ pub trait Storage: Send + Sync {
 
     /// Wraps a closure in a single backend transaction. SQLite turns
     /// O(observations) fsyncs into one; Memory + JSON are no-ops.
-    fn batch_begin(&mut self) -> std::io::Result<()> {
+    fn batch_begin(&mut self) -> Result<()> {
         Ok(())
     }
-    fn batch_commit(&mut self) -> std::io::Result<()> {
+    fn batch_commit(&mut self) -> Result<()> {
         Ok(())
     }
 
-    fn flush(&mut self) -> std::io::Result<()> {
+    fn flush(&mut self) -> Result<()> {
         Ok(())
     }
-    fn close(&mut self) -> std::io::Result<()> {
+    fn close(&mut self) -> Result<()> {
         Ok(())
     }
-    fn save_to(&mut self, path: &str) -> std::io::Result<()>;
-    fn path(&self) -> Option<String> {
+    fn save_to(&mut self, path: &Path) -> Result<()>;
+    fn path(&self) -> Option<&Path> {
         None
     }
 }
 
 /// Pick the backend by file extension. Empty path → in-memory.
-pub fn open_storage(path: &str, max_values: usize) -> Result<Box<dyn Storage>, std::io::Error> {
-    if path.is_empty() {
+pub fn open_storage(path: &Path, max_values: usize) -> Result<Box<dyn Storage>> {
+    if path.as_os_str().is_empty() {
         return Ok(Box::new(crate::storage_memory::MemoryStorage::new(
             max_values,
         )));
     }
-    let lower = path.to_lowercase();
-    if lower.ends_with(".db") || lower.ends_with(".sqlite") || lower.ends_with(".sqlite3") {
+    if is_sqlite_path(path) {
         #[cfg(feature = "sqlite")]
         return Ok(Box::new(crate::storage_sqlite::SqliteStorage::open(
             path, max_values,
         )?));
         #[cfg(not(feature = "sqlite"))]
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            format!("{path}: built without the `sqlite` feature; use a .json corpus instead"),
+        return Err(crate::errors::Error::unsupported(
+            path,
+            "built without the `sqlite` feature; use a .json corpus instead",
         ));
     }
     Ok(Box::new(crate::storage_json::JsonStorage::open(
@@ -107,7 +107,15 @@ pub fn open_storage(path: &str, max_values: usize) -> Result<Box<dyn Storage>, s
     )?))
 }
 
+/// `.db`, `.sqlite`, and `.sqlite3` (any case) name a SQLite corpus.
+pub(crate) fn is_sqlite_path(path: &Path) -> bool {
+    path.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+        let e = e.to_ascii_lowercase();
+        e == "db" || e == "sqlite" || e == "sqlite3"
+    })
+}
+
 /// Coerce an arbitrary input into an Identifier. Helper used by Corpus.
-pub fn coerce_identifier(s: &str) -> Result<Identifier, ParseError> {
+pub fn coerce_identifier(s: &str) -> std::result::Result<Identifier, ParseError> {
     crate::parser::parse(s)
 }

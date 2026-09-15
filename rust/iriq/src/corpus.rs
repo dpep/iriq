@@ -2,7 +2,7 @@ use crate::classifier::{canonical_date, segment_type_from_name, SegmentClassifie
 use crate::cluster::ParamSummary;
 use crate::cluster::{placeholder_for, Cluster};
 use crate::clusterer::cluster_key_for_host;
-use crate::errors::ParseError;
+use crate::errors::{ParseError, Result};
 use crate::event::Event;
 use crate::hints::{derive_hints, SegmentHint};
 use crate::identifier::Identifier;
@@ -17,6 +17,7 @@ use crate::storage::{open_storage, Storage};
 use crate::storage_memory::MemoryStorage;
 use crate::synthesized_recognizer::SynthesizedRecognizer;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -88,8 +89,8 @@ impl Corpus {
         }
     }
 
-    pub fn open(path: &str) -> Result<Self, std::io::Error> {
-        let storage = open_storage(path, DEFAULT_MAX_VALUES_PER_POSITION)?;
+    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        let storage = open_storage(path.as_ref(), DEFAULT_MAX_VALUES_PER_POSITION)?;
         let mut cp = Corpus {
             classifier: DEFAULT_CLASSIFIER_ARC.clone(),
             host_strategy: HostStrategy::Full,
@@ -119,7 +120,7 @@ impl Corpus {
         }
     }
 
-    pub fn observe(&mut self, input: &str) -> Result<(), ParseError> {
+    pub fn observe(&mut self, input: &str) -> Result<()> {
         let iri = parse(input)?;
         self.observe_iri(&iri);
         Ok(())
@@ -142,7 +143,7 @@ impl Corpus {
         }
     }
 
-    pub fn reinfer(&mut self) -> Result<(), ParseError> {
+    pub fn reinfer(&mut self) -> Result<()> {
         let mut iris = Vec::new();
         self.storage
             .each_observed_iri(&mut |c| iris.push(c.to_string()));
@@ -162,10 +163,7 @@ impl Corpus {
         propose_recognizers(self.storage.as_ref(), opts)
     }
 
-    pub fn activate_proposal(
-        &mut self,
-        p: &RecognizerProposal,
-    ) -> Result<SynthesizedRecognizer, ParseError> {
+    pub fn activate_proposal(&mut self, p: &RecognizerProposal) -> Result<SynthesizedRecognizer> {
         // The proposal suggests a type name (e.g. "ghp"). Unknown names
         // become dynamic Custom types, matching Ruby's symbol semantics.
         let ty = segment_type_from_name(&p.suggested_type);
@@ -186,7 +184,7 @@ impl Corpus {
         &mut self,
         confidence_threshold: f64,
         opts: ProposalOptions,
-    ) -> Result<Vec<SynthesizedRecognizer>, ParseError> {
+    ) -> Result<Vec<SynthesizedRecognizer>> {
         let proposals = self.propose_recognizers(opts);
         let mut activated = Vec::new();
         for p in proposals {
@@ -274,7 +272,7 @@ impl Corpus {
         events
     }
 
-    pub fn normalize(&self, input: &str) -> Result<String, ParseError> {
+    pub fn normalize(&self, input: &str) -> std::result::Result<String, ParseError> {
         let iri = parse(input)?;
         Ok(self.normalize_identifier(&iri))
     }
@@ -325,21 +323,22 @@ impl Corpus {
             .position_stats_for(&Position::path(host, prefix))
     }
 
-    pub fn save(&mut self, path: &str) -> std::io::Result<()> {
-        let backend = self.storage.path().unwrap_or_default();
-        if path.is_empty() || path == backend {
+    pub fn save(&mut self, path: impl AsRef<Path>) -> Result<()> {
+        let path = path.as_ref();
+        let backend = self.storage.path().unwrap_or(Path::new(""));
+        if path.as_os_str().is_empty() || path.as_os_str() == backend.as_os_str() {
             self.storage.flush()
         } else {
             self.storage.save_to(path)
         }
     }
 
-    pub fn close(&mut self) -> std::io::Result<()> {
+    pub fn close(&mut self) -> Result<()> {
         self.storage.close()
     }
 
     /// Wrap many observations in a single backend transaction.
-    pub fn batch<F: FnOnce(&mut Corpus)>(&mut self, fn_: F) -> std::io::Result<()> {
+    pub fn batch<F: FnOnce(&mut Corpus)>(&mut self, fn_: F) -> Result<()> {
         self.storage.batch_begin()?;
         fn_(self);
         self.storage.batch_commit()

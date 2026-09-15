@@ -190,7 +190,7 @@ impl Storage for MemoryStorage {
         self.activated_recognizers.len()
     }
 
-    fn save_to(&mut self, path: &str) -> std::io::Result<()> {
+    fn save_to(&mut self, path: &std::path::Path) -> crate::errors::Result<()> {
         crate::storage_json::dump_memory_to_json(self, path)
     }
 }

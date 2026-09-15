@@ -4,6 +4,7 @@
 
 use crate::classifier::{segment_type_from_name, SegmentType, DEFAULT_CLASSIFIER};
 use crate::cluster::{Cluster, MAX_CLUSTER_EXAMPLES};
+use crate::errors::{Error, Result};
 use crate::identifier::Identifier;
 use crate::parser::parse;
 use crate::position::{Position, PositionScope};
@@ -13,6 +14,7 @@ use crate::storage_memory::MemoryStorage;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 const SCHEMA: &str = include_str!("./sqlite_schema.sql");
@@ -21,16 +23,17 @@ const SCHEMA_VERSION: i64 = 4;
 pub struct SqliteStorage {
     conn: Mutex<Connection>,
     max_values: usize,
-    path: String,
+    path: PathBuf,
 }
 
 impl SqliteStorage {
-    pub fn open(path: &str, max_values: usize) -> std::io::Result<Self> {
+    pub fn open(path: &Path, max_values: usize) -> Result<Self> {
+        let rs_err = |e| Error::sqlite(path, e);
         let conn = Connection::open(path).map_err(rs_err)?;
         // PRAGMAs first (busy_timeout before journal_mode).
         conn.execute_batch("PRAGMA busy_timeout = 30000;")
             .map_err(rs_err)?;
-        enable_wal(&conn)?;
+        enable_wal(&conn, path)?;
         conn.execute_batch("PRAGMA synchronous = NORMAL;")
             .map_err(rs_err)?;
         conn.execute_batch(SCHEMA).map_err(rs_err)?;
@@ -84,13 +87,9 @@ impl SqliteStorage {
         Ok(SqliteStorage {
             conn: Mutex::new(conn),
             max_values,
-            path: path.to_string(),
+            path: path.to_path_buf(),
         })
     }
-}
-
-fn rs_err<E: std::fmt::Display>(e: E) -> std::io::Error {
-    std::io::Error::other(e.to_string())
 }
 
 /// Converting a rollback-mode database to WAL takes an exclusive lock, and
@@ -99,7 +98,7 @@ fn rs_err<E: std::fmt::Display>(e: E) -> std::io::Error {
 /// busy_timeout set. WAL is a persistent database property: retry briefly —
 /// either this connection wins the conversion or another process already
 /// converted the file.
-fn enable_wal(conn: &Connection) -> std::io::Result<()> {
+fn enable_wal(conn: &Connection, path: &Path) -> Result<()> {
     let mut attempts = 0;
     loop {
         match conn.execute_batch("PRAGMA journal_mode = WAL;") {
@@ -114,7 +113,7 @@ fn enable_wal(conn: &Connection) -> std::io::Result<()> {
                 attempts += 1;
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
-            Err(e) => return Err(rs_err(e)),
+            Err(e) => return Err(Error::sqlite(path, e)),
         }
     }
 }
@@ -720,33 +719,33 @@ impl Storage for SqliteStorage {
         n as usize
     }
 
-    fn batch_begin(&mut self) -> std::io::Result<()> {
+    fn batch_begin(&mut self) -> Result<()> {
         let c = self.conn.lock().unwrap();
-        c.execute_batch("BEGIN IMMEDIATE").map_err(rs_err)?;
-        Ok(())
+        c.execute_batch("BEGIN IMMEDIATE")
+            .map_err(|e| Error::sqlite(&self.path, e))
     }
-    fn batch_commit(&mut self) -> std::io::Result<()> {
+    fn batch_commit(&mut self) -> Result<()> {
         let c = self.conn.lock().unwrap();
-        c.execute_batch("COMMIT").map_err(rs_err)?;
-        Ok(())
+        c.execute_batch("COMMIT")
+            .map_err(|e| Error::sqlite(&self.path, e))
     }
 
-    fn flush(&mut self) -> std::io::Result<()> {
+    fn flush(&mut self) -> Result<()> {
         Ok(())
     }
-    fn close(&mut self) -> std::io::Result<()> {
+    fn close(&mut self) -> Result<()> {
         let c = self.conn.lock().unwrap();
         let _ = c.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
         Ok(())
     }
-    fn save_to(&mut self, path: &str) -> std::io::Result<()> {
+    fn save_to(&mut self, path: &Path) -> Result<()> {
         // Mirror the contents into a fresh MemoryStorage and write JSON.
         let mut mem = MemoryStorage::new(self.max_values);
         mirror_into_memory(self, &mut mem);
         crate::storage_json::dump_memory_to_json(&mem, path)
     }
-    fn path(&self) -> Option<String> {
-        Some(self.path.clone())
+    fn path(&self) -> Option<&Path> {
+        Some(&self.path)
     }
 }
 

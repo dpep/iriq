@@ -1,5 +1,6 @@
 use crate::classifier::SegmentType;
 use crate::cluster::Cluster;
+use crate::errors::{Error, Result};
 use crate::identifier::Identifier;
 use crate::parser::parse;
 use crate::position::{Position, PositionScope};
@@ -9,6 +10,7 @@ use crate::storage_memory::MemoryStorage;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::io::Write;
+use std::path::{Path, PathBuf};
 
 /// JSON-backed corpus storage. Wraps a `MemoryStorage` with load/save
 /// against a file. On-disk format matches Ruby + Go byte-for-byte
@@ -16,27 +18,24 @@ use std::io::Write;
 /// preserves through json marshal/unmarshal).
 pub struct JsonStorage {
     inner: MemoryStorage,
-    path: String,
+    path: PathBuf,
 }
 
 impl JsonStorage {
-    pub fn open(path: &str, max_values: usize) -> std::io::Result<Self> {
+    pub fn open(path: &Path, max_values: usize) -> Result<Self> {
         let mut s = JsonStorage {
             inner: MemoryStorage::new(max_values),
-            path: path.to_string(),
+            path: path.to_path_buf(),
         };
         if let Ok(meta) = std::fs::metadata(path) {
             if meta.len() > 0 {
-                let data = std::fs::read(path)?;
-                load_memory_from_json(&mut s.inner, &data).map_err(io_err)?;
+                let data = std::fs::read(path).map_err(|e| Error::io(path, e))?;
+                load_memory_from_json(&mut s.inner, &data)
+                    .map_err(|reason| Error::corrupt(path, reason))?;
             }
         }
         Ok(s)
     }
-}
-
-fn io_err<E: std::fmt::Display>(e: E) -> std::io::Error {
-    std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())
 }
 
 impl Storage for JsonStorage {
@@ -119,18 +118,18 @@ impl Storage for JsonStorage {
         self.inner.activated_recognizer_count()
     }
 
-    fn flush(&mut self) -> std::io::Result<()> {
+    fn flush(&mut self) -> Result<()> {
         dump_memory_to_json(&self.inner, &self.path)
     }
-    fn save_to(&mut self, path: &str) -> std::io::Result<()> {
+    fn save_to(&mut self, path: &Path) -> Result<()> {
         dump_memory_to_json(&self.inner, path)
     }
-    fn path(&self) -> Option<String> {
-        Some(self.path.clone())
+    fn path(&self) -> Option<&Path> {
+        Some(&self.path)
     }
 }
 
-pub fn dump_memory_to_json(m: &MemoryStorage, path: &str) -> std::io::Result<()> {
+pub fn dump_memory_to_json(m: &MemoryStorage, path: &Path) -> Result<()> {
     let mut root = Map::new();
     root.insert(
         "host_counts".to_string(),
@@ -194,13 +193,15 @@ pub fn dump_memory_to_json(m: &MemoryStorage, path: &str) -> std::io::Result<()>
     let activated: Vec<Value> = m.activated_recognizers_ref().to_vec();
     root.insert("activated_recognizers".to_string(), Value::Array(activated));
 
-    let data = serde_json::to_string(&Value::Object(root)).map_err(io_err)?;
-    let tmp = format!("{}.tmp", path);
-    {
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(data.as_bytes())?;
-    }
-    std::fs::rename(&tmp, path)
+    let data = serde_json::to_string(&Value::Object(root))
+        .map_err(|e| Error::io(path, std::io::Error::other(e)))?;
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let write = || -> std::io::Result<()> {
+        std::fs::File::create(&tmp)?.write_all(data.as_bytes())?;
+        std::fs::rename(&tmp, path)
+    };
+    write().map_err(|e| Error::io(path, e))
 }
 
 fn position_stats_to_value(s: &PositionStats) -> Value {

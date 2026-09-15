@@ -5,8 +5,8 @@
 
 use iriq::{
     classifier::DEFAULT_CLASSIFIER, cross_host_shape::cross_host_shapes, normalize_identifier,
-    parse, trace_identifier, Cluster, Corpus, Extractor, HostStrategy, Identifier, ParseError,
-    ProposalOptions, RecognizerProposal, TraceResult,
+    parse, trace_identifier, Cluster, Corpus, Extractor, HostStrategy, Identifier, ProposalOptions,
+    RecognizerProposal, TraceResult,
 };
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -245,7 +245,7 @@ fn run<R: Read, W: Write, E: Write>(
                 corpus = Some(c);
             }
             Err(e) => {
-                let _ = writeln!(stderr, "iriq: {}", e);
+                let _ = writeln!(stderr, "iriq: {}", describe(&e));
                 return 1;
             }
         }
@@ -276,13 +276,21 @@ fn run<R: Read, W: Write, E: Write>(
     if let Some(mut c) = corpus {
         if let Some(ref path) = corpus_path {
             if let Err(e) = c.save(path) {
-                let _ = writeln!(stderr, "iriq: {}", e);
+                let _ = writeln!(stderr, "iriq: {}", describe(&e));
                 return 1;
             }
         }
         let _ = c.close();
     }
     code
+}
+
+// Library errors name what failed and keep the cause in source().
+fn describe(e: &dyn std::error::Error) -> String {
+    match e.source() {
+        Some(cause) => format!("{e}: {cause}"),
+        None => e.to_string(),
+    }
 }
 
 // resolve_corpus_path applies the precedence chain:
@@ -595,13 +603,13 @@ fn cmd_summary<W: Write, E: Write>(
     }
     let iri = match parse(&args[0]) {
         Ok(i) => i,
-        Err(ParseError(msg)) => {
+        Err(e) => {
             return emit_error(
                 stderr,
                 opts.json,
                 "parse_error",
-                &msg,
-                &format!("iriq: parse error: {}", msg),
+                e.message(),
+                &format!("iriq: {}", e),
                 2,
             );
         }
@@ -1460,7 +1468,7 @@ fn cmd_reinfer<W: Write, E: Write>(
     let n = c.observed_iri_count();
     let before = c.size();
     if let Err(e) = c.reinfer() {
-        let _ = writeln!(stderr, "iriq: {}", e);
+        let _ = writeln!(stderr, "iriq: {}", describe(&e));
         return 1;
     }
     let after = c.size();
@@ -1516,7 +1524,7 @@ fn cmd_propose<W: Write, E: Write>(
                 return 0;
             }
             Err(e) => {
-                let _ = writeln!(stderr, "iriq: {}", e);
+                let _ = writeln!(stderr, "iriq: {}", describe(&e));
                 return 1;
             }
         }

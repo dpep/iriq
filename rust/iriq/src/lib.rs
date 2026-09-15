@@ -87,7 +87,7 @@ pub use cluster::{Cluster, ParamSummary, SegmentPositionStat};
 pub use clusterer::{cluster_key_for, cluster_key_for_host, ClusterKey, Clusterer, ExplainEntry};
 pub use corpus::{Classification, Corpus, CorpusEntry, HostStrategy};
 pub use cross_host_shape::CrossHostShape;
-pub use errors::ParseError;
+pub use errors::{Error, ParseError, Result};
 pub use explanation::{explain, explain_identifier};
 pub use extractor::Extractor;
 pub use hints::{derive_hints, derive_hints_default, SegmentHint};
