@@ -91,9 +91,9 @@ times. Until then, `corpus.normalize` returns exactly what `normalize` does.
 ## Persist a corpus
 
 `Corpus::open(path)` picks the backend by extension: `.db`, `.sqlite` and
-`.sqlite3` are SQLite; anything else is JSON. Wrap a run of observations in
-`batch` to make it one transaction: it commits when the closure returns `Ok`
-and rolls back on `Err` or a panic.
+`.sqlite3` are SQLite; anything else is JSON. For bulk ingest, hand
+`observe_all` a slice of parsed IRIs: on SQLite it commits about a second's
+worth at a time, so other processes writing the corpus get turns in between.
 
 ```rust,no_run
 use std::io::BufRead;
@@ -101,17 +101,11 @@ use iriq::{parse, Corpus};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let lines = std::io::stdin().lock().lines().collect::<Result<Vec<_>, _>>()?;
+    // Skip input that isn't a URL.
+    let iris: Vec<_> = lines.iter().filter_map(|line| parse(line).ok()).collect();
 
     let mut corpus = Corpus::open("routes.db")?;
-    corpus.batch(|c| {
-        for line in &lines {
-            // Skip input that isn't a URL; a storage failure still aborts the batch.
-            if let Ok(iri) = parse(line) {
-                c.observe_iri(&iri)?;
-            }
-        }
-        Ok(())
-    })?;
+    corpus.observe_all(&iris)?;
 
     corpus.save("routes.db")?; // its own path: flush in place (a .json corpus is written here)
     corpus.save("routes-export.json")?; // any other path: a JSON export
@@ -119,13 +113,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+If `observe_all` fails part-way, what it already committed stays. When
+observations must land together or not at all, wrap them in `batch`: it commits
+when the closure returns `Ok` and rolls back on `Err` or a panic. On SQLite it
+holds the write lock until then, so keep it short.
+
 `save` exports only JSON: saving to another `.db` path returns
 `Error::Unsupported` and writes nothing.
 
 ### Sharing a corpus between processes
 
 - **SQLite** is the one to share. Many processes can observe into one `.db` at
-  once; each writer waits up to 30 seconds for another's transaction to finish.
+  once, taking turns with the write lock: a writer waits up to 10 seconds for
+  it, then returns an error. `reinfer` and activation rebuild without the lock
+  and take it only to install the result; a `batch` holds it until the closure
+  returns.
 - **JSON** is single-writer. The file is read at `open` and written at `save`,
   so when two processes save the same file, the last one wins.
 - **Activated recognizers.** When another process activates a recognizer (the

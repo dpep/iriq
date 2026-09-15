@@ -245,9 +245,11 @@ at a specific file instead, to keep separate corpora or share one across runs.
 The extension picks the backend, and the two behave differently:
 
 - **`.db` / `.sqlite` / `.sqlite3` (SQLite)** — the default, and the one to
-  share. Many `iriq` processes can write at once; each waits up to 30 seconds
-  for another's transaction to finish. `--reinfer` runs as one transaction, and
-  writers wait for it. Use SQLite for streams and concurrent writers.
+  share. Many `iriq` processes can write at once by taking turns: a writer
+  waits up to 10 seconds for its turn. A big `cluster` commits about a second
+  at a time, and `--reinfer` rebuilds on the side and holds the corpus only to
+  swap the result in, so a `tail -f` stream keeps flowing beside either. Use
+  SQLite for streams and concurrent writers.
 - **Anything else (JSON)** — read when iriq starts and written once, when it
   exits cleanly. It's single-writer: when two processes use one file, the last
   to exit wins. A streaming run that's killed, Ctrl-C included, saves nothing.
@@ -258,6 +260,12 @@ A few things to know:
   not just this input. Add `-C` to cluster one input on its own.
 - iriq keeps every IRI it observes, repeats included, so `--reinfer` can replay
   them. That log grows without bound.
+- On SQLite, `cluster` and `--stats` commit their input about a second at a
+  time. If one is killed part-way, what it committed stays: feed it the same
+  input again and those IRIs count twice.
+- `--reinfer` (and `--activate-above`) rebuilds in temporary tables before
+  swapping the result in, so it needs free space in `TMPDIR`: plan on more than
+  the corpus file's own size.
 - `--reset` deletes the corpus file, its SQLite `-wal` / `-shm` sidecars, and any
   temp files a JSON save left behind. Don't reset a corpus another process is
   writing: that process carries on, exits 0, and its writes are lost with the
