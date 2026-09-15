@@ -3,8 +3,10 @@
 
 mod common;
 
-use serde_json::Value;
+use iriq::{Corpus, ProposalOptions};
+use serde_json::{json, Value};
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::Stdio;
 
 fn cluster_json_lines(stdin: &str) -> Vec<Value> {
@@ -111,4 +113,81 @@ fn segment_values_list_by_descending_count_then_value() {
     let clusters = cluster_json_lines(&stdin);
     let users = cluster(&clusters, "/users/{user_id}");
     assert_eq!(keys(&users["segments"][1]["values"]), ["11", "5", "6", "3"]);
+}
+
+const PAT_URL: &str = "https://api.github.com/auth/ghp_zzzz9999xyzzy";
+
+/// A JSON corpus whose views propose `ghp_`, holding `activations` as its
+/// stored activations (as though another binary had written them).
+fn corpus_holding(name: &str, activations: Value) -> PathBuf {
+    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("parity-small-{}-{name}.json", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let mut c = Corpus::open(&path).unwrap();
+    for i in 0..25 {
+        c.observe(&format!("https://api.github.com/auth/ghp_aaaa{i:04}xyzzy"))
+            .unwrap();
+    }
+    c.save(&path).unwrap();
+    drop(c);
+
+    let mut doc = read_json(&path);
+    doc["activated_recognizers"] = activations;
+    std::fs::write(&path, serde_json::to_vec(&doc).unwrap()).unwrap();
+    path
+}
+
+fn read_json(path: &PathBuf) -> Value {
+    serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+}
+
+#[test]
+fn reactivating_a_held_recognizer_is_a_no_op_whichever_binary_stored_it() {
+    for (writer, specificity) in [("ruby", 1.0), ("older-rust", 0.3)] {
+        let held = json!([{"prefix": "ghp_", "type": "ghp", "specificity": specificity}]);
+        let path = corpus_holding(writer, held.clone());
+        let mut c = Corpus::open(&path).unwrap();
+        // Specificity never decides a synthesized recognizer's verdict.
+        assert_eq!(
+            c.normalize(PAT_URL).unwrap(),
+            "https://api.github.com/auth/{ghp}",
+            "{writer}"
+        );
+        // The views predate the activation, so they still propose it.
+        let proposals = c.propose_recognizers(ProposalOptions::default()).unwrap();
+        assert!(
+            proposals
+                .iter()
+                .any(|p| p.prefix == "ghp_" && p.confidence >= 0.9),
+            "{writer}: {proposals:?}"
+        );
+
+        let activated = c
+            .activate_proposals_above(0.9, ProposalOptions::default())
+            .unwrap();
+        assert!(activated.is_empty(), "{writer}: {activated:?}");
+        c.save(&path).unwrap();
+        drop(c);
+        assert_eq!(read_json(&path)["activated_recognizers"], held, "{writer}");
+        std::fs::remove_file(&path).ok();
+    }
+}
+
+#[test]
+fn activation_stores_rubys_specificity() {
+    let path = corpus_holding("fresh", json!([]));
+    let mut c = Corpus::open(&path).unwrap();
+    let activated = c
+        .activate_proposals_above(0.9, ProposalOptions::default())
+        .unwrap();
+    assert_eq!(activated.len(), 1);
+    c.save(&path).unwrap();
+    drop(c);
+
+    // Ruby's Specificity::SEMANTIC.
+    assert_eq!(
+        read_json(&path)["activated_recognizers"],
+        json!([{"prefix": "ghp_", "type": "ghp", "specificity": 1.0}])
+    );
+    std::fs::remove_file(&path).ok();
 }

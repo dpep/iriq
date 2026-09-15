@@ -281,10 +281,14 @@ impl Corpus {
         self.rebuild(Some(dump))
     }
 
+    /// An activation is its prefix and type: specificity never changes what
+    /// it classifies, and older binaries stored a different one.
     fn has_activated(&self, dump: &serde_json::Value) -> Result<bool> {
         let mut found = false;
-        self.storage
-            .each_activated_recognizer(&mut |stored| found |= stored == dump)?;
+        self.storage.each_activated_recognizer(&mut |stored| {
+            found |=
+                stored.get("prefix") == dump.get("prefix") && stored.get("type") == dump.get("type")
+        })?;
         Ok(found)
     }
 

@@ -138,6 +138,15 @@ describe "Recognizer auto-activation" do
       end
     end
 
+    # Older Rust binaries stored an activation's specificity as 0.3.
+    it "changes nothing when the stored row has another specificity" do
+      observe_pat_stream
+      corpus.storage.record_activated_recognizer({ "prefix" => "ghp_", "type" => "ghp", "specificity" => 0.3 })
+
+      expect(corpus.activate_proposals_above(0.9)).to eq([])
+      expect(corpus.activated_recognizer_count).to eq(1)
+    end
+
     it "isn't reported by activate_proposals_above" do
       observe_pat_stream
       stale = corpus.propose_recognizers.first

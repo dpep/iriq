@@ -6,7 +6,10 @@
 use crate::classifier::{Recognizer, SegmentType, Verdict};
 use serde_json::{Map, Value};
 
-const SPECIFICITY_PATTERN: f64 = 0.3;
+// Ruby's Specificity::SEMANTIC. A proposal's prefix never fires alongside a
+// built-in or another activation, so the value only has to match the rows
+// Ruby writes.
+const SPECIFICITY: f64 = 1.0;
 
 pub struct SynthesizedRecognizer {
     pub prefix: String,
@@ -19,7 +22,7 @@ impl SynthesizedRecognizer {
         SynthesizedRecognizer {
             prefix: prefix.into(),
             ty,
-            specificity: SPECIFICITY_PATTERN,
+            specificity: SPECIFICITY,
         }
     }
 
@@ -31,7 +34,7 @@ impl SynthesizedRecognizer {
         let specificity = obj
             .get("specificity")
             .and_then(|v| v.as_f64())
-            .unwrap_or(SPECIFICITY_PATTERN);
+            .unwrap_or(SPECIFICITY);
         Some(SynthesizedRecognizer {
             prefix: prefix.to_string(),
             ty,
@@ -72,6 +75,8 @@ impl Recognizer for SynthesizedRecognizer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::classifier::SegmentClassifier;
+    use std::sync::Arc;
 
     #[test]
     fn matches_the_prefix_then_ascii_alphanumerics_only() {
@@ -96,5 +101,30 @@ mod tests {
         for (segment, matches) in cases {
             assert_eq!(r.try_classify(segment).is_some(), matches, "{segment:?}");
         }
+    }
+
+    #[test]
+    fn specificity_never_changes_a_classification() {
+        let segments = [
+            "ghp_abc",
+            "abc_123",
+            "ghp_",
+            "1234",
+            "2024-01-15",
+            "users",
+            "a_b_c",
+        ];
+        let classify_at = |specificity: f64| -> Vec<SegmentType> {
+            let c = SegmentClassifier::new();
+            for prefix in ["ghp_", "abc_"] {
+                c.register_recognizer(Arc::new(SynthesizedRecognizer {
+                    prefix: prefix.into(),
+                    ty: crate::classifier::segment_type_from_name(prefix.trim_end_matches('_')),
+                    specificity,
+                }));
+            }
+            segments.iter().map(|s| c.classify(s)).collect()
+        };
+        assert_eq!(classify_at(0.3), classify_at(SPECIFICITY));
     }
 }

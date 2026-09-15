@@ -420,7 +420,7 @@ module Iriq
     def rebuild(activation)
       planned = stored_activations
       if activation
-        return false if planned.include?(activation)
+        return false if holds_activation?(planned, activation)
 
         planned += [activation]
       end
@@ -463,7 +463,7 @@ module Iriq
     def install_views(mark, planned, activation)
       batch do
         if activation
-          next false if stored_activations.include?(activation)
+          next false if holds_activation?(stored_activations, activation)
 
           @storage.record_activated_recognizer(activation)
         end
@@ -486,6 +486,12 @@ module Iriq
       mark = @storage.each_observed_iri_since(mark) { |canonical| iris << canonical }
       iris.each { |canonical| events_for(Parser.parse(canonical)).each { |e| Reducer.apply(e, @storage) } }
       [iris.size, mark]
+    end
+
+    # An activation is its prefix and type: specificity never changes what it
+    # classifies, and older Rust binaries stored a different one.
+    def holds_activation?(activations, activation)
+      activations.any? { |a| a.values_at("prefix", "type") == activation.values_at("prefix", "type") }
     end
 
     def stored_activations
