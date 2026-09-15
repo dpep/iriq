@@ -171,6 +171,21 @@ and the auto-default corpus becomes `default.json` when the feature is
 off. Schema v4 is shared across runtimes — a `.db` written by either binary opens cleanly
 in the other (and in `.db` files written by the retired Go port).
 
+SQLite writers share the write lock by one rule: a writer waits up to 10s
+for it, and no iriq process holds it longer than about a turn of work.
+Waiting is a busy handler that retries every 1ms (SQLite's own busy_timeout
+backs off to 100ms retries and misses short gaps). An ingest
+(`observe_all`) commits a ~1s turn at a time, and a writer that used a whole
+turn leaves the lock free for 20ms. `reinfer` and activation rebuild without
+the lock: they replay the log into TEMP tables named like the views (which
+shadow them for that connection only), then take the lock just long enough to
+replay what others logged meanwhile and copy the result in, in one
+transaction. Connections set `cache_size` to 64MB because each turn re-reads
+the pages the last one wrote; with the default 2MB cache a 1.2M-line ingest
+ran ~45% slower. `LOCK_WAIT`, `LOCK_TURN`, `TURN_PAUSE` and the cache size
+live in `lib/iriq/storage/sqlite.rb` and `rust/iriq/src/storage_sqlite.rs`;
+change them in both.
+
 When adding a new backend, replicate the contract in both languages and
 add parity scenarios in `script/cli_parity.sh`'s `corpus_pair` section.
 
