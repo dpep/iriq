@@ -53,9 +53,6 @@
 // SQLite-only items; stable builds never see this.
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-// `color_kind` became unreachable when the surface narrowed; delete it there
-// and drop this allow.
-#[allow(dead_code)]
 mod classifier;
 mod cluster;
 mod clusterer;

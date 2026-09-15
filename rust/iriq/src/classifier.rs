@@ -409,14 +409,6 @@ pub fn display_type(t: SegmentType) -> &'static str {
     }
 }
 
-pub fn color_kind(value: &str) -> Option<&'static str> {
-    if COLOR_HEX_RE.is_match(value) {
-        Some("hex")
-    } else {
-        None
-    }
-}
-
 pub fn file_kind(value: &str) -> Option<FileKind> {
     let caps = FILE_EXT_RE.captures(value)?;
     let ext = caps.get(1).unwrap().as_str().to_ascii_lowercase();
