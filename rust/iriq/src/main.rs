@@ -272,6 +272,11 @@ fn run<R: Read, W: Write, E: Write>(
     } else {
         cmd_summary(&mut stdout, &mut stderr, &args, &opts, corpus.as_mut())
     };
+    let code = match code {
+        Ok(code) => Ok(code),
+        Err(Failure::Io(e)) => Err(e),
+        Err(Failure::Corpus(e)) => Ok(corpus_error(&mut stderr, opts.json, &e)),
+    };
 
     // Saved even when stdout failed: everything read so far was observed.
     if let Some(mut c) = corpus {
@@ -298,6 +303,25 @@ fn finish<W: Write, E: Write>(
         Ok(code) => code,
         Err(e) if e.kind() == io::ErrorKind::BrokenPipe => 141,
         Err(e) => emit_error(stderr, json, "stdout_error", &format!("stdout: {e}"), "", 1),
+    }
+}
+
+// Why a command stopped: stdout failed (see `finish`) or the corpus did. A
+// command propagates either with `?`; `run` reports them.
+enum Failure {
+    Io(io::Error),
+    Corpus(iriq::Error),
+}
+
+impl From<io::Error> for Failure {
+    fn from(e: io::Error) -> Self {
+        Failure::Io(e)
+    }
+}
+
+impl From<iriq::Error> for Failure {
+    fn from(e: iriq::Error) -> Self {
+        Failure::Corpus(e)
     }
 }
 
@@ -655,7 +679,7 @@ fn cmd_summary<W: Write, E: Write>(
     args: &[String],
     opts: &Opts,
     corpus: Option<&mut Corpus>,
-) -> io::Result<u8> {
+) -> Result<u8, Failure> {
     if args.is_empty() {
         return Ok(emit_error(
             stderr,
@@ -684,9 +708,7 @@ fn cmd_summary<W: Write, E: Write>(
     // passing --corpus.
     let corpus: Option<&Corpus> = match corpus {
         Some(c) => {
-            if let Err(e) = c.observe_iri(&iri) {
-                return Ok(corpus_error(stderr, opts.json, &e));
-            }
+            c.observe_iri(&iri)?;
             Some(&*c)
         }
         None => None,
@@ -932,7 +954,7 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
     opts: &Opts,
     corpus: Option<&mut Corpus>,
     explicit_cluster: bool,
-) -> io::Result<u8> {
+) -> Result<u8, Failure> {
     // Per-IRI sections (-n/-p/-c/-e) stream, with or without a corpus, so a
     // live `tail -f | iriq -n` prints as lines arrive. The aggregate views
     // below need the whole input first, so they slurp.
@@ -960,15 +982,12 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
         (None, Some(c)) => c,
         _ => unreachable!(),
     };
-    let observed = working.batch(|c| {
+    working.batch(|c| {
         for iri in &iris {
             c.observe_iri(iri)?;
         }
         Ok(())
-    });
-    if let Err(e) = observed {
-        return Ok(corpus_error(stderr, opts.json, &e));
-    }
+    })?;
 
     if opts.stats {
         emit_stats(stdout, working, opts)?;
@@ -1008,7 +1027,7 @@ fn stream_per_iri_sections<R: Read, W: Write, E: Write>(
     args: &[String],
     opts: &Opts,
     mut corpus: Option<&mut Corpus>,
-) -> io::Result<u8> {
+) -> Result<u8, Failure> {
     let source: Box<dyn Read + '_> = if args.is_empty() || args[0] == "-" {
         Box::new(stdin)
     } else {
@@ -1023,12 +1042,9 @@ fn stream_per_iri_sections<R: Read, W: Write, E: Write>(
     // Waits for input outside any transaction: a quiet `tail -f` must not hold
     // the corpus's write lock.
     while input.error.is_none() && input.next_line(&mut line) {
-        let chunk = match corpus.as_deref_mut() {
-            Some(c) => c.batch(|c| input.chunk(&mut line, Some(c), opts, &mut rendered)),
-            None => input.chunk(&mut line, None, opts, &mut rendered),
-        };
-        if let Err(e) = chunk {
-            return Ok(corpus_error(stderr, opts.json, &e));
+        match corpus.as_deref_mut() {
+            Some(c) => c.batch(|c| input.chunk(&mut line, Some(c), opts, &mut rendered))?,
+            None => input.chunk(&mut line, None, opts, &mut rendered)?,
         }
         stdout.write_all(&rendered.bytes)?;
         stdout.flush()?;
@@ -1519,7 +1535,7 @@ fn cmd_stats<W: Write, E: Write>(
     stderr: &mut E,
     corpus: Option<&Corpus>,
     opts: &Opts,
-) -> io::Result<u8> {
+) -> Result<u8, Failure> {
     let Some(c) = corpus else {
         return Ok(emit_error(
             stderr,
@@ -1598,7 +1614,7 @@ fn cmd_reinfer<W: Write, E: Write>(
     stderr: &mut E,
     corpus: Option<&mut Corpus>,
     opts: &Opts,
-) -> io::Result<u8> {
+) -> Result<u8, Failure> {
     let Some(c) = corpus else {
         return Ok(emit_error(
             stderr,
@@ -1611,9 +1627,7 @@ fn cmd_reinfer<W: Write, E: Write>(
     };
     let n = c.observed_iri_count();
     let before = c.size();
-    if let Err(e) = c.reinfer() {
-        return Ok(corpus_error(stderr, opts.json, &e));
-    }
+    c.reinfer()?;
     let after = c.size();
     let noun = if n == 1 {
         "observation"
@@ -1634,7 +1648,7 @@ fn cmd_propose<W: Write, E: Write>(
     stderr: &mut E,
     corpus: Option<&mut Corpus>,
     opts: &Opts,
-) -> io::Result<u8> {
+) -> Result<u8, Failure> {
     let Some(c) = corpus else {
         return Ok(emit_error(
             stderr,
@@ -1650,23 +1664,19 @@ fn cmd_propose<W: Write, E: Write>(
     popts.min_coverage = opts.propose_min_coverage;
     popts.min_hosts = opts.min_hosts;
     if opts.activate_above > 0.0 {
-        match c.activate_proposals_above(opts.activate_above, popts) {
-            Ok(activated) => {
-                if activated.is_empty() {
-                    writeln!(
-                        stdout,
-                        "no proposals at or above coverage {}",
-                        opts.activate_above
-                    )?;
-                    return Ok(0);
-                }
-                for r in activated {
-                    writeln!(stdout, "activated: {} ({})", r.suggested_type, r.prefix)?;
-                }
-                return Ok(0);
-            }
-            Err(e) => return Ok(corpus_error(stderr, opts.json, &e)),
+        let activated = c.activate_proposals_above(opts.activate_above, popts)?;
+        if activated.is_empty() {
+            writeln!(
+                stdout,
+                "no proposals at or above coverage {}",
+                opts.activate_above
+            )?;
+            return Ok(0);
         }
+        for r in activated {
+            writeln!(stdout, "activated: {} ({})", r.suggested_type, r.prefix)?;
+        }
+        return Ok(0);
     }
 
     let proposals = c.propose_recognizers(popts);
@@ -1760,7 +1770,7 @@ fn cmd_cross_host_shapes<W: Write, E: Write>(
     stderr: &mut E,
     corpus: Option<&Corpus>,
     opts: &Opts,
-) -> io::Result<u8> {
+) -> Result<u8, Failure> {
     let Some(c) = corpus else {
         return Ok(emit_error(
             stderr,
