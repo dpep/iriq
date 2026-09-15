@@ -95,19 +95,16 @@ module Iriq
     # replay against alternate reducers / thresholds for re-runnable
     # inference. See lib/iriq/event.rb and lib/iriq/reducer.rb.
     def observe(input)
-      iri     = coerce(input)
-      events  = events_for(iri)
-      cluster = nil
+      iri    = coerce(input)
+      events = events_for(iri)
 
       @storage.transaction do |s|
-        events.each do |e|
-          result = Reducer.apply(e, s)
-          cluster = result if e.is_a?(Event::ClusterAddition)
-        end
+        events.each { |e| Reducer.apply(e, s) }
         s.record_observation(iri.canonical) if s.respond_to?(:record_observation)
       end
 
-      Observation.new(corpus: self, identifier: iri, cluster: cluster)
+      addition = events.find { |e| e.is_a?(Event::ClusterAddition) }
+      Observation.new(corpus: self, identifier: iri, cluster_key: addition.key)
     end
 
     # Drop every materialized view (host counts, position stats, clusters,

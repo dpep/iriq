@@ -12,6 +12,18 @@ describe Iriq::Corpus do
       expect(obs.explanation.last).to include(value: "123", type: :integer)
     end
 
+    it "gives the observation's cluster as it stands when read, on every backend" do
+      Dir.mktmpdir("iriq-observation") do |dir|
+        [described_class.new, described_class.open(File.join(dir, "c.db"))].each do |c|
+          first = c.observe("https://foo.com/users/1")
+          c.observe("https://foo.com/users/2")
+          expect(first.cluster).to have_attributes(key: "https://foo.com/users/{user_id}", count: 2)
+        ensure
+          c.close
+        end
+      end
+    end
+
     it "accepts a pre-parsed Identifier" do
       iri = Iriq.parse("https://foo.com/users/1")
       expect { corpus.observe(iri) }.not_to raise_error

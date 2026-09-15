@@ -361,8 +361,6 @@ module Iriq
             end
           end
         end
-
-        load_cluster(key)
       end
 
       # Append a canonical IRI to the source-IRI log. Inside the same

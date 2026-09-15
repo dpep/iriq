@@ -8,8 +8,7 @@ module Iriq
   # handles it, register it in DEFAULTS — no other module changes.
   module Reducer
     # Each entry: { event_class => [lambda(event, storage) -> result] }.
-    # Lambdas may return the result of the underlying storage call so
-    # callers (Corpus#observe) can pick up the cluster they need to return.
+    # Lambdas return the result of the underlying storage call.
     DEFAULTS = {
       Event::HostSeen        => [->(e, s) { s.increment_host(e.host) }],
       Event::PathLengthSeen  => [->(e, s) { s.increment_path_length(e.length) }],
