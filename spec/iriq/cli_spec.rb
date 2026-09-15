@@ -683,6 +683,17 @@ describe Iriq::CLI do
       expect(run("--corpus", path, "-n", "https://x.com/users/2")).to eq(1)
       expect(stderr.string).to eq("iriq: corpus #{path}: attempt to write a readonly database\n")
     end
+
+    it "reports a corpus directory it can't create the same way, before announcing a corpus" do
+      File.chmod(0o555, dir)
+      skip "file permissions aren't enforced for this user" if File.writable?(dir)
+      path = File.join(dir, "sub", "c.db")
+
+      expect(run("--corpus", path, "-n", "https://x.com/users/1")).to eq(1)
+      expect(stderr.string).to eq("iriq: corpus #{path}: Permission denied (os error 13)\n")
+    ensure
+      File.chmod(0o755, dir)
+    end
   end
 
   describe "corpus commands" do
@@ -742,7 +753,8 @@ describe Iriq::CLI do
       it "reports when nothing clears the activation threshold" do
         seed_recognizable_stream
         expect(run("--corpus", corpus_path, "--propose-recognizers", "--activate-above", "1.5")).to eq(0)
-        expect(stdout.string).to include("no proposals at or above coverage 1.5")
+        # --activate-above filters on confidence, so the message names it.
+        expect(stdout.string).to eq("no proposals at or above confidence 1.5\n")
       end
     end
 
@@ -895,6 +907,37 @@ describe Iriq::CLI do
         File.binwrite(path, bad)
         expect(run("--json", "cluster", path)).to eq(1)
         expect(json_error).to eq("code" => "invalid_utf8", "message" => "stream did not contain valid UTF-8")
+      end
+    end
+
+    describe "unreadable input" do
+      it "reports the OS error for a file argument, with a read_error envelope under --json" do
+        path = File.join(@dir, "secret.log")
+        File.write(path, "https://foo.com/users/1\n")
+        File.chmod(0o000, path)
+        skip "file permissions aren't enforced for this user" if File.readable?(path)
+
+        expect(run(path)).to eq(1)
+        expect(stderr.string).to eq("iriq: Permission denied (os error 13)\n")
+
+        stderr.truncate(stderr.rewind)
+        expect(run("-n", path)).to eq(1)
+        expect(stderr.string).to eq("iriq: Permission denied (os error 13)\n")
+
+        stderr.truncate(stderr.rewind)
+        expect(run("--json", "cluster", path)).to eq(1)
+        expect(json_error).to eq("code" => "read_error", "message" => "Permission denied (os error 13)")
+      end
+
+      it "reports a failed read of stdin, streaming or not" do
+        File.open(@dir) do |directory|
+          [[], ["-n"]].each do |args|
+            err = StringIO.new
+            cli = described_class.new(stdin: directory, stdout: StringIO.new, stderr: err)
+            expect(cli.run(args)).to eq(1)
+            expect(err.string).to eq("iriq: Is a directory (os error 21)\n")
+          end
+        end
       end
     end
   end

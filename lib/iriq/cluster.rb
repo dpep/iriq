@@ -180,7 +180,11 @@ module Iriq
     # agree on what the corpus "thinks" about a param.
     def param_type(name)
       stats = @param_stats[name]
-      return nil unless stats
+      stats && Cluster.param_type_for(name, stats)
+    end
+
+    # param_type for one param's stats, read without the rest of the cluster.
+    def self.param_type_for(name, stats)
       return nil if stats.total.zero?
 
       type = stats.dominant_type
@@ -243,7 +247,7 @@ module Iriq
     YEAR_MIN_DISTINCT       = 2
     YEAR_MAX_DISTINCT       = 150
 
-    def year_position?(type, stats)
+    def self.year_position?(type, stats)
       return false unless type == :integer
       return false if stats.numeric_count.zero?
       return false if stats.cardinality < YEAR_MIN_DISTINCT
@@ -258,7 +262,7 @@ module Iriq
     HTTP_STATUS_MIN_DISTINCT     = 2
     HTTP_STATUS_MAX_DISTINCT     = 30
 
-    def http_status_position?(type, stats)
+    def self.http_status_position?(type, stats)
       return false unless type == :integer
       return false if stats.numeric_count.zero?
       return false if stats.cardinality < HTTP_STATUS_MIN_DISTINCT
@@ -272,7 +276,7 @@ module Iriq
     # as an enum. Built around the *established* members (values seen at least
     # ENUM_MIN_VALUE_COUNT times) so a stray one-off value is a straggler, not
     # a disqualifier. See ENUM_* constants at the top of this class.
-    def enum?(stats)
+    def self.enum?(stats)
       return false if stats.total < ENUM_MIN_OBSERVATIONS
 
       established = established_values(stats)
@@ -283,7 +287,7 @@ module Iriq
     end
 
     # Values seen often enough to count as real members of the set (vs noise).
-    def established_values(stats)
+    def self.established_values(stats)
       stats.value_counts.select { |_, n| n >= ENUM_MIN_VALUE_COUNT }
     end
 
@@ -299,7 +303,7 @@ module Iriq
     # ordered by descending count (lex tie-break). Stragglers are excluded so
     # the advertised set is what the corpus is actually confident about.
     def enum_values(stats)
-      established_values(stats).sort_by { |v, n| [-n, v] }.map(&:first)
+      Cluster.established_values(stats).sort_by { |v, n| [-n, v] }.map(&:first)
     end
 
     # value_distribution returns the fraction of total observations each
@@ -350,7 +354,7 @@ module Iriq
 
     # Most common type in stats.type_counts excluding `skip` — lex tie-break
     # so the choice is deterministic across runtimes.
-    def dominant_excluding(stats, skip)
+    def self.dominant_excluding(stats, skip)
       best = nil
       best_count = -1
       stats.type_counts.each do |t, n|

@@ -23,7 +23,11 @@ module Iriq
       # mistyped --corpus path can't overwrite an unrelated JSON file: it must
       # be an object with at least one corpus key, or `{}`.
       def load!(path)
-        data = File.read(path)
+        data = begin
+          File.read(path)
+        rescue SystemCallError => e
+          raise CorpusError, "corpus #{path}: #{Iriq.os_error_message(e)}"
+        end
         return self if data.empty?
 
         dump = begin

@@ -12,6 +12,18 @@ describe Iriq::Corpus do
       expect(obs.explanation.last).to include(value: "123", type: :integer)
     end
 
+    it "gives the observation's cluster as it stands when read, on every backend" do
+      Dir.mktmpdir("iriq-observation") do |dir|
+        [described_class.new, described_class.open(File.join(dir, "c.db"))].each do |c|
+          first = c.observe("https://foo.com/users/1")
+          c.observe("https://foo.com/users/2")
+          expect(first.cluster).to have_attributes(key: "https://foo.com/users/{user_id}", count: 2)
+        ensure
+          c.close
+        end
+      end
+    end
+
     it "accepts a pre-parsed Identifier" do
       iri = Iriq.parse("https://foo.com/users/1")
       expect { corpus.observe(iri) }.not_to raise_error
@@ -622,6 +634,24 @@ describe Iriq::Corpus do
 
     it "rejects unknown host_strategy" do
       expect { described_class.new(host_strategy: :bogus) }.to raise_error(ArgumentError)
+    end
+  end
+
+  describe "evidence reads" do
+    it "classifies a variable segment of a non-stable type without reading its position" do
+      corpus.observe("https://foo.com/users/1")
+      allow(corpus.storage).to receive(:position_evidence).and_call_original
+
+      corpus.normalize("https://foo.com/users/2")
+      expect(corpus.storage).to have_received(:position_evidence).once
+    end
+
+    it "renders an absent query without reading the cluster" do
+      corpus.observe("https://foo.com/users?page=1")
+      allow(corpus.storage).to receive(:param_stats).and_call_original
+
+      expect(corpus.render_query(Iriq.parse("https://foo.com/users"))).to eq("")
+      expect(corpus.storage).not_to have_received(:param_stats)
     end
   end
 

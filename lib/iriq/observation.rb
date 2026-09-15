@@ -1,13 +1,18 @@
 module Iriq
   # The result of Corpus#observe. Lightweight value object — heavy work
-  # (explanation, normalization) is deferred until you ask.
+  # (cluster load, explanation, normalization) is deferred until you ask.
   class Observation
-    attr_reader :identifier, :cluster
+    attr_reader :identifier
 
-    def initialize(corpus:, identifier:, cluster:)
-      @corpus     = corpus
-      @identifier = identifier
-      @cluster    = cluster
+    def initialize(corpus:, identifier:, cluster_key:)
+      @corpus      = corpus
+      @identifier  = identifier
+      @cluster_key = cluster_key
+    end
+
+    # The cluster as it stands when first read; observing doesn't load it.
+    def cluster
+      @cluster ||= @corpus.storage.cluster_for(@cluster_key)
     end
 
     def fingerprint

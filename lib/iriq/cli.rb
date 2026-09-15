@@ -271,7 +271,11 @@ module Iriq
 
     def load_corpus(path, host_strategy: :full, announce_create: false)
       if announce_create && !File.exist?(path)
-        FileUtils.mkdir_p(File.dirname(path))
+        begin
+          FileUtils.mkdir_p(File.dirname(path))
+        rescue SystemCallError => e
+          raise CorpusError, "corpus #{path}: #{Iriq.os_error_message(e)}"
+        end
         stderr.puts "iriq: created corpus at #{path} (disable with --no-corpus or IRIQ_NO_CORPUS=1)"
       end
       Corpus.open(path, host_strategy: host_strategy)
@@ -440,12 +444,25 @@ module Iriq
       input_lines(path).lazy.flat_map { |line| extractor.extract(utf8!(line)) }
     end
 
+    # Yields input lines as they arrive. Only the reads are guarded, so a
+    # failure in the caller's block isn't mistaken for a read error.
     def input_lines(path)
-      if path.nil? || path == "-"
-        stdin.each_line
-      else
-        File.foreach(path)
+      return enum_for(:input_lines, path) unless block_given?
+
+      io = path.nil? || path == "-" ? stdin : read_guard { File.open(path) }
+      while (line = read_guard { io.gets })
+        yield line
       end
+    ensure
+      io.close if io && !io.equal?(stdin)
+    end
+
+    # Input iriq can't read is the OS error in the Rust CLI's words,
+    # `iriq: Permission denied (os error 13)`, code read_error.
+    def read_guard
+      yield
+    rescue SystemCallError => e
+      raise InputError.new("read_error", Iriq.os_error_message(e))
     end
 
     # Input is UTF-8 regardless of locale; anything else is an error, not a
@@ -552,7 +569,7 @@ module Iriq
     # --propose-recognizers: scan observed values for prefix patterns
     # that recur enough to suggest a new Recognizer. Prints one block
     # per proposal in human mode, or a JSON array under --json. With
-    # --activate-above F, every proposal at or above coverage F is
+    # --activate-above F, every proposal at or above confidence F is
     # promoted to a live Recognizer on the corpus's classifier and the
     # corpus reinfers to apply the new classifier to existing
     # observations.
@@ -567,7 +584,7 @@ module Iriq
       if opts[:activate_above]
         activated = corpus.activate_proposals_above(opts[:activate_above], **kwargs)
         if activated.empty?
-          stdout.puts "no proposals at or above coverage #{opts[:activate_above]}"
+          stdout.puts "no proposals at or above confidence #{opts[:activate_above]}"
         else
           activated.each do |r|
             stdout.puts "activated: #{r.type} (#{r.prefix})"
@@ -707,11 +724,7 @@ module Iriq
     end
 
     def read_text(path)
-      if path.nil? || path == "-"
-        stdin.read
-      else
-        File.read(path)
-      end
+      read_guard { path.nil? || path == "-" ? stdin.read : File.read(path) }
     end
 
     # Compact identifier hash for parse output (both JSON and human). Drops

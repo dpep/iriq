@@ -52,4 +52,45 @@ describe "SQLite corpus concurrency" do
       corpus.close
     end
   end
+
+  # Each insert into a capped position must count what the other writers
+  # committed, so the position ends holding exactly `cap` values.
+  it "keeps a position at its value cap while CLI writers interleave" do
+    require "sqlite3"
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "capped.db")
+      cap  = 20
+      Iriq::Corpus.open(path, max_values_per_position: cap).close
+
+      root    = File.expand_path("../..", __dir__)
+      command = [RbConfig.ruby, "-I", File.join(root, "lib"), File.join(root, "exe/iriq"), "-n", "--corpus", path]
+      writers = WRITERS.times.map { IO.popen(command, "r+") }
+      # Barrier: every writer has booted and opened the corpus before the
+      # interleaved lines start.
+      writers.each { |w| w.puts("https://warm.example.com/x") }
+      writers.each(&:gets)
+      # Strict round-robin: each line is echoed (committed) before the next
+      # writer's turn, so every writer's view goes stale between its lines.
+      30.times do |i|
+        writers.each_with_index do |w, n|
+          w.puts("https://cap.example.com/t/w#{n}v#{i}")
+          w.gets
+        end
+      end
+      statuses = writers.map do |w|
+        w.close_write
+        w.read
+        w.close
+        $?
+      end
+      expect(statuses).to all(be_success)
+
+      db = SQLite3::Database.new(path)
+      counts = db.execute(
+        "SELECT locator, COUNT(*) FROM position_values WHERE host = 'cap.example.com' GROUP BY locator",
+      ).to_h
+      db.close
+      expect(counts).to eq("" => 1, "/t" => cap)
+    end
+  end
 end

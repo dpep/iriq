@@ -128,6 +128,15 @@ module Iriq
       def self.open(path, classifier: SegmentClassifier::DEFAULT,
                           max_values_per_position: PositionStats::DEFAULT_MAX_VALUES)
         new(path: path, classifier: classifier, max_values_per_position: max_values_per_position).tap(&:setup!)
+      rescue SQLite3::Exception => e
+        raise corpus_error(path, e)
+      end
+
+      # A failure SQLite reports (not a database, can't open, read-only, full
+      # disk) reads like every other corpus failure: `corpus PATH: cause`. The
+      # gem appends the failing SQL to its message; the cause is the part before.
+      def self.corpus_error(path, e)
+        CorpusError.new("corpus #{path}: #{e.message.split(":\n", 2).first}")
       end
 
       def initialize(path:, classifier: SegmentClassifier::DEFAULT,
@@ -144,7 +153,15 @@ module Iriq
         enable_wal!
         @db.execute("PRAGMA synchronous = NORMAL")
         @db.execute("PRAGMA foreign_keys = ON")
-        @in_batch = false
+        @in_batch       = false
+        @in_transaction = false
+        # Values tracked per position, remembered so each new value needn't
+        # re-count them. Exact only inside a transaction (the write lock is
+        # held) and while @counts_version still matches.
+        @value_counts   = {}
+        # PRAGMA data_version when @value_counts was last known exact; it
+        # changes only when another connection commits.
+        @counts_version = nil
       end
 
       # Checked before SCHEMA runs, so iriq never adds tables to a corpus
@@ -184,12 +201,7 @@ module Iriq
         # no-ops — the outer batch wraps everything in one txn for speed.
         return yield(self) if @in_batch
 
-        @db.transaction
-        yield self
-        @db.commit
-      rescue => e
-        @db.rollback rescue nil
-        raise corpus_error(e)
+        write_transaction { yield self }
       end
 
       # Wrap many observations in a single transaction. Cuts SQLite write
@@ -198,22 +210,40 @@ module Iriq
         return yield if @in_batch
 
         @in_batch = true
-        @db.transaction
         begin
-          yield
-          @db.commit
-        rescue => e
-          @db.rollback rescue nil
-          raise corpus_error(e)
+          write_transaction { yield }
         ensure
           @in_batch = false
         end
       end
 
-      # A write SQLite refuses (read-only file, full disk) reads like every
-      # other corpus failure: `corpus PATH: cause`. Anything else passes through.
+      # IMMEDIATE takes the write lock up front. A deferred transaction that
+      # reads first can't upgrade once another process commits: SQLite
+      # reports busy without consulting busy_timeout.
+      private def write_transaction
+        @db.transaction(:immediate)
+        @in_transaction = true
+        # Under the write lock no one else can commit until we do, so the
+        # version read now holds for the whole transaction.
+        version = @db.get_first_value("PRAGMA data_version")
+        @value_counts.clear unless version == @counts_version
+        @counts_version = version
+        result = yield
+        @db.commit
+        result
+      rescue => e
+        @db.rollback rescue nil
+        @value_counts.clear
+        @counts_version = nil
+        raise corpus_error(e)
+      ensure
+        @in_transaction = false
+      end
+
+      # SQLite failures inside a transaction become CorpusErrors; anything else
+      # passes through.
       def corpus_error(e)
-        e.is_a?(SQLite3::Exception) ? CorpusError.new("corpus #{@path}: #{e.message}") : e
+        e.is_a?(SQLite3::Exception) ? Sqlite.corpus_error(@path, e) : e
       end
 
       # Saving is automatic — incremental UPSERTs hit disk on commit. flush
@@ -281,16 +311,18 @@ module Iriq
           WHERE host = ? AND scope = ? AND locator = ? AND value = ?
         SQL
         if @db.changes.zero?
-          card = @db.get_first_value(
-            "SELECT COUNT(*) FROM position_values WHERE host = ? AND scope = ? AND locator = ?",
-            [host, scope, locator],
+          where = [host, scope, locator]
+          card = (@in_transaction && @value_counts[where]) || @db.get_first_value(
+            "SELECT COUNT(*) FROM position_values WHERE host = ? AND scope = ? AND locator = ?", where,
           )
           if card < @max_values_per_position
             @db.execute(
               "INSERT INTO position_values (host, scope, locator, value, count) VALUES (?, ?, ?, ?, 1)",
               [host, scope, locator, value],
             )
+            card += 1
           end
+          @value_counts[where] = card if @in_transaction
         end
       end
 
@@ -361,8 +393,6 @@ module Iriq
             end
           end
         end
-
-        load_cluster(key)
       end
 
       # Append a canonical IRI to the source-IRI log. Inside the same
@@ -404,6 +434,7 @@ module Iriq
       # Drop every materialized view without touching the source-IRI log.
       # Corpus#reinfer calls this before replaying the log.
       def clear_materialized_views
+        @value_counts.clear
         @db.execute_batch(<<~SQL)
           DELETE FROM host_counts;
           DELETE FROM path_length_counts;
@@ -497,6 +528,52 @@ module Iriq
 
       def cluster_for(key)
         load_cluster(key)
+      end
+
+      # What Corpus#classify reads: counts, not every value tracked at the
+      # position.
+      def position_evidence(position, value)
+        where = [position.host || "", position.scope.to_s, position.locator]
+        total = @db.get_first_value(
+          "SELECT total FROM position_stats WHERE host = ? AND scope = ? AND locator = ?", where,
+        )
+        return nil if total.nil?
+
+        type_counts = Hash.new(0)
+        @db.execute(
+          "SELECT type, count FROM position_types WHERE host = ? AND scope = ? AND locator = ?", where,
+        ) { |r| type_counts[r[0].to_sym] = r[1] }
+        PositionEvidence.new(
+          total:       total,
+          type_counts: type_counts,
+          cardinality: @db.get_first_value(
+            "SELECT COUNT(*) FROM position_values WHERE host = ? AND scope = ? AND locator = ?", where,
+          ),
+          value_count: @db.get_first_value(
+            "SELECT count FROM position_values WHERE host = ? AND scope = ? AND locator = ? AND value = ?",
+            [*where, value],
+          ),
+        )
+      end
+
+      # One query param's stats — narrower than cluster_for, which also loads
+      # the cluster's examples and segment counts.
+      def param_stats(key, name)
+        total = @db.get_first_value(
+          "SELECT total FROM cluster_params WHERE cluster_key = ? AND name = ?", [key, name],
+        )
+        return nil if total.nil?
+
+        stats = PositionStats.new(max_values: @max_values_per_position)
+        stats.instance_variable_set(:@total, total)
+        @db.execute(
+          "SELECT value, count FROM cluster_param_values WHERE cluster_key = ? AND name = ?", [key, name],
+        ) { |r| stats.value_counts[r[0]] = r[1] }
+        @db.execute(
+          "SELECT type, count FROM cluster_param_types WHERE cluster_key = ? AND name = ?", [key, name],
+        ) { |r| stats.type_counts[r[0].to_sym] = r[1] }
+        recompute_numeric!(stats)
+        stats
       end
 
       private
