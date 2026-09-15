@@ -599,6 +599,29 @@ activate_pair() {
 activate_pair "JSON storage"   ".json"
 activate_pair "SQLite storage" ".db"
 
+# A proposal never takes a built-in type name: `literal_` proposes
+# `literal_id`, and activating it classifies new values as {literal_id}.
+reserved_name_side() {
+  local path="$1"
+  shift
+  rm -f "$path" "$path-wal" "$path-shm"
+  local stream=""
+  for i in $(seq 10 34); do stream+="https://api.x.com/t/literal_Zz$i"$'\n'; done
+  echo -n "$stream" | "$@" --corpus "$path" > /dev/null 2>&1
+  "$@" --corpus "$path" --propose-recognizers --json < /dev/null
+  "$@" --corpus "$path" --propose-recognizers --activate-above 0.9 < /dev/null
+  "$@" --corpus "$path" -n "https://api.x.com/t/literal_Zz99" < /dev/null
+}
+ruby_reserved=$(cd "$REPO_ROOT" && reserved_name_side "$corpus_dir/ruby-reserved.db" $RUBY 2>&1)
+rust_reserved=$(reserved_name_side "$corpus_dir/rust-reserved.db" "$RUST_BIN" 2>&1)
+if [[ "$ruby_reserved" == "$rust_reserved" ]] && [[ "$ruby_reserved" == *'{literal_id}'* ]]; then
+  pass_count=$((pass_count + 1))
+else
+  fail_count=$((fail_count + 1))
+  echo; echo "MISMATCH: proposal named after a built-in type gets _id"
+  diff <(echo "$ruby_reserved") <(echo "$rust_reserved") | sed 's/^/    /' || true
+fi
+
 # --cross-host-shapes parity. Stream IRIs across multiple hosts that
 # share the same shape; both runtimes should report identical output.
 cross_host_pair() {

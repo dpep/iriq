@@ -123,10 +123,9 @@ pub fn propose_recognizers(
         samples.sort();
         samples.truncate(5);
 
-        let suggested = prefix.trim_end_matches('_').to_string();
         out.push(RecognizerProposal {
             prefix: prefix.clone(),
-            suggested_type: suggested,
+            suggested_type: suggested_type_for(&prefix),
             positions: acc.positions_ordered.clone(),
             hosts: hosts.clone(),
             coverage,
@@ -146,6 +145,19 @@ pub fn propose_recognizers(
     out
 }
 
+/// A proposal never takes a name iriq already means something by (a built-in
+/// type, or `ip`, the ipv4/ipv6 display name): activating `literal_` as
+/// `literal` would fix every matching value as a literal. Those get `_id`.
+fn suggested_type_for(prefix: &str) -> String {
+    let name = prefix.trim_end_matches('_');
+    // segment_type_from_str, not _from_name: that interns unknown names.
+    if name == "ip" || crate::classifier::segment_type_from_str(name).is_some() {
+        format!("{name}_id")
+    } else {
+        name.to_string()
+    }
+}
+
 fn slug_or_opaque_dominant(stats: &PositionStats) -> bool {
     let mut dom = SegmentType::Literal;
     let mut max = 0usize;
@@ -156,4 +168,36 @@ fn slug_or_opaque_dominant(stats: &PositionStats) -> bool {
         }
     }
     dom == SegmentType::Slug || dom == SegmentType::OpaqueId
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn proposals_for(prefix: &str) -> Vec<RecognizerProposal> {
+        let mut storage = crate::storage_memory::MemoryStorage::new(100);
+        let pos = Position::path("x.com", "/t");
+        for i in 0..25 {
+            storage
+                .observe_position(&pos, &format!("{prefix}Ab{i:03}x"), SegmentType::OpaqueId)
+                .unwrap();
+        }
+        propose_recognizers(&storage, ProposalOptions::default())
+    }
+
+    #[test]
+    fn a_proposal_never_takes_a_built_in_type_name() {
+        for (prefix, suggested) in [
+            ("ghp_", "ghp"),
+            ("literal_", "literal_id"),
+            ("uuid_", "uuid_id"),
+            ("ip_", "ip_id"),
+        ] {
+            let got: Vec<String> = proposals_for(prefix)
+                .into_iter()
+                .map(|p| p.suggested_type)
+                .collect();
+            assert_eq!(got, [suggested], "{prefix}");
+        }
+    }
 }
