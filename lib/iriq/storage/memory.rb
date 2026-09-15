@@ -170,13 +170,19 @@ module Iriq
 
       # --- Bulk load (used by JSON backend) --------------------------------
 
+      # Top-level keys of the dump. A JSON file with none of them isn't a corpus.
+      DUMP_KEYS = %w[host_counts path_length_counts raw_shape_counts fingerprint_counts
+                     max_values_per_position position_stats clusterer observed_iris
+                     activated_recognizers].freeze
+
+      # Missing keys load as empty, so `{}` is a valid (empty) corpus.
       def load_dump!(h)
-        @host_counts        = Hash.new(0).merge(h["host_counts"])
-        @path_length_counts = Hash.new(0).merge(h["path_length_counts"].transform_keys(&:to_i))
-        @raw_shape_counts   = Hash.new(0).merge(h["raw_shape_counts"])
-        @fingerprint_counts = Hash.new(0).merge(h["fingerprint_counts"])
+        @host_counts        = Hash.new(0).merge(h.fetch("host_counts", {}))
+        @path_length_counts = Hash.new(0).merge(h.fetch("path_length_counts", {}).transform_keys(&:to_i))
+        @raw_shape_counts   = Hash.new(0).merge(h.fetch("raw_shape_counts", {}))
+        @fingerprint_counts = Hash.new(0).merge(h.fetch("fingerprint_counts", {}))
         @max_values_per_position = h.fetch("max_values_per_position", PositionStats::DEFAULT_MAX_VALUES)
-        @position_stats = h["position_stats"].each_with_object({}) do |entry, acc|
+        @position_stats = h.fetch("position_stats", []).each_with_object({}) do |entry, acc|
           position = Position.from_dump(entry["position"])
           acc[position] = PositionStats.from_dump(entry["stats"])
         end

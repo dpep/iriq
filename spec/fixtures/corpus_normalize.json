@@ -1,0 +1,116 @@
+{
+  "cases": [
+    {
+      "observe": [
+        "https://foo.com/users/123"
+      ],
+      "input": "https://foo.com/users/123",
+      "hints": false,
+      "output": "https://foo.com/users/{integer}"
+    },
+    {
+      "observe": [
+        "https://foo.com/users/alice/profile",
+        "https://foo.com/users/bob/profile",
+        "https://foo.com/users/carol/profile",
+        "https://foo.com/users/dave/profile",
+        "https://foo.com/users/erin/profile",
+        "https://foo.com/users/frank/profile",
+        "https://foo.com/users/gina/profile",
+        "https://foo.com/users/hank/profile",
+        "https://foo.com/users/ivan/profile",
+        "https://foo.com/users/jane/profile"
+      ],
+      "input": "https://foo.com/users/zoe/profile",
+      "hints": false,
+      "output": "https://foo.com/users/{value}/profile"
+    },
+    {
+      "observe": [
+        "https://foo.com/users/alice/profile",
+        "https://foo.com/users/bob/profile",
+        "https://foo.com/users/carol/profile",
+        "https://foo.com/users/dave/profile",
+        "https://foo.com/users/erin/profile",
+        "https://foo.com/users/frank/profile",
+        "https://foo.com/users/gina/profile",
+        "https://foo.com/users/hank/profile",
+        "https://foo.com/users/ivan/profile",
+        "https://foo.com/users/jane/profile"
+      ],
+      "input": "https://foo.com/users/zoe/profile",
+      "hints": true,
+      "output": "https://foo.com/users/{user}/profile"
+    },
+    {
+      "observe": [
+        "https://shop.com/pricing/usd?currency=eur"
+      ],
+      "input": "https://shop.com/pricing/usd?currency=eur",
+      "hints": true,
+      "output": "https://shop.com/pricing/USD?currency=EUR"
+    },
+    {
+      "observe": [
+        "https://foo.com/x?phone=unknown&email=tbd"
+      ],
+      "input": "https://foo.com/x?phone=unknown&email=tbd",
+      "hints": true,
+      "output": "https://foo.com/x?email={email}&phone={phone}"
+    },
+    {
+      "observe": [
+        "https://foo.com/posts/abc-123"
+      ],
+      "input": "https://foo.com/posts/abc-123",
+      "hints": true,
+      "output": "https://foo.com/posts/{post_id}"
+    },
+    {
+      "observe": [
+        "https://foo.com/api/v1/status"
+      ],
+      "input": "https://foo.com/api/v1/status",
+      "hints": true,
+      "output": "https://foo.com/api/{version}/status"
+    },
+    {
+      "observe": [
+        "https://foo.com/api/v1/status",
+        "https://foo.com/api/v1/status",
+        "https://foo.com/api/v1/status",
+        "https://foo.com/api/v1/status",
+        "https://foo.com/api/v1/status"
+      ],
+      "input": "https://foo.com/api/v1/status",
+      "hints": true,
+      "output": "https://foo.com/api/v1/status"
+    },
+    {
+      "observe": [
+        "https://shop.com/pricing/usd/checkout",
+        "https://shop.com/pricing/usd/checkout",
+        "https://shop.com/pricing/usd/checkout",
+        "https://shop.com/pricing/usd/checkout",
+        "https://shop.com/pricing/usd/checkout",
+        "https://shop.com/pricing/usd/checkout"
+      ],
+      "input": "https://shop.com/pricing/usd/checkout",
+      "hints": true,
+      "output": "https://shop.com/pricing/USD/checkout"
+    },
+    {
+      "observe": [
+        "https://shop.com/price?currency=eur",
+        "https://shop.com/price?currency=gbp",
+        "https://shop.com/price?currency=jpy",
+        "https://shop.com/price?currency=chf",
+        "https://shop.com/price?currency=cad",
+        "https://shop.com/price?currency=aud"
+      ],
+      "input": "https://shop.com/price?currency=usd",
+      "hints": true,
+      "output": "https://shop.com/price?currency=USD"
+    }
+  ]
+}

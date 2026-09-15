@@ -12,6 +12,17 @@ describe Iriq::CLI do
     cli.run(args)
   end
 
+  describe "spec sandbox" do
+    # Guards the suite itself: no example may resolve the developer's real
+    # corpus, whatever IRIQ_* / XDG_* the shell exported.
+    it "never resolves a corpus path under the developer's home" do
+      home = File.expand_path("~")
+      expect(cli.send(:default_corpus_path)).not_to start_with(home)
+      expect(cli.send(:resolve_reset_path, {})).not_to start_with(home)
+      expect(cli.send(:resolve_corpus_path, {})).to be_nil
+    end
+  end
+
   describe "help / usage / version" do
     it "prints usage with no args" do
       expect(run).to eq(0)
@@ -485,10 +496,19 @@ describe Iriq::CLI do
       end
     end
 
-    it "rejects unknown values" do
-      stdin.string = ""
-      expect(run("--host=bogus")).to eq(1)
-      expect(stderr.string).to match(/--host/)
+    it "applies to the throwaway -C corpus too" do
+      stdin.string = "https://api.foo.com/users/1\nhttps://app.foo.com/users/2\n"
+      expect(run("-C", "--host", "reg", "cluster")).to eq(0)
+      expect(stdout.string).to start_with("[2] foo.com  /users/{user_id}")
+    end
+
+    it "rejects unknown values, naming the argument once plus the accepted modes" do
+      expect(run("--host", "bogus", "foo.com/x")).to eq(1)
+      expect(stderr.string).to eq("iriq: invalid argument: --host bogus (expected full|registrable|reg|none)\n")
+
+      stderr.truncate(stderr.rewind)
+      expect(run("--host=bogus", "foo.com/x")).to eq(1)
+      expect(stderr.string).to eq("iriq: invalid argument: --host=bogus (expected full|registrable|reg|none)\n")
     end
   end
 
@@ -536,6 +556,17 @@ describe Iriq::CLI do
 
       expect(run("-n", "--corpus", corpus_path, "https://foo.com/users/zoe/profile")).to eq(0)
       expect(stdout.string.strip).to eq("https://foo.com/users/{user}/profile")
+    end
+
+    it "matches -C output on a fresh corpus (currency canonicalized)" do
+      url = "https://shop.com/pricing/usd?currency=eur"
+      expect(run("-n", "--corpus", corpus_path, url)).to eq(0)
+      expect(stdout.string.strip).to eq("https://shop.com/pricing/USD?currency=EUR")
+    end
+
+    it "honors -N (no hints) with a corpus" do
+      expect(run("-n", "-N", "--corpus", corpus_path, "https://foo.com/users/123")).to eq(0)
+      expect(stdout.string.strip).to eq("https://foo.com/users/{integer}")
     end
 
     it "deterministic normalize is unchanged without --corpus" do
@@ -715,6 +746,87 @@ describe Iriq::CLI do
     end
   end
 
+  describe "input handling" do
+    around do |example|
+      Dir.mktmpdir("iriq-input") do |dir|
+        @dir = dir
+        example.run
+      end
+    end
+
+    def json_error
+      JSON.parse(stderr.string)["error"]
+    end
+
+    describe "positional files" do
+      it "reads a bare filename (no ./) as a file, including with --stats" do
+        File.write(File.join(@dir, "urls.txt"), "https://foo.com/users/1\nhttps://foo.com/users/2\n")
+        Dir.chdir(@dir) { expect(run("-n", "urls.txt")).to eq(0) }
+        expect(stdout.string.lines.map(&:chomp)).to eq(["https://foo.com/users/{user_id}"] * 2)
+
+        stdout.truncate(stdout.rewind)
+        Dir.chdir(@dir) { expect(run("urls.txt", "--stats")).to eq(0) }
+        expect(stdout.string).to include("observations: 2")
+      end
+
+      it "reads an existing file even when its name looks like a host" do
+        File.write(File.join(@dir, "foo.com"), "https://bar.com/users/9\n")
+        Dir.chdir(@dir) { expect(run("-n", "foo.com")).to eq(0) }
+        expect(stdout.string.strip).to eq("https://bar.com/users/{user_id}")
+      end
+
+      it "always treats an argument containing :// as an IRI" do
+        FileUtils.mkdir_p(File.join(@dir, "https:/foo.com"))
+        File.write(File.join(@dir, "https:/foo.com/x"), "https://bar.com/users/9\n")
+        Dir.chdir(@dir) { expect(run("-n", "https://foo.com/x")).to eq(0) }
+        expect(stdout.string.strip).to eq("https://foo.com/x")
+      end
+    end
+
+    describe "missing files" do
+      it "says so when a path-like argument doesn't exist" do
+        expect(run("./nope.txt")).to eq(1)
+        expect(stderr.string).to eq("iriq: no such file: ./nope.txt\n")
+
+        stderr.truncate(stderr.rewind)
+        expect(run("-n", "/nope/x.log")).to eq(1)
+        expect(stderr.string).to eq("iriq: no such file: /nope/x.log\n")
+      end
+
+      it "says so for a missing cluster file" do
+        expect(run("cluster", "./nope.txt")).to eq(1)
+        expect(stderr.string).to eq("iriq: no such file: ./nope.txt\n")
+      end
+
+      it "uses a file_not_found envelope under --json" do
+        expect(run("--json", "./nope.txt")).to eq(1)
+        expect(json_error).to eq("code" => "file_not_found", "message" => "no such file: ./nope.txt")
+      end
+    end
+
+    describe "invalid UTF-8" do
+      let(:bad) { "https://foo.com/users/1\nhttps://foo.com/\xFF/x\n".b }
+
+      it "reports it cleanly on stdin, streaming or not" do
+        stdin.string = bad
+        expect(run("-n")).to eq(1)
+        expect(stderr.string).to eq("iriq: stream did not contain valid UTF-8\n")
+
+        stderr.truncate(stderr.rewind)
+        stdin.string = bad
+        expect(run).to eq(1)
+        expect(stderr.string).to eq("iriq: stream did not contain valid UTF-8\n")
+      end
+
+      it "reports it cleanly for a file argument, with an invalid_utf8 envelope under --json" do
+        path = File.join(@dir, "bad.log")
+        File.binwrite(path, bad)
+        expect(run("--json", "cluster", path)).to eq(1)
+        expect(json_error).to eq("code" => "invalid_utf8", "message" => "stream did not contain valid UTF-8")
+      end
+    end
+  end
+
   describe "cluster" do
     it "clusters identifiers from stdin" do
       stdin.string = <<~LINES
@@ -745,6 +857,25 @@ describe Iriq::CLI do
 
         expect(run("cluster", f.path)).to eq(0)
         expect(stdout.string).to include("[2] foo.com  /x/{x_id}")
+      end
+    end
+
+    it "survives numeric params too large to be finite, in JSON, human, and saved corpus" do
+      huge = "1" * 400
+      input = "https://inf.com/p?v=#{huge}\nhttps://inf.com/p?v=-#{huge}\nhttps://inf.com/p?v=3\n"
+      Dir.mktmpdir("iriq-inf") do |dir|
+        corpus = File.join(dir, "c.json")
+        stdin.string = input
+        expect(run("--corpus", corpus, "cluster", "--json")).to eq(0)
+        param = JSON.parse(stdout.string).first["params"].find { |p| p["name"] == "v" }
+        expect(param).to include("min" => 3.0, "max" => 3.0, "avg" => 3.0)
+        expect(File.exist?(corpus)).to be true
+
+        stdout.truncate(stdout.rewind)
+        stdin.string = input
+        stdin.rewind
+        expect(run("-C", "cluster")).to eq(0)
+        expect(stdout.string).to include("3..3  avg 3")
       end
     end
 

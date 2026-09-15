@@ -1,6 +1,42 @@
 {
   "cases": [
     {
+      "input": "٢٠٢٤-٠١-٠١",
+      "type": "literal"
+    },
+    {
+      "input": "2024٠١٠١",
+      "type": "literal"
+    },
+    {
+      "input": "v𝟎",
+      "type": "literal"
+    },
+    {
+      "input": "+1٥٥٥1234567",
+      "type": "literal"
+    },
+    {
+      "input": "4٥.5,-122.6",
+      "type": "literal"
+    },
+    {
+      "input": "http://x.com/a b",
+      "type": "url"
+    },
+    {
+      "input": "http://x.com/a b",
+      "type": "literal"
+    },
+    {
+      "input": "http://x.com/ab",
+      "type": "url"
+    },
+    {
+      "input": "falſe",
+      "type": "boolean"
+    },
+    {
       "input": "users",
       "type": "literal"
     },
@@ -330,6 +366,18 @@
     },
     {
       "input": "",
+      "type": "literal"
+    },
+    {
+      "input": "1०००००००",
+      "type": "literal"
+    },
+    {
+      "input": "2024-٠١-١٥",
+      "type": "literal"
+    },
+    {
+      "input": "1.٥",
       "type": "literal"
     }
   ]

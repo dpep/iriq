@@ -130,6 +130,24 @@ describe Iriq::Corpus do
     end
   end
 
+  describe "normalize with hints: false" do
+    it "renders type placeholders instead of neighbor-derived names" do
+      corpus.observe("https://foo.com/users/123")
+      expect(corpus.normalize("https://foo.com/users/123", hints: false))
+        .to eq("https://foo.com/users/{integer}")
+      expect(corpus.normalize("https://foo.com/users/123"))
+        .to eq("https://foo.com/users/{user_id}")
+    end
+
+    it "renders a corpus-inferred slot, which has no type, as {value}" do
+      %w[alice bob carol dave erin frank gina hank ivan jane].each do |name|
+        corpus.observe("https://foo.com/users/#{name}/profile")
+      end
+      expect(corpus.normalize("https://foo.com/users/zoe/profile", hints: false))
+        .to eq("https://foo.com/users/{value}/profile")
+    end
+  end
+
   describe "explainability categories" do
     it "marks classifier-variable segments as :variable_identifier" do
       corpus.observe("https://foo.com/users/123")
@@ -278,6 +296,46 @@ describe Iriq::Corpus do
       page = summary.find { |p| p[:name] == "page" }
       expect(page[:type]).to eq(:integer)
       expect(page[:presence]).to eq(1.0)
+    end
+  end
+
+  describe "agreement with mechanical normalize on a first observation" do
+    # A corpus with no real evidence has no opinion, so the default (corpus-on)
+    # output must match -C output.
+    [
+      "https://shop.com/pricing/usd?currency=eur",
+      "https://shop.com/events/usd",
+      "https://foo.com/x?phone=unknown&email=tbd",
+      "https://foo.com/events?since=2024/01/15&page=5",
+      "https://foo.com/users/123",
+      "https://foo.com/posts/abc-123",
+      "https://foo.com/api/v1/status",
+    ].each do |url|
+      it "renders #{url} exactly as Iriq.normalize" do
+        fresh = described_class.new
+        fresh.observe(url)
+        expect(fresh.normalize(url)).to eq(Iriq.normalize(url))
+      end
+    end
+
+    it "prints currencies canonically, never as placeholders, even after seeing them vary" do
+      c = described_class.new
+      %w[eur gbp jpy chf cad aud].each { |cur| c.observe("https://shop.com/price/#{cur}?currency=#{cur}") }
+      expect(c.normalize("https://shop.com/price/usd?currency=usd"))
+        .to eq("https://shop.com/price/USD?currency=USD")
+    end
+
+    it "acts on evidence once a position has enough observations" do
+      c = described_class.new
+      5.times { c.observe("https://foo.com/api/v1/status") }
+      expect(c.normalize("https://foo.com/api/v1/status")).to eq("https://foo.com/api/v1/status")
+    end
+
+    it "prints a stable currency segment in canonical upper case" do
+      c = described_class.new
+      6.times { c.observe("https://shop.com/pricing/usd/checkout") }
+      expect(c.normalize("https://shop.com/pricing/usd/checkout"))
+        .to eq("https://shop.com/pricing/USD/checkout")
     end
   end
 

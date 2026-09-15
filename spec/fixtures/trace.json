@@ -1,0 +1,187 @@
+{
+  "cases": [
+    {
+      "input": "https://a.com/events/2024-01-15/USD?currency=EUR&since=2024-01-15",
+      "hints": true,
+      "trace": {
+        "input": "https://a.com/events/2024-01-15/USD?currency=EUR&since=2024-01-15",
+        "normalized": "https://a.com/events/2024-01-15/USD?currency=EUR&since=2024-01-15",
+        "scheme": "https",
+        "host": "a.com",
+        "path": [
+          {
+            "value": "events",
+            "type": "literal",
+            "output": "events",
+            "notes": []
+          },
+          {
+            "value": "2024-01-15",
+            "type": "date",
+            "output": "2024-01-15",
+            "notes": []
+          },
+          {
+            "value": "USD",
+            "type": "currency",
+            "output": "USD",
+            "notes": []
+          }
+        ],
+        "query": [
+          {
+            "name": "currency",
+            "value": "EUR",
+            "type": "currency",
+            "output": "EUR",
+            "notes": []
+          },
+          {
+            "name": "since",
+            "value": "2024-01-15",
+            "type": "date",
+            "output": "2024-01-15",
+            "notes": []
+          }
+        ]
+      }
+    },
+    {
+      "input": "https://shop.com/pricing/usd?currency=eur",
+      "hints": true,
+      "trace": {
+        "input": "https://shop.com/pricing/usd?currency=eur",
+        "normalized": "https://shop.com/pricing/USD?currency=EUR",
+        "scheme": "https",
+        "host": "shop.com",
+        "path": [
+          {
+            "value": "pricing",
+            "type": "literal",
+            "output": "pricing",
+            "notes": []
+          },
+          {
+            "value": "usd",
+            "type": "currency",
+            "output": "USD",
+            "notes": [
+              "currency upcase (usd → USD)"
+            ]
+          }
+        ],
+        "query": [
+          {
+            "name": "currency",
+            "value": "eur",
+            "type": "currency",
+            "output": "EUR",
+            "notes": [
+              "currency upcase (eur → EUR)"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "input": "https://foo.com/api/v1/probe/192.168.1.1",
+      "hints": true,
+      "trace": {
+        "input": "https://foo.com/api/v1/probe/192.168.1.1",
+        "normalized": "https://foo.com/api/{version}/probe/{ip}",
+        "scheme": "https",
+        "host": "foo.com",
+        "path": [
+          {
+            "value": "api",
+            "type": "literal",
+            "output": "api",
+            "notes": []
+          },
+          {
+            "value": "v1",
+            "type": "version",
+            "output": "{version}",
+            "notes": [
+              "semantic type — surfaced as {version}, not {api_id}"
+            ]
+          },
+          {
+            "value": "probe",
+            "type": "literal",
+            "output": "probe",
+            "notes": []
+          },
+          {
+            "value": "192.168.1.1",
+            "type": "ipv4",
+            "output": "{ip}",
+            "notes": [
+              "ip umbrella collapse (ipv4 → ip)",
+              "semantic type — surfaced as {ip}, not {probe_id}"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "input": "https://foo.com/users/123/orders/456",
+      "hints": false,
+      "trace": {
+        "input": "https://foo.com/users/123/orders/456",
+        "normalized": "https://foo.com/users/{integer}/orders/{integer}",
+        "scheme": "https",
+        "host": "foo.com",
+        "path": [
+          {
+            "value": "users",
+            "type": "literal",
+            "output": "users",
+            "notes": []
+          },
+          {
+            "value": "123",
+            "type": "integer",
+            "output": "{integer}",
+            "notes": []
+          },
+          {
+            "value": "orders",
+            "type": "literal",
+            "output": "orders",
+            "notes": []
+          },
+          {
+            "value": "456",
+            "type": "integer",
+            "output": "{integer}",
+            "notes": []
+          }
+        ]
+      }
+    },
+    {
+      "input": "urn:isbn:0451450523",
+      "hints": true,
+      "trace": {
+        "input": "urn:isbn:0451450523",
+        "normalized": "urn:isbn:{isbn_id}",
+        "scheme": "urn",
+        "path": [
+          {
+            "value": "isbn",
+            "type": "literal",
+            "output": "isbn",
+            "notes": []
+          },
+          {
+            "value": "0451450523",
+            "type": "integer",
+            "output": "{isbn_id}",
+            "notes": []
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -112,6 +112,17 @@ describe Iriq::Storage do
       reopened.close
     end
 
+    it "rebuilds numeric ranges from finite values only on reopen" do
+      sqlite = Iriq::Corpus.open(@path)
+      ["1" * 400, "3", "5"].each { |v| sqlite.observe("https://foo.com/p?v=#{v}") }
+      sqlite.close
+
+      reopened = Iriq::Corpus.open(@path)
+      row = reopened.clusters.first.param_summary.find { |r| r[:name] == "v" }
+      expect(row.values_at(:min, :max, :avg)).to eq([3.0, 5.0, 4.0])
+      reopened.close
+    end
+
     it "enforces the value cardinality cap" do
       sqlite = Iriq::Corpus.open(@path, max_values_per_position: 5)
       20.times { |i| sqlite.observe("https://foo.com/items/#{i}") }
@@ -211,6 +222,93 @@ describe Iriq::Storage do
       expect(reader.host_counts["foo.com"]).to eq(3)
       expect(reader.stats_for("foo.com", "/users").total).to eq(3)
       reader.close
+    end
+  end
+
+  describe "files iriq refuses to open" do
+    around do |example|
+      Dir.mktmpdir("iriq-refuse") do |dir|
+        @dir = dir
+        example.run
+      end
+    end
+
+    it "refuses a JSON object with none of the corpus keys and leaves it untouched" do
+      path = File.join(@dir, "notes.json")
+      File.write(path, %({"foo": 1}))
+      expect { Iriq::Corpus.open(path) }
+        .to raise_error(Iriq::CorpusError, "#{path} is not an iriq corpus (no recognized keys); refusing to use it")
+      expect(File.read(path)).to eq(%({"foo": 1}))
+    end
+
+    it "refuses JSON that isn't an object, and malformed JSON" do
+      list = File.join(@dir, "list.json")
+      File.write(list, "[1, 2]")
+      expect { Iriq::Corpus.open(list) }.to raise_error(Iriq::CorpusError, /#{Regexp.escape(list)} is not an iriq corpus/)
+
+      broken = File.join(@dir, "broken.json")
+      File.write(broken, %({"host_counts": ))
+      expect { Iriq::Corpus.open(broken) }.to raise_error(Iriq::CorpusError, /#{Regexp.escape(broken)} is not valid JSON/)
+    end
+
+    it "treats {} as an empty corpus" do
+      path = File.join(@dir, "empty.json")
+      File.write(path, "{}")
+      corpus = Iriq::Corpus.open(path)
+      corpus.observe("https://foo.com/x")
+      corpus.save
+      expect(JSON.parse(File.read(path))["host_counts"]).to eq("foo.com" => 1)
+    end
+
+    it "refuses a SQLite corpus from a newer schema without modifying it" do
+      require "iriq/storage/sqlite"
+      path = File.join(@dir, "future.db")
+      db = SQLite3::Database.new(path)
+      db.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)")
+      db.execute("INSERT INTO meta VALUES ('schema_version', '99')")
+      db.close
+
+      expect { Iriq::Corpus.open(path) }.to raise_error(
+        Iriq::CorpusError,
+        "#{path} has schema version 99, newer than this iriq supports (#{Iriq::Storage::Sqlite::SCHEMA_VERSION}); upgrade iriq",
+      )
+      db = SQLite3::Database.new(path)
+      expect(db.execute("SELECT name FROM sqlite_master WHERE type = 'table'").flatten).to eq(["meta"])
+      db.close
+    end
+  end
+
+  describe "JSON saves" do
+    around do |example|
+      Dir.mktmpdir("iriq-json-save") do |dir|
+        @dir = dir
+        example.run
+      end
+    end
+
+    it "don't depend on a fixed PATH.tmp name" do
+      path = File.join(@dir, "c.json")
+      Dir.mkdir("#{path}.tmp") # something already occupying the old shared name
+      corpus = Iriq::Corpus.open(path)
+      corpus.observe("https://foo.com/x")
+      corpus.save
+      corpus.save(File.join(@dir, "export.json"))
+
+      expect(JSON.parse(File.read(path))["host_counts"]).to eq("foo.com" => 1)
+      expect(Dir.children(@dir)).to contain_exactly("c.json", "c.json.tmp", "export.json")
+    end
+
+    it "survive concurrent writers (last writer wins, nobody crashes)" do
+      path = File.join(@dir, "shared.json")
+      writers = 4.times.map do |w|
+        Thread.new do
+          corpus = Iriq::Corpus.open(path)
+          corpus.observe("https://w#{w}.com/x")
+          20.times { corpus.save }
+        end
+      end
+      expect { writers.each(&:join) }.not_to raise_error
+      expect(JSON.parse(File.read(path))["host_counts"].size).to eq(1)
     end
   end
 end

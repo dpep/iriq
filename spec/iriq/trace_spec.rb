@@ -38,10 +38,26 @@ describe Iriq::Trace do
       expect(phone_row[:notes]).to include(/param-name hint/)
     end
 
+    it "shows already-canonical dates and currencies as their value, agreeing with the normalized line" do
+      tr = described_class.for("https://a.com/events/2024-01-15/USD?since=2024-01-15&currency=EUR")
+      expect(tr[:normalized]).to eq("https://a.com/events/2024-01-15/USD?currency=EUR&since=2024-01-15")
+
+      rows = (tr[:path] + tr[:query]).to_h { |r| [[r[:name], r[:value]], r] }
+      expect(rows[[nil, "2024-01-15"]]).to include(output: "2024-01-15", notes: [])
+      expect(rows[[nil, "USD"]]).to include(output: "USD", notes: [])
+      expect(rows[["since", "2024-01-15"]]).to include(output: "2024-01-15", notes: [])
+      expect(rows[["currency", "EUR"]]).to include(output: "EUR", notes: [])
+    end
+
     it "handles URN inputs" do
       tr = described_class.for("urn:isbn:0451450523")
       expect(tr[:normalized]).to eq("urn:isbn:{isbn_id}")
       expect(tr[:path].last[:output]).to eq("{isbn_id}")
+    end
+
+    it "omits host, like port, when the IRI has none" do
+      expect(described_class.for("urn:isbn:0451450523")).not_to have_key(:host)
+      expect(described_class.for("https://foo.com/x")).to include(host: "foo.com")
     end
   end
 end

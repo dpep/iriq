@@ -147,7 +147,21 @@ module Iriq
         @in_batch = false
       end
 
+      # Checked before SCHEMA runs, so iriq never adds tables to a corpus
+      # written by a newer iriq.
+      def refuse_newer_schema!
+        has_meta = @db.get_first_value("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta'")
+        return unless has_meta
+
+        version = @db.get_first_value("SELECT value FROM meta WHERE key = 'schema_version'").to_i
+        return if version <= SCHEMA_VERSION
+
+        @db.close
+        raise CorpusError, "#{@path} has schema version #{version}, newer than this iriq supports (#{SCHEMA_VERSION}); upgrade iriq"
+      end
+
       def setup!
+        refuse_newer_schema!
         @db.execute_batch(SCHEMA)
         existing = @db.get_first_value("SELECT value FROM meta WHERE key = 'schema_version'")
         if existing.nil?
@@ -584,7 +598,7 @@ module Iriq
         sum   = 0.0
         stats.value_counts.each do |value, n|
           num = Float(value, exception: false)
-          next unless num
+          next unless num&.finite? # same rule as PositionStats#record_numeric
 
           count += n
           min = num if min.nil? || num < min

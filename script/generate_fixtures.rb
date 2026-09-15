@@ -45,9 +45,20 @@ PARSER_INPUTS = [
   "https://foo.com:99999/x",
   "https://EXÄMPLE.com/x",
   "https://РОССИЯ.рф/x",
+  # Per-character downcase: a word-final Σ becomes σ, not final-sigma ς.
+  "https://ΑΣ-x.com/users/1",
+  # Fully-qualified (trailing-dot) host survives parsing verbatim.
+  "https://api.foo.com./x",
+  "https://ΑΣ-x.com/",
+  "https://ΟΔΟΣ/x",
 ].freeze
 
 CLASSIFIER_INPUTS = [
+  # Unicode edges the Rust core lane converged onto Ruby: digit and space
+  # classes are ASCII (Nd digits aren't digits; NBSP doesn't end a URL), while
+  # the boolean match is case-insensitive with Unicode folding (ſ ~ s).
+  "٢٠٢٤-٠١-٠١", "2024٠١٠١", "v𝟎", "+1٥٥٥1234567", "4٥.5,-122.6",
+  "http://x.com/a b", "http://x.com/a b", "http://x.com/ab", "falſe",
   "users", "Profile", "123", "0", "9999999",
   "3.14", "-2.5", "1.0",
   "f47ac10b-58cc-4372-a567-0e02b2c3d479",
@@ -78,6 +89,8 @@ CLASSIFIER_INPUTS = [
   "US", "CA", "GB", "XX", "OK",
   "TWFuIGlzIGRpc3Rpbmd1aXNoZWQ=", "AAAAAAAAAAAAAA+/==",
   "こんにちは", "",
+  # Digit classes are ASCII: Unicode Nd digits are not integers/dates/floats.
+  "1०००००००", "2024-٠١-١٥", "1.٥",
 ].freeze
 
 INFLECTOR_INPUTS = %w[
@@ -105,6 +118,8 @@ NORMALIZE_INPUTS = [
   ["https://foo.com/files/d41d8cd98f00b204e9800998ecf8427e", true],
   ["https://shop.com/pricing/usd/checkout",                  true],
   ["https://shop.com/price?currency=eur",                    true],
+  # Currency upcase is ASCII-only: ſ/ı must not forge USD/INR.
+  ["https://shop.com/price?currency=uſd",                    true],
   ["https://foo.com/probe/192.168.1.1",                      true],
   ["https://foo.com/probe/::1",                              true],
   ["https://foo.com/api/v1/status",                          true],
@@ -115,6 +130,10 @@ NORMALIZE_INPUTS = [
   ["https://foo.com/ui?bg=%23ff00ff",                        true],
   ["https://foo.com/maps?coords=37.7749,-122.4194",          true],
   ["https://foo.com/orders?country=US&color=%23fff",         true],
+  # Unicode Nd digits are not ASCII \d: no integer/date/float from them.
+  ["https://x.com/1०००००००",                                 true],
+  ["https://a.com/x?d=2024-٠١-١٥",                           true],
+  ["https://a.com/x?v=1.٥",                                  true],
 ].freeze
 
 PATH_SHAPE_INPUTS = [
@@ -328,5 +347,117 @@ write_fixture("param_summary", {
   "inputs"   => param_inputs,
   "expected" => param_expected,
 })
+
+# Corpus-informed normalize. Each case observes `observe` into a fresh corpus,
+# then normalizes `input` with `hints`. Pins two rules: -N (hints: false) is
+# honored with a corpus, and the corpus changes a shape only where it has
+# evidence (>= Corpus::MIN_OBSERVATIONS_FOR_INFERENCE observations) — below
+# that, output equals mechanical normalize (currency upcase, param-name hints).
+names = %w[alice bob carol dave erin frank gina hank ivan jane]
+corpus_normalize_inputs = [
+  # hints: false with a corpus
+  [["https://foo.com/users/123"], "https://foo.com/users/123", false],
+  [names.map { |n| "https://foo.com/users/#{n}/profile" }, "https://foo.com/users/zoe/profile", false],
+  [names.map { |n| "https://foo.com/users/#{n}/profile" }, "https://foo.com/users/zoe/profile", true],
+  # first observation == mechanical
+  [["https://shop.com/pricing/usd?currency=eur"], "https://shop.com/pricing/usd?currency=eur", true],
+  [["https://foo.com/x?phone=unknown&email=tbd"], "https://foo.com/x?phone=unknown&email=tbd", true],
+  [["https://foo.com/posts/abc-123"], "https://foo.com/posts/abc-123", true],
+  [["https://foo.com/api/v1/status"], "https://foo.com/api/v1/status", true],
+  # with evidence: the corpus's opinion wins, values print canonically
+  [["https://foo.com/api/v1/status"] * 5, "https://foo.com/api/v1/status", true],
+  [["https://shop.com/pricing/usd/checkout"] * 6, "https://shop.com/pricing/usd/checkout", true],
+  [%w[eur gbp jpy chf cad aud].map { |c| "https://shop.com/price?currency=#{c}" }, "https://shop.com/price?currency=usd", true],
+]
+corpus_normalize_cases = corpus_normalize_inputs.map do |(observe, input, hints)|
+  c = Iriq::Corpus.new
+  observe.each { |u| c.observe(u) }
+  { "observe" => observe, "input" => input, "hints" => hints, "output" => c.normalize(input, hints: hints) }
+end
+write_fixture("corpus_normalize", { "cases" => corpus_normalize_cases })
+
+# Numeric range — digit strings too long to be finite (±Infinity) still count
+# toward type/value counts but are excluded from min/max/avg. `huge` is all
+# non-finite, so it has no range keys at all (absent, not null); `mixed` and
+# `v` keep only their finite values' range.
+huge = "1" * 400
+numeric_inputs = [
+  "https://foo.com/n?mixed=#{huge}",
+  "https://foo.com/n?mixed=-#{huge}",
+  "https://foo.com/n?mixed=3",
+  "https://foo.com/n?mixed=5",
+  "https://foo.com/n?huge=#{huge}",
+  "https://foo.com/n?huge=9#{huge}",
+  "https://foo.com/n?v=1",
+  "https://foo.com/n?v=#{huge}",
+]
+numeric_corpus = Iriq::Corpus.new
+numeric_inputs.each { |u| numeric_corpus.observe(u) }
+numeric_expected = numeric_corpus.params_for("https://foo.com/n").to_h do |row|
+  entry = { "type" => row[:type].to_s, "count" => row[:count] }
+  %i[min max avg].each { |k| entry[k.to_s] = row[k] if row.key?(k) }
+  [row[:name], entry]
+end
+write_fixture("numeric_range", {
+  "query"    => "https://foo.com/n",
+  "inputs"   => numeric_inputs,
+  "expected" => numeric_expected,
+})
+
+# File param kinds — a value with an unrecognized extension lands in an
+# `unknown` bucket rather than being dropped from kind_distribution.
+file_inputs = (["https://foo.com/d?f=b.pdf"] * 3) + ["https://foo.com/d?f=c.zzz"]
+file_corpus = Iriq::Corpus.new
+file_inputs.each { |u| file_corpus.observe(u) }
+file_expected = file_corpus.params_for("https://foo.com/d").to_h do |row|
+  [row[:name], {
+    "type"              => row[:type].to_s,
+    "kind_distribution" => row[:kind_distribution]&.transform_keys(&:to_s),
+  }]
+end
+write_fixture("file_kind_distribution", {
+  "query"    => "https://foo.com/d",
+  "inputs"   => file_inputs,
+  "expected" => file_expected,
+})
+
+# canonical_date — ASCII date forms canonicalize to ISO; Unicode Nd digits
+# never form a date (nil).
+CANONICAL_DATE_INPUTS = [
+  "2024-01-15", "20240115", "2024/01/15", "01/15/2024", "1/5/2024",
+  "2024-٠١-١٥", "12/٣١/2024",
+].freeze
+canonical_date_cases = CANONICAL_DATE_INPUTS.map do |v|
+  { "input" => v, "canonical" => Iriq::SegmentClassifier.canonical_date(v) }
+end
+write_fixture("canonical_date", { "cases" => canonical_date_cases })
+
+# Registrable domain — the host key under --host registrable. Trailing-dot
+# (fully-qualified), empty-label, and non-ASCII hosts are the known edges.
+REGISTRABLE_HOSTS = [
+  "api.foo.com", "api.foo.com.", "foo.com", "a.b.example.co.uk",
+  "news.example.co.uk.", "localhost", "127.0.0.1", "ασ-x.com", "api.ασ-x.com",
+  "www.foo.co.uk.", "x.y.z...", "foo.com.", "a..b", "..", "١.٢.٣.٤",
+].freeze
+registrable_cases = REGISTRABLE_HOSTS.map do |host|
+  { "host" => host, "registrable" => Iriq::RegistrableDomain.for(host) }
+end
+write_fixture("registrable_domain", { "cases" => registrable_cases })
+
+# Explain trace (the `-e` rows). Symbols are round-tripped through JSON so the
+# fixture holds exactly what `iriq -e -j` prints. Pins: already-canonical
+# date/currency rows print the value with no note; host is omitted, not null,
+# when the IRI has none.
+TRACE_INPUTS = [
+  ["https://a.com/events/2024-01-15/USD?currency=EUR&since=2024-01-15", true],
+  ["https://shop.com/pricing/usd?currency=eur",                          true],
+  ["https://foo.com/api/v1/probe/192.168.1.1",                           true],
+  ["https://foo.com/users/123/orders/456",                               false],
+  ["urn:isbn:0451450523",                                                true],
+].freeze
+trace_cases = TRACE_INPUTS.map do |(input, hints)|
+  { "input" => input, "hints" => hints, "trace" => JSON.parse(JSON.generate(Iriq::Trace.for(input, hints: hints))) }
+end
+write_fixture("trace", { "cases" => trace_cases })
 
 puts "Done."

@@ -505,7 +505,8 @@ module Iriq
     # /pricing/USD both render as /pricing/USD.
     def self.canonical_currency(value)
       return nil if value.nil?
-      up = value.upcase
+      # ASCII-only: full Unicode upcase maps ſ→S / ı→I, forging a code.
+      up = value.upcase(:ascii)
       CURRENCY_CODES.include?(up) ? up : nil
     end
 
