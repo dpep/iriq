@@ -48,8 +48,10 @@ module Iriq
     def record_numeric(value, type)
       return unless NUMERIC_TYPES.include?(type)
 
-      n = Float(value) rescue nil
-      return unless n
+      # Huge digit strings parse to ±Infinity; they'd poison the range and
+      # can't be serialized to JSON. They still count in type/value counts.
+      n = Float(value, exception: false)
+      return unless n&.finite?
 
       @numeric_count += 1
       @numeric_min = n if @numeric_min.nil? || n < @numeric_min

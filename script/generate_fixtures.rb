@@ -105,6 +105,8 @@ NORMALIZE_INPUTS = [
   ["https://foo.com/files/d41d8cd98f00b204e9800998ecf8427e", true],
   ["https://shop.com/pricing/usd/checkout",                  true],
   ["https://shop.com/price?currency=eur",                    true],
+  # Currency upcase is ASCII-only: ſ/ı must not forge USD/INR.
+  ["https://shop.com/price?currency=uſd",                    true],
   ["https://foo.com/probe/192.168.1.1",                      true],
   ["https://foo.com/probe/::1",                              true],
   ["https://foo.com/api/v1/status",                          true],
@@ -327,6 +329,35 @@ write_fixture("param_summary", {
   "query"    => "https://foo.com/items",
   "inputs"   => param_inputs,
   "expected" => param_expected,
+})
+
+# Numeric range — digit strings too long to be finite (±Infinity) still count
+# toward type/value counts but are excluded from min/max/avg. `huge` is all
+# non-finite (no range at all); `mixed` keeps only the finite values' range.
+huge = "1" * 400
+numeric_inputs = [
+  "https://foo.com/n?mixed=#{huge}",
+  "https://foo.com/n?mixed=-#{huge}",
+  "https://foo.com/n?mixed=3",
+  "https://foo.com/n?mixed=5",
+  "https://foo.com/n?huge=#{huge}",
+  "https://foo.com/n?huge=9#{huge}",
+]
+numeric_corpus = Iriq::Corpus.new
+numeric_inputs.each { |u| numeric_corpus.observe(u) }
+numeric_expected = numeric_corpus.params_for("https://foo.com/n").to_h do |row|
+  [row[:name], {
+    "type"  => row[:type].to_s,
+    "count" => row[:count],
+    "min"   => row[:min],
+    "max"   => row[:max],
+    "avg"   => row[:avg],
+  }]
+end
+write_fixture("numeric_range", {
+  "query"    => "https://foo.com/n",
+  "inputs"   => numeric_inputs,
+  "expected" => numeric_expected,
 })
 
 puts "Done."

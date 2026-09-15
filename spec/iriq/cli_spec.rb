@@ -496,10 +496,13 @@ describe Iriq::CLI do
       end
     end
 
-    it "rejects unknown values" do
-      stdin.string = ""
-      expect(run("--host=bogus")).to eq(1)
-      expect(stderr.string).to match(/--host/)
+    it "rejects unknown values, naming the argument once plus the accepted modes" do
+      expect(run("--host", "bogus", "foo.com/x")).to eq(1)
+      expect(stderr.string).to eq("iriq: invalid argument: --host bogus (expected full|registrable|reg|none)\n")
+
+      stderr.truncate(stderr.rewind)
+      expect(run("--host=bogus", "foo.com/x")).to eq(1)
+      expect(stderr.string).to eq("iriq: invalid argument: --host=bogus (expected full|registrable|reg|none)\n")
     end
   end
 
@@ -756,6 +759,25 @@ describe Iriq::CLI do
 
         expect(run("cluster", f.path)).to eq(0)
         expect(stdout.string).to include("[2] foo.com  /x/{x_id}")
+      end
+    end
+
+    it "survives numeric params too large to be finite, in JSON, human, and saved corpus" do
+      huge = "1" * 400
+      input = "https://inf.com/p?v=#{huge}\nhttps://inf.com/p?v=-#{huge}\nhttps://inf.com/p?v=3\n"
+      Dir.mktmpdir("iriq-inf") do |dir|
+        corpus = File.join(dir, "c.json")
+        stdin.string = input
+        expect(run("--corpus", corpus, "cluster", "--json")).to eq(0)
+        param = JSON.parse(stdout.string).first["params"].find { |p| p["name"] == "v" }
+        expect(param).to include("min" => 3.0, "max" => 3.0, "avg" => 3.0)
+        expect(File.exist?(corpus)).to be true
+
+        stdout.truncate(stdout.rewind)
+        stdin.string = input
+        stdin.rewind
+        expect(run("-C", "cluster")).to eq(0)
+        expect(stdout.string).to include("3..3  avg 3")
       end
     end
 

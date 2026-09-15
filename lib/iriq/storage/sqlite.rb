@@ -584,7 +584,7 @@ module Iriq
         sum   = 0.0
         stats.value_counts.each do |value, n|
           num = Float(value, exception: false)
-          next unless num
+          next unless num&.finite? # same rule as PositionStats#record_numeric
 
           count += n
           min = num if min.nil? || num < min

@@ -61,6 +61,11 @@
       "output": "https://shop.com/price?currency=EUR"
     },
     {
+      "input": "https://shop.com/price?currency=uſd",
+      "hints": true,
+      "output": "https://shop.com/price?currency={currency}"
+    },
+    {
       "input": "https://foo.com/probe/192.168.1.1",
       "hints": true,
       "output": "https://foo.com/probe/{ip}"

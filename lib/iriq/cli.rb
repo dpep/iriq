@@ -322,7 +322,9 @@ module Iriq
 
     def host_strategy_arg(value)
       mode = HOST_STRATEGY_ALIASES[value.to_s.downcase]
-      raise OptionParser::InvalidArgument, "--host: expected full|registrable|reg|none, got #{value.inspect}" unless mode
+      # OptionParser prefixes the switch itself ("--host bogus" / "--host=bogus"),
+      # so the message carries only the accepted modes.
+      raise OptionParser::InvalidArgument.new(value, "(expected full|registrable|reg|none)") unless mode
 
       mode
     end

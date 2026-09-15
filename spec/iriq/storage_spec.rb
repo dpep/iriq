@@ -112,6 +112,17 @@ describe Iriq::Storage do
       reopened.close
     end
 
+    it "rebuilds numeric ranges from finite values only on reopen" do
+      sqlite = Iriq::Corpus.open(@path)
+      ["1" * 400, "3", "5"].each { |v| sqlite.observe("https://foo.com/p?v=#{v}") }
+      sqlite.close
+
+      reopened = Iriq::Corpus.open(@path)
+      row = reopened.clusters.first.param_summary.find { |r| r[:name] == "v" }
+      expect(row.values_at(:min, :max, :avg)).to eq([3.0, 5.0, 4.0])
+      reopened.close
+    end
+
     it "enforces the value cardinality cap" do
       sqlite = Iriq::Corpus.open(@path, max_values_per_position: 5)
       20.times { |i| sqlite.observe("https://foo.com/items/#{i}") }

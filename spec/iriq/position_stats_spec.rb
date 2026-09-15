@@ -30,6 +30,28 @@ describe Iriq::PositionStats do
     end
   end
 
+  describe "numeric range" do
+    it "keeps min/max/avg over finite values only, while still counting the rest" do
+      stats.observe("1" * 400, :integer)       # parses to +Infinity
+      stats.observe("-#{'1' * 400}", :integer) # -Infinity
+      stats.observe("4", :integer)
+      stats.observe("2", :integer)
+
+      expect(stats.total).to eq(4)
+      expect(stats.type_counts[:integer]).to eq(4)
+      expect(stats.numeric_count).to eq(2)
+      expect([stats.numeric_min, stats.numeric_max, stats.numeric_avg]).to eq([2.0, 4.0, 3.0])
+    end
+
+    it "has no range when every numeric value is non-finite" do
+      stats.observe("9" * 400, :integer)
+
+      expect(stats.numeric_count).to eq(0)
+      expect(stats.numeric_min).to be_nil
+      expect(stats.numeric_avg).to be_nil
+    end
+  end
+
   describe "#variable_fraction" do
     let(:classifier) { Iriq::SegmentClassifier.new }
 

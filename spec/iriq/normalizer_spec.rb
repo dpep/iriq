@@ -50,6 +50,13 @@ describe Iriq::Normalizer do
       expect(out).to eq("https://shop.com/price?currency=EUR")
     end
 
+    it "upcases currency codes with ASCII rules only" do
+      # Full-Unicode upcase maps ſ→S and ı→I, forging a code out of a non-code.
+      expect(described_class.normalize("https://shop.com/price?currency=uſd"))
+        .to eq("https://shop.com/price?currency={currency}")
+      expect(Iriq::SegmentClassifier.canonical_currency("ınr")).to be_nil
+    end
+
     it "collapses ipv4/ipv6 to {ip} in placeholder form" do
       expect(described_class.normalize("https://foo.com/probe/192.168.1.1"))
         .to eq("https://foo.com/probe/{ip}")
