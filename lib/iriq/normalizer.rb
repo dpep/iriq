@@ -70,25 +70,28 @@ module Iriq
 
     def render_query(iri, classifier)
       iri.query_params.keys.sort.map do |k|
-        v    = iri.query_params[k]
-        type = classifier.classify(v.to_s)
-        # Param-name hint can lift a generic literal/opaque_id/slug into
-        # a semantic type — `?phone=unknown` becomes `{phone}`.
-        if (hint = SegmentClassifier.param_name_hint(k, type))
-          type = hint
-        end
-        shaped =
-          if type == :date && (canon = SegmentClassifier.canonical_date(v.to_s))
-            canon
-          elsif type == :currency && (canon = SegmentClassifier.canonical_currency(v.to_s))
-            canon
-          elsif classifier.variable?(type)
-            "{#{SegmentClassifier.display_type(type)}}"
-          else
-            v
-          end
-        "#{k}=#{shaped}"
+        "#{k}=#{render_param(k, iri.query_params[k], classifier)}"
       end.join("&")
+    end
+
+    # One param's mechanical rendering. Corpus#render_query delegates here for
+    # params it lacks evidence on, so the two paths can't drift.
+    def render_param(name, value, classifier)
+      type = classifier.classify(value.to_s)
+      # Param-name hint can lift a generic literal/opaque_id/slug into
+      # a semantic type — `?phone=unknown` becomes `{phone}`.
+      if (hint = SegmentClassifier.param_name_hint(name, type))
+        type = hint
+      end
+      if type == :date && (canon = SegmentClassifier.canonical_date(value.to_s))
+        canon
+      elsif type == :currency && (canon = SegmentClassifier.canonical_currency(value.to_s))
+        canon
+      elsif classifier.variable?(type)
+        "{#{SegmentClassifier.display_type(type)}}"
+      else
+        value
+      end
     end
   end
 end

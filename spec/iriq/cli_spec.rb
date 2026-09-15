@@ -552,6 +552,17 @@ describe Iriq::CLI do
       expect(stdout.string.strip).to eq("https://foo.com/users/{user}/profile")
     end
 
+    it "matches -C output on a fresh corpus (currency canonicalized)" do
+      url = "https://shop.com/pricing/usd?currency=eur"
+      expect(run("-n", "--corpus", corpus_path, url)).to eq(0)
+      expect(stdout.string.strip).to eq("https://shop.com/pricing/USD?currency=EUR")
+    end
+
+    it "honors -N (no hints) with a corpus" do
+      expect(run("-n", "-N", "--corpus", corpus_path, "https://foo.com/users/123")).to eq(0)
+      expect(stdout.string.strip).to eq("https://foo.com/users/{integer}")
+    end
+
     it "deterministic normalize is unchanged without --corpus" do
       expect(run("-n", "https://foo.com/users/123/profile")).to eq(0)
       expect(stdout.string.strip).to eq("https://foo.com/users/{user_id}/profile")

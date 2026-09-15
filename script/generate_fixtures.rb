@@ -331,6 +331,34 @@ write_fixture("param_summary", {
   "expected" => param_expected,
 })
 
+# Corpus-informed normalize. Each case observes `observe` into a fresh corpus,
+# then normalizes `input` with `hints`. Pins two rules: -N (hints: false) is
+# honored with a corpus, and the corpus changes a shape only where it has
+# evidence (>= Corpus::MIN_OBSERVATIONS_FOR_INFERENCE observations) — below
+# that, output equals mechanical normalize (currency upcase, param-name hints).
+names = %w[alice bob carol dave erin frank gina hank ivan jane]
+corpus_normalize_inputs = [
+  # hints: false with a corpus
+  [["https://foo.com/users/123"], "https://foo.com/users/123", false],
+  [names.map { |n| "https://foo.com/users/#{n}/profile" }, "https://foo.com/users/zoe/profile", false],
+  [names.map { |n| "https://foo.com/users/#{n}/profile" }, "https://foo.com/users/zoe/profile", true],
+  # first observation == mechanical
+  [["https://shop.com/pricing/usd?currency=eur"], "https://shop.com/pricing/usd?currency=eur", true],
+  [["https://foo.com/x?phone=unknown&email=tbd"], "https://foo.com/x?phone=unknown&email=tbd", true],
+  [["https://foo.com/posts/abc-123"], "https://foo.com/posts/abc-123", true],
+  [["https://foo.com/api/v1/status"], "https://foo.com/api/v1/status", true],
+  # with evidence: the corpus's opinion wins, values print canonically
+  [["https://foo.com/api/v1/status"] * 5, "https://foo.com/api/v1/status", true],
+  [["https://shop.com/pricing/usd/checkout"] * 6, "https://shop.com/pricing/usd/checkout", true],
+  [%w[eur gbp jpy chf cad aud].map { |c| "https://shop.com/price?currency=#{c}" }, "https://shop.com/price?currency=usd", true],
+]
+corpus_normalize_cases = corpus_normalize_inputs.map do |(observe, input, hints)|
+  c = Iriq::Corpus.new
+  observe.each { |u| c.observe(u) }
+  { "observe" => observe, "input" => input, "hints" => hints, "output" => c.normalize(input, hints: hints) }
+end
+write_fixture("corpus_normalize", { "cases" => corpus_normalize_cases })
+
 # Numeric range — digit strings too long to be finite (±Infinity) still count
 # toward type/value counts but are excluded from min/max/avg. `huge` is all
 # non-finite (no range at all); `mixed` keeps only the finite values' range.

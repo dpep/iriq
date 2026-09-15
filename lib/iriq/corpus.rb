@@ -264,9 +264,9 @@ module Iriq
     # call into Normalizer with `evidence: self`; the corpus-informed path
     # and query rendering live in #render_path / #render_query below
     # (the evidence-source interface).
-    def normalize(input)
+    def normalize(input, hints: true)
       iri = coerce(input)
-      Normalizer.normalize_identifier(iri, classifier: @classifier, hints: true, evidence: self)
+      Normalizer.normalize_identifier(iri, classifier: @classifier, hints: hints, evidence: self)
     end
 
     # Evidence-source interface — called by Normalizer when this Corpus is
@@ -274,27 +274,32 @@ module Iriq
     # classifications (variability promotion, popular-outlier preservation).
     # Always emits a leading "/" — empty path collapses to "/" to match
     # mechanical output and anchor any trailing query.
-    def render_path(iri, _classifier, _hints)
-      tokens = annotate_segments(iri).map { |entry| corpus_token(entry) }
+    def render_path(iri, _classifier, hints)
+      tokens = annotate_segments(iri).map { |entry| corpus_token(entry, hints) }
       "/" + tokens.join("/")
     end
 
-    # Evidence-source interface — render the query string with
-    # cluster-inferred param types where available. The mechanical
-    # NullEvidenceSource provides the classifier-only fallback; this
-    # version prefers the cluster's observed type per param (dominant
-    # type_count, subject to the corpus thresholds).
+    # Evidence-source interface — render the query string. A param the
+    # cluster has seen at least MIN_OBSERVATIONS_FOR_INFERENCE times renders
+    # with the cluster's type; below that the corpus has no opinion and the
+    # param renders exactly as mechanical normalize would.
     def render_query(iri, _classifier = @classifier)
       hinted_shape = PathShape.new(classifier: @classifier, hints: true)
                               .from_entries(SegmentHints.derive(iri.path_segments, @classifier))
       key, * = Cluster.key_for(iri, classifier: @classifier, shape: hinted_shape,
                                host: effective_host(iri.host))
-      cluster = @storage.cluster_for(key)
+      cluster    = @storage.cluster_for(key)
+      mechanical = NullEvidenceSource.new
 
       iri.query_params.keys.sort.map do |k|
-        v = iri.query_params[k].to_s
-        type = inferred_param_type(cluster, k, v)
-        shaped = render_param_value(v, type)
+        v     = iri.query_params[k].to_s
+        stats = cluster && cluster.param_stats[k]
+        shaped =
+          if stats && stats.total >= MIN_OBSERVATIONS_FOR_INFERENCE
+            render_param_value(v, cluster.param_type(k) || @classifier.classify(v))
+          else
+            mechanical.render_param(k, v, @classifier)
+          end
         "#{k}=#{shaped}"
       end.join("&")
     end
@@ -456,10 +461,11 @@ module Iriq
       # For STABLE_VARIABLE_TYPES (version, locale, currency, boolean),
       # a dominant value wins over the variable-dominance branch — a
       # single-version /api/v1/... pattern stays as the literal `v1`
-      # rather than placeholdering to {version}. Without dominance,
-      # fall through to :variable_identifier (the per-type placeholder).
+      # rather than placeholdering to {version}. Without dominance, or
+      # without enough observations to call anything dominant (one sample
+      # is always 100%), fall through to :variable_identifier.
       if variable
-        return :stable_literal if value_frac >= STABLE_LITERAL_THRESHOLD
+        return :stable_literal if enough_data && value_frac >= STABLE_LITERAL_THRESHOLD
 
         return :variable_identifier
       end
@@ -502,20 +508,18 @@ module Iriq
       stats.value_fraction(value) >= POPULAR_BASELINE_MULTIPLE * baseline
     end
 
-    def inferred_param_type(cluster, name, value)
-      # Prefer the cluster's confident type when we have enough samples;
-      # otherwise classify the current value directly. Cluster#param_type
-      # applies the :date quorum gate (see Cluster::DATE_CONFIDENCE_THRESHOLD).
-      stats = cluster && cluster.param_stats[name]
-      if stats && stats.total >= MIN_OBSERVATIONS_FOR_INFERENCE
-        cluster.param_type(name) || @classifier.classify(value)
-      else
-        @classifier.classify(value)
+    # Dates and currencies print in canonical form (ISO date, upper-case code)
+    # rather than as a placeholder — same as mechanical normalize. nil when
+    # the value isn't one.
+    def canonical_form(type, value)
+      case type
+      when :date     then SegmentClassifier.canonical_date(value)
+      when :currency then SegmentClassifier.canonical_currency(value)
       end
     end
 
     def render_param_value(value, type)
-      if type == :date && (canon = SegmentClassifier.canonical_date(value))
+      if (canon = canonical_form(type, value))
         canon
       elsif @classifier.variable?(type)
         "{#{SegmentClassifier.display_type(type)}}"
@@ -524,27 +528,29 @@ module Iriq
       end
     end
 
-    def corpus_token(entry)
+    def corpus_token(entry, hints)
+      if (canon = canonical_form(entry[:type], entry[:value]))
+        return canon
+      end
+
       case entry[:classification]
       when :variable_identifier, :corpus_inferred_variable
-        placeholder_for_variable(entry)
+        placeholder_for_variable(entry, hints)
       else
         entry[:value]
       end
     end
 
-    def placeholder_for_variable(entry)
-      # Dates render in canonical ISO form rather than as a `{date}` placeholder
-      # — matches what mechanical Iriq.normalize does for path segments and
-      # what render_param_value does for query params.
-      if entry[:type] == :date && (canon = SegmentClassifier.canonical_date(entry[:value]))
-        return canon
+    def placeholder_for_variable(entry, hints)
+      if entry[:variable]
+        return "{#{(hints && entry[:hint]) || SegmentClassifier.display_type(entry[:type])}}"
       end
-      return "{#{entry[:hint] || SegmentClassifier.display_type(entry[:type])}}" if entry[:variable]
 
       # corpus-inferred variable: classifier said literal, corpus says
-      # otherwise. Derive a hint from the prefix's last literal segment if
-      # we can.
+      # otherwise. There's no type to show, so without hints it's {value};
+      # with hints, name it after the prefix's last literal segment.
+      return "{value}" unless hints
+
       last_literal = entry[:prefix].split("/").reject(&:empty?).reject { |s| s.start_with?("{") }.last
       base = last_literal ? Inflector.singularize(last_literal) : nil
       base ? "{#{base}}" : "{value}"

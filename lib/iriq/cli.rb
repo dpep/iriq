@@ -349,7 +349,7 @@ module Iriq
       data[:parse]     = identifier_hash(iri) if sections.include?(:parse)
       data[:canonical] = iri.canonical         if sections.include?(:canonical)
       if sections.include?(:normalize)
-        data[:normalize] = corpus ? corpus.normalize(iri) : Normalizer.normalize_identifier(iri, hints: opts[:hints])
+        data[:normalize] = corpus ? corpus.normalize(iri, hints: opts[:hints]) : Normalizer.normalize_identifier(iri, hints: opts[:hints])
       end
       if sections.include?(:explain)
         data[:explain] = Trace.for(iri, hints: opts[:hints])
