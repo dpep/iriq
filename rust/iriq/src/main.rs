@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, IsTerminal, Read, Write};
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 const LARGE_BATCH_THRESHOLD: usize = 10;
@@ -374,12 +375,14 @@ fn env_corpus_disabled() -> bool {
 fn cmd_reset<W: Write>(stderr: &mut W, opts: &Opts) -> u8 {
     let path = resolve_reset_path(opts);
     let mut removed = 0;
-    for p in [
+    let named = [
         path.clone(),
         format!("{}-wal", path),
         format!("{}-shm", path),
         format!("{}.tmp", path),
-    ] {
+    ]
+    .map(PathBuf::from);
+    for p in named.into_iter().chain(json_temp_files(Path::new(&path))) {
         if std::fs::remove_file(&p).is_ok() {
             removed += 1;
         }
@@ -403,6 +406,38 @@ fn resolve_reset_path(opts: &Opts) -> String {
         return env;
     }
     default_corpus_path()
+}
+
+// The JSON writer's per-save temp files, `<path>.<pid>.<n>.tmp`; a save that
+// dies before its rename leaves one behind.
+fn json_temp_files(path: &Path) -> Vec<PathBuf> {
+    let (Some(name), Some(dir)) = (path.file_name().and_then(|n| n.to_str()), path.parent()) else {
+        return Vec::new();
+    };
+    let dir = if dir.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        dir
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name())
+        .filter(|file| {
+            file.to_str()
+                .and_then(|f| {
+                    f.strip_prefix(name)?
+                        .strip_prefix('.')?
+                        .strip_suffix(".tmp")
+                })
+                .and_then(|counters| counters.split_once('.'))
+                .is_some_and(|(pid, n)| digits(pid) && digits(n))
+        })
+        .map(|file| dir.join(file))
+        .collect()
 }
 
 fn parseable_iri(s: &str) -> bool {

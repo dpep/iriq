@@ -36,6 +36,7 @@
 
 <!-- lane: rust-cli -->
 - **Bugfix (Rust): the human cluster view printed some numbers wrong.** A numeric param past 2^63 (`?v=18446744073709551616`) printed `9223372036854775807..9223372036854775807  avg 9223372036854775807`; it now prints the exact value, as Ruby does (`18446744073709551616..99999999999999991611392`). Averages and ranges also round and print like Ruby's `format_num` everywhere else: a non-whole value that rounds to a whole number keeps its `.0` (`avg 3.0`, was `avg 3`), a rounded `-0.004` prints `-0.0`, `1.005` rounds to `1.01`, and values past 15 digits use Ruby's `e+15` notation. `--json` output is unchanged.
+- **Bugfix (Rust): `--reset` left a crashed save's temp files behind.** A JSON corpus saves through its own temp file, `<path>.<pid>.<n>.tmp`, but `--reset` removed only `<path>.tmp`, so a save killed mid-write left files nothing ever cleaned up. `--reset` now removes those as well as the corpus, its `-wal`/`-shm` sidecars and `<path>.tmp`, and nothing else.
 <!-- /lane: rust-cli -->
 
 ###  0.34.0  (2026-08-12)

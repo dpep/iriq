@@ -266,6 +266,43 @@ fn reset_deletes_the_corpus_and_tolerates_a_missing_one() {
 }
 
 #[test]
+fn reset_sweeps_the_json_writers_temp_files_and_nothing_else() {
+    let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("reset-sweep-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let corpus = dir.join("c.json");
+    let cps = corpus.to_str().unwrap();
+    run(&["--corpus", cps], "https://foo.com/users/1\n");
+
+    let swept = ["c.json.tmp", "c.json.4242.0.tmp", "c.json.4242.17.tmp"];
+    let kept = [
+        "c.json.notes",
+        "c.json.4242.tmp",
+        "c.json.x.0.tmp",
+        "c.jsonx.1.0.tmp",
+        "other.json.1.0.tmp",
+    ];
+    for name in swept.iter().chain(&kept) {
+        std::fs::write(dir.join(name), "").unwrap();
+    }
+
+    let (_out, err, ok) = run_full(&["--reset", "--corpus", cps], "");
+    assert!(ok, "{err}");
+    assert!(!corpus.exists(), "corpus should be gone after reset");
+    for name in swept {
+        assert!(!dir.join(name).exists(), "temp file left behind: {name}");
+    }
+    for name in kept {
+        assert!(
+            dir.join(name).exists(),
+            "reset removed an unrelated file: {name}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn cluster_ranges_print_numbers_beyond_i64_exactly() {
     let urls = "https://u64.com/p?v=18446744073709551616\n\
                 https://u64.com/p?v=18446744073709551617\n\
