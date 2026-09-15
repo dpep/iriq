@@ -205,13 +205,14 @@ module Iriq
       end
 
       # Wrap many observations in a single transaction. Cuts SQLite write
-      # overhead from O(observations) fsyncs to O(1).
+      # overhead from O(observations) fsyncs to O(1). Yields whether another
+      # connection may have committed since this one's last transaction.
       def batch
-        return yield if @in_batch
+        return yield(false) if @in_batch
 
         @in_batch = true
         begin
-          write_transaction { yield }
+          write_transaction { |changed| yield changed }
         ensure
           @in_batch = false
         end
@@ -224,11 +225,13 @@ module Iriq
         @db.transaction(:immediate)
         @in_transaction = true
         # Under the write lock no one else can commit until we do, so the
-        # version read now holds for the whole transaction.
+        # version read now holds for the whole transaction. An unknown last
+        # version (first transaction, or after a rollback) counts as changed.
         version = @db.get_first_value("PRAGMA data_version")
-        @value_counts.clear unless version == @counts_version
+        changed = version != @counts_version
+        @value_counts.clear if changed
         @counts_version = version
-        result = yield
+        result = yield changed
         @db.commit
         result
       rescue => e

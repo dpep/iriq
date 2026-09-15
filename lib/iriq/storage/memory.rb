@@ -57,8 +57,9 @@ module Iriq
         yield self
       end
 
+      # Yields false: nothing else writes an in-memory corpus.
       def batch
-        yield
+        yield false
       end
 
       def flush;  end

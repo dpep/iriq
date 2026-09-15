@@ -148,4 +148,49 @@ describe "Recognizer auto-activation" do
       expect(corpus.activate_proposals_above(0.5)).to be_empty
     end
   end
+
+  # A transaction classifies with exactly the stored activation set as of its
+  # start, including activations another corpus on the same file committed.
+  describe "activations another corpus commits" do
+    around do |example|
+      Dir.mktmpdir do |dir|
+        @path = File.join(dir, "corpus.db")
+        example.run
+      end
+    end
+
+    def observe_prefixed(corpus, host, route, prefix)
+      25.times { |i| corpus.observe("https://#{host}/#{route}/#{prefix}aaaa#{i.to_s.rjust(4, '0')}xyzzy") }
+    end
+
+    it "reach a corpus opened before them from its next observation" do
+      writer = Iriq::Corpus.open(@path)
+      observe_prefixed(writer, "api.github.com", "auth", "ghp_")
+      activator = Iriq::Corpus.open(@path)
+      activator.activate_proposal(activator.propose_recognizers.first)
+
+      writer.observe("https://api.github.com/auth/ghp_zzzz9999xyzzy")
+
+      expect(writer.classifier.classify("ghp_zzzz9999xyzzy")).to eq(:ghp)
+      expect(writer.stats_for("api.github.com", "/auth").type_counts[:ghp]).to eq(26)
+      writer.close
+      activator.close
+    end
+
+    it "are kept by an activation made through a corpus opened before them" do
+      stale = Iriq::Corpus.open(@path)
+      observe_prefixed(stale, "api.github.com", "auth", "ghp_")
+      observe_prefixed(stale, "api.stripe.com", "keys", "sk_")
+      proposals = stale.propose_recognizers.to_h { |p| [p.prefix, p] }
+      other = Iriq::Corpus.open(@path)
+      other.activate_proposal(proposals.fetch("ghp_"))
+
+      stale.activate_proposal(proposals.fetch("sk_"))
+
+      expect(stale.stats_for("api.github.com", "/auth").type_counts[:ghp]).to eq(25)
+      expect(stale.stats_for("api.stripe.com", "/keys").type_counts[:sk]).to eq(25)
+      stale.close
+      other.close
+    end
+  end
 end

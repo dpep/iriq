@@ -99,15 +99,16 @@ module Iriq
     # replay against alternate reducers / thresholds for re-runnable
     # inference. See lib/iriq/event.rb and lib/iriq/reducer.rb.
     def observe(input)
-      iri    = coerce(input)
-      events = events_for(iri)
+      iri = coerce(input)
 
-      @storage.transaction do |s|
-        events.each { |e| Reducer.apply(e, s) }
-        s.record_observation(iri.canonical) if s.respond_to?(:record_observation)
+      addition = batch do
+        # Derived inside the batch, which may have just adopted activations.
+        events = events_for(iri)
+        events.each { |e| Reducer.apply(e, @storage) }
+        @storage.record_observation(iri.canonical) if @storage.respond_to?(:record_observation)
+        events.find { |e| e.is_a?(Event::ClusterAddition) }
       end
 
-      addition = events.find { |e| e.is_a?(Event::ClusterAddition) }
       Observation.new(corpus: self, identifier: iri, cluster_key: addition.key)
     end
 
@@ -123,13 +124,13 @@ module Iriq
     # Wrapped in a single backend transaction so a failure mid-replay
     # leaves the prior views intact.
     def reinfer
-      @storage.transaction do |s|
+      batch do
         iris = []
-        s.each_observed_iri { |canonical| iris << canonical }
-        s.clear_materialized_views
+        @storage.each_observed_iri { |canonical| iris << canonical }
+        @storage.clear_materialized_views
         iris.each do |canonical|
           iri = Parser.parse(canonical)
-          events_for(iri).each { |e| Reducer.apply(e, s) }
+          events_for(iri).each { |e| Reducer.apply(e, @storage) }
         end
       end
       nil
@@ -371,8 +372,14 @@ module Iriq
     # Wrap many observations in a single backend transaction. For SQLite this
     # turns thousands of fsyncs into one; for in-memory backends it's a
     # no-op. Use when ingesting a batch.
-    def batch(&block)
-      @storage.batch(&block)
+    #
+    # Every write runs in one, and classifies with exactly the activations
+    # stored as of its start — including any another connection committed.
+    def batch
+      @storage.batch do |changed|
+        reapply_activated_recognizers! if changed
+        yield
+      end
     end
 
     private
