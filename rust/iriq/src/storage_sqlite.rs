@@ -37,6 +37,18 @@ impl SqliteStorage {
         // PRAGMAs first (busy_timeout before journal_mode).
         conn.execute_batch("PRAGMA busy_timeout = 30000;")
             .map_err(rs_err)?;
+        // Before anything writes: a newer build's corpus must be left as it is.
+        if let Some(stored) = stored_schema_version(&conn).map_err(rs_err)? {
+            if stored > SCHEMA_VERSION {
+                return Err(Error::unsupported(
+                    path,
+                    format!(
+                        "schema version {stored} is newer than this iriq supports \
+                         ({SCHEMA_VERSION}); upgrade iriq"
+                    ),
+                ));
+            }
+        }
         enable_wal(&conn, path)?;
         conn.execute_batch("PRAGMA synchronous = NORMAL;")
             .map_err(rs_err)?;
@@ -100,6 +112,27 @@ impl SqliteStorage {
     fn conn(&self) -> MutexGuard<'_, Connection> {
         self.conn.lock().unwrap_or_else(PoisonError::into_inner)
     }
+}
+
+/// The schema version a corpus file records, if it records one yet. A fresh
+/// file has no `meta` table, so check for it rather than query and fail.
+fn stored_schema_version(conn: &Connection) -> rusqlite::Result<Option<i64>> {
+    let has_meta: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta')",
+        [],
+        |r| r.get(0),
+    )?;
+    if !has_meta {
+        return Ok(None);
+    }
+    let stored: Option<String> = conn
+        .query_row(
+            "SELECT value FROM meta WHERE key = 'schema_version'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(stored.and_then(|v| v.parse().ok()))
 }
 
 /// Converting a rollback-mode database to WAL takes an exclusive lock, and
@@ -857,5 +890,30 @@ mod tests {
         let cause = std::error::Error::source(&err).unwrap().to_string();
         assert!(cause.contains("simulated write failure"), "{cause}");
         assert_eq!(corpus.observed_iri_count(), 0);
+    }
+
+    #[test]
+    fn a_corpus_from_a_newer_schema_is_refused_untouched() {
+        let path = temp_db("newer-schema");
+        Corpus::open(&path).unwrap().close().unwrap();
+        let stored_version = |conn: &Connection| -> String {
+            conn.query_row(
+                "SELECT value FROM meta WHERE key = 'schema_version'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        let conn = Connection::open(&path).unwrap();
+        conn.execute(
+            "UPDATE meta SET value = ? WHERE key = 'schema_version'",
+            params![(SCHEMA_VERSION + 1).to_string()],
+        )
+        .unwrap();
+
+        let err = Corpus::open(&path).expect_err("opened a corpus from a newer schema");
+        assert!(matches!(err, Error::Unsupported { .. }), "{err:?}");
+        assert!(err.to_string().contains("newer"), "{err}");
+        assert_eq!(stored_version(&conn), (SCHEMA_VERSION + 1).to_string());
     }
 }
