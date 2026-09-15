@@ -1682,7 +1682,7 @@ fn cmd_propose<W: Write, E: Write>(
         if activated.is_empty() {
             writeln!(
                 stdout,
-                "no proposals at or above coverage {}",
+                "no proposals at or above confidence {}",
                 opts.activate_above
             )?;
             return Ok(0);

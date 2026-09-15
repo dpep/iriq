@@ -338,6 +338,26 @@ fn propose_recognizers_runs() {
 }
 
 #[test]
+fn activate_above_names_the_confidence_threshold_when_nothing_qualifies() {
+    let urls: String = (1..=12)
+        .map(|i| format!("https://foo.com/users/{i}\n"))
+        .collect();
+    let cp = corpus_with("activate-none", &urls);
+    let out = run(
+        &[
+            "--corpus",
+            &cp,
+            "--propose-recognizers",
+            "--activate-above",
+            "0.5",
+        ],
+        "",
+    );
+    assert_eq!(out, "no proposals at or above confidence 0.5\n");
+    let _ = std::fs::remove_file(&cp);
+}
+
+#[test]
 fn cross_host_shapes_runs() {
     let urls = "https://a.com/users/1\nhttps://b.com/users/2\nhttps://c.com/users/3\n";
     let cp = corpus_with("crosshost", urls);
