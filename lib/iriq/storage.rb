@@ -1,5 +1,3 @@
-require "securerandom"
-
 module Iriq
   # Storage is the persistence layer for a Corpus. It owns every counter and
   # per-(host, prefix) frequency map; the Corpus class delegates state to it.
@@ -14,6 +12,10 @@ module Iriq
   # picks Json, `.db`/`.sqlite`/`.sqlite3` picks Sqlite.
   module Storage
     SQLITE_EXTS = %w[.db .sqlite .sqlite3].freeze
+
+    TEMP_SEQ_LOCK = Mutex.new
+    @temp_seq = 0
+    def self.next_temp_seq = TEMP_SEQ_LOCK.synchronize { @temp_seq += 1 }
 
     module_function
 
@@ -32,11 +34,12 @@ module Iriq
       end
     end
 
-    # Replace `path` atomically via a writer-unique temp file + rename. A
-    # shared `PATH.tmp` let concurrent writers rename each other's file away
+    # Replace `path` atomically via a per-write temp file, PATH.<pid>.<n>.tmp
+    # (Rust's writer uses the same shape; --reset sweeps exactly it), + rename.
+    # A shared PATH.tmp let concurrent writers rename each other's file away
     # (ENOENT). Last writer still wins: a JSON corpus is single-writer.
     def write_atomically(path, contents)
-      tmp = "#{path}.#{SecureRandom.hex(8)}.tmp"
+      tmp = "#{path}.#{Process.pid}.#{Storage.next_temp_seq}.tmp"
       File.write(tmp, contents)
       File.rename(tmp, path)
     ensure

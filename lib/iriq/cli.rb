@@ -319,7 +319,7 @@ module Iriq
         return emit_error("missing_argument", "no corpus path to reset (use --corpus PATH or unset --no-corpus)", 1)
       end
       removed = []
-      [path, "#{path}-wal", "#{path}-shm", "#{path}.tmp"].each do |p|
+      [path, "#{path}-wal", "#{path}-shm", "#{path}.tmp", *json_temp_files(path)].each do |p|
         if File.exist?(p)
           File.delete(p)
           removed << p
@@ -331,6 +331,16 @@ module Iriq
         stderr.puts "iriq: reset corpus at #{path}"
       end
       0
+    end
+
+    # The JSON writer's per-save temp files, PATH.<pid>.<n>.tmp
+    # (Storage.write_atomically); a save killed before its rename leaves one.
+    def json_temp_files(path)
+      dir = File.dirname(path)
+      return [] unless Dir.exist?(dir)
+
+      pattern = /\A#{Regexp.escape(File.basename(path))}\.\d+\.\d+\.tmp\z/
+      Dir.children(dir).grep(pattern).map { |name| File.join(dir, name) }
     end
 
     # --reset honors --corpus / IRIQ_CORPUS even when --no-corpus is set —

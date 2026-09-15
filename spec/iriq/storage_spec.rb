@@ -298,6 +298,17 @@ describe Iriq::Storage do
       expect(Dir.children(@dir)).to contain_exactly("c.json", "c.json.tmp", "export.json")
     end
 
+    it "write through PATH.<pid>.<n>.tmp, the name --reset sweeps" do
+      path = File.join(@dir, "c.json")
+      temps = []
+      allow(File).to receive(:rename).and_wrap_original { |orig, from, to| temps << from; orig.call(from, to) }
+      corpus = Iriq::Corpus.open(path)
+      2.times { corpus.save }
+
+      expect(temps).to all(match(/\A#{Regexp.escape(path)}\.#{Process.pid}\.\d+\.tmp\z/))
+      expect(temps.uniq.size).to eq(2)
+    end
+
     it "survive concurrent writers (last writer wins, nobody crashes)" do
       path = File.join(@dir, "shared.json")
       writers = 4.times.map do |w|

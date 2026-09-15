@@ -378,6 +378,28 @@ reset_pair() {
 
 reset_pair "seeded (human)"
 reset_pair "seeded (--json)" --json
+
+# --reset removes the JSON writer's PATH.<pid>.<n>.tmp leftovers and nothing
+# else that merely shares the prefix. Same directory for both sides, so the
+# notice (which embeds the path) is comparable.
+reset_sweep_side() {
+  local dir="$corpus_dir/sweep"
+  rm -rf "$dir" && mkdir -p "$dir"
+  for f in c.json c.json.tmp c.json.4242.0.tmp c.json.4242.17.tmp c.json.notes c.json.4242.tmp c.json.x.0.tmp c.jsonx.1.0.tmp c.json.0123456789abcdef.tmp; do
+    : > "$dir/$f"
+  done
+  "$@" --reset --corpus "$dir/c.json" < /dev/null 2>&1 || true
+  ls "$dir"
+}
+ruby_sweep=$(cd "$REPO_ROOT" && reset_sweep_side $RUBY)
+rust_sweep=$(reset_sweep_side "$RUST_BIN")
+if [[ "$ruby_sweep" == "$rust_sweep" ]]; then
+  pass_count=$((pass_count + 1))
+else
+  fail_count=$((fail_count + 1))
+  echo; echo "MISMATCH: reset sweeps writer temp files"
+  diff <(echo "$ruby_sweep") <(echo "$rust_sweep") | sed 's/^/    /' || true
+fi
 # The "no corpus to reset" branch — the path never existed. --reset does not
 # create the file, so both invocations see the same missing path.
 run_pair "reset nonexistent"      "" --reset --corpus "$corpus_dir/never-created.db"

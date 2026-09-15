@@ -63,6 +63,7 @@
 
 <!-- lane: port -->
 - **Ruby: `-n`/`-p`/`-c`/`-e` on piped input now print each URL the way single-input mode does.** Rule, for both runtimes: each extracted URL is observed, then rendered from the corpus as it stands at that moment. With `-C` there is no corpus, so output is mechanical. Before, Ruby always rendered piped `-n` mechanically, even with a corpus, and piped `-e` printed only the `# URL` header with no trace (`[]` under `--json`). What changes for Ruby users: with a warm corpus, piped `-n` now shows the corpus's shapes, just like `iriq -n URL`. With a cold corpus, a slot stays literal until it has been seen 5 times.
+- **Ruby: `--reset` now also removes a crashed JSON save's temp files, like Rust.** Both runtimes now save a `.json` corpus through `<path>.<pid>.<n>.tmp`. `--reset` removes the corpus, its `-wal`/`-shm` sidecars, `<path>.tmp`, and any `<path>.<pid>.<n>.tmp`. Nothing else is touched.
 <!-- /lane: port -->
 
 ###  0.34.0  (2026-08-12)

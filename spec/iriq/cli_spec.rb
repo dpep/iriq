@@ -633,6 +633,16 @@ describe Iriq::CLI do
       expect(stderr.string).to include("reset corpus at #{corpus_path}")
     end
 
+    it "sweeps the JSON writer's PATH.<pid>.<n>.tmp files and nothing else" do
+      path  = File.join(corpus_dir, "c.json")
+      swept = %w[c.json c.json.tmp c.json.4242.0.tmp c.json.4242.17.tmp]
+      kept  = %w[c.json.notes c.json.4242.tmp c.json.x.0.tmp c.jsonx.1.0.tmp other.json.1.0.tmp c.json.0123456789abcdef.tmp]
+      (swept + kept).each { |name| File.write(File.join(corpus_dir, name), "") }
+
+      expect(run("--reset", "--corpus", path)).to eq(0)
+      expect(Dir.children(corpus_dir)).to match_array(kept)
+    end
+
     it "reports when there is no corpus to reset" do
       expect(run("--reset", "--corpus", corpus_path)).to eq(0)
       expect(stderr.string).to include("no corpus to reset at #{corpus_path}")
