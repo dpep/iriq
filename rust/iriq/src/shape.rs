@@ -66,5 +66,5 @@ fn render_entry(e: &SegmentHint, opts: ShapeRenderOptions) -> String {
     if !opts.hints_off && !e.hint.is_empty() {
         return format!("{{{}}}", e.hint);
     }
-    format!("{{{}}}", display_type(e.ty))
+    format!("{{{}}}", display_type(&e.ty))
 }

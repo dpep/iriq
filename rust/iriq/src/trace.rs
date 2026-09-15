@@ -102,7 +102,7 @@ fn render_segment_row(
         return TraceRow {
             name: String::new(),
             value: entry.value.clone(),
-            ty: entry.ty,
+            ty: entry.ty.clone(),
             output: entry.value.clone(),
             notes,
         };
@@ -117,7 +117,7 @@ fn render_segment_row(
             return TraceRow {
                 name: String::new(),
                 value: entry.value.clone(),
-                ty: entry.ty,
+                ty: entry.ty.clone(),
                 output: canon,
                 notes,
             };
@@ -131,7 +131,7 @@ fn render_segment_row(
             return TraceRow {
                 name: String::new(),
                 value: entry.value.clone(),
-                ty: entry.ty,
+                ty: entry.ty.clone(),
                 output: canon,
                 notes,
             };
@@ -145,8 +145,8 @@ fn render_segment_row(
 
     // Hint suppression note for semantic types.
     if hints && entry.hint.is_empty() && !hint_eligible_types().contains(&entry.ty) {
-        if let Some(would) = would_be_hint(segments, idx, entry.ty, c) {
-            let display = display_type(entry.ty);
+        if let Some(would) = would_be_hint(segments, idx, &entry.ty, c) {
+            let display = display_type(&entry.ty);
             notes.push(format!(
                 "semantic type — surfaced as {{{}}}, not {{{}}}",
                 display, would
@@ -157,12 +157,12 @@ fn render_segment_row(
     let output = if hints && !entry.hint.is_empty() {
         format!("{{{}}}", entry.hint)
     } else {
-        format!("{{{}}}", display_type(entry.ty))
+        format!("{{{}}}", display_type(&entry.ty))
     };
     TraceRow {
         name: String::new(),
         value: entry.value.clone(),
-        ty: entry.ty,
+        ty: entry.ty.clone(),
         output,
         notes,
     }
@@ -171,7 +171,7 @@ fn render_segment_row(
 fn would_be_hint(
     segments: &[String],
     idx: usize,
-    t: SegmentType,
+    t: &SegmentType,
     c: &SegmentClassifier,
 ) -> Option<String> {
     if idx == 0 {
@@ -182,7 +182,7 @@ fn would_be_hint(
         return None;
     }
     let base = singularize(prev);
-    let suffix = if t == SegmentType::Uuid {
+    let suffix = if *t == SegmentType::Uuid {
         "_uuid"
     } else {
         "_id"
@@ -204,7 +204,7 @@ fn trace_query(iri: &Identifier, c: &SegmentClassifier) -> Vec<TraceRow> {
 fn render_query_row(name: &str, value: &str, c: &SegmentClassifier) -> TraceRow {
     let mut notes = Vec::new();
     let base = c.classify(value);
-    let effective = if let Some(h) = param_name_hint(name, base) {
+    let effective = if let Some(h) = param_name_hint(name, &base) {
         notes.push(format!(
             "param-name hint (`{}=`) lifted {} → {}",
             name, base, h
@@ -221,8 +221,8 @@ fn render_query_row(name: &str, value: &str, c: &SegmentClassifier) -> TraceRow 
                     notes.push(format!("canonical date ({} → {})", value, canon));
                 }
                 canon
-            } else if c.variable(effective) {
-                format!("{{{}}}", display_type(effective))
+            } else if c.variable(&effective) {
+                format!("{{{}}}", display_type(&effective))
             } else {
                 value.to_string()
             }
@@ -233,19 +233,19 @@ fn render_query_row(name: &str, value: &str, c: &SegmentClassifier) -> TraceRow 
                     notes.push(format!("currency upcase ({} → {})", value, canon));
                 }
                 canon
-            } else if c.variable(effective) {
-                format!("{{{}}}", display_type(effective))
+            } else if c.variable(&effective) {
+                format!("{{{}}}", display_type(&effective))
             } else {
                 value.to_string()
             }
         }
         SegmentType::Ipv4 | SegmentType::Ipv6 => {
             notes.push(format!("ip umbrella collapse ({} → ip)", effective));
-            format!("{{{}}}", display_type(effective))
+            format!("{{{}}}", display_type(&effective))
         }
         _ => {
-            if c.variable(effective) {
-                format!("{{{}}}", display_type(effective))
+            if c.variable(&effective) {
+                format!("{{{}}}", display_type(&effective))
             } else {
                 value.to_string()
             }

@@ -20,8 +20,7 @@ static HINT_ELIGIBLE: Lazy<HashSet<SegmentType>> = Lazy::new(|| {
         SegmentType::OpaqueId,
         SegmentType::Slug,
     ]
-    .iter()
-    .copied()
+    .into_iter()
     .collect()
 });
 
@@ -29,12 +28,13 @@ pub fn derive_hints(segments: &[String], c: &SegmentClassifier) -> Vec<SegmentHi
     let mut out = Vec::with_capacity(segments.len());
     for (i, seg) in segments.iter().enumerate() {
         let t = c.classify(seg);
-        let variable = c.variable(t);
+        let variable = c.variable(&t);
+        let hint = hint_for(segments, i, &t, variable, c);
         out.push(SegmentHint {
             value: seg.clone(),
             ty: t,
             variable,
-            hint: hint_for(segments, i, t, variable, c),
+            hint,
         });
     }
     out
@@ -43,14 +43,14 @@ pub fn derive_hints(segments: &[String], c: &SegmentClassifier) -> Vec<SegmentHi
 pub fn hint_for(
     segments: &[String],
     i: usize,
-    t: SegmentType,
+    t: &SegmentType,
     variable: bool,
     c: &SegmentClassifier,
 ) -> String {
     if !variable || i == 0 {
         return String::new();
     }
-    if !HINT_ELIGIBLE.contains(&t) {
+    if !HINT_ELIGIBLE.contains(t) {
         return String::new();
     }
     let prev = &segments[i - 1];
@@ -58,7 +58,7 @@ pub fn hint_for(
         return String::new();
     }
     let base = singularize(prev);
-    let suffix = if t == SegmentType::Uuid {
+    let suffix = if *t == SegmentType::Uuid {
         "_uuid"
     } else {
         "_id"

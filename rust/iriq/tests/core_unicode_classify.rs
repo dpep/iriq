@@ -34,8 +34,8 @@ fn classify_matches_ruby_on_non_ascii_digits_and_spaces() {
         ("fal\u{17F}e", Boolean),
     ];
     let c = SegmentClassifier::new();
-    for &(value, want) in cases {
-        assert_eq!(c.classify(value), want, "{value:?}");
+    for (value, want) in cases {
+        assert_eq!(c.classify(value), *want, "{value:?}");
     }
 }
 

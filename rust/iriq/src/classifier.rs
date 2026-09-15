@@ -7,7 +7,7 @@ use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum SegmentType {
     Literal,
@@ -60,17 +60,17 @@ pub enum SegmentType {
 
 /// The name of a [`SegmentType::Custom`] type. Only [`segment_type_from_name`]
 /// creates one, and never for a built-in name.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct CustomType(&'static str);
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CustomType(std::sync::Arc<str>);
 
 impl CustomType {
-    pub fn as_str(&self) -> &'static str {
-        self.0
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
 impl SegmentType {
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         use SegmentType::*;
         match self {
             Literal => "literal",
@@ -386,7 +386,7 @@ static PARAM_NAME_HINTS: Lazy<HashMap<&'static str, SegmentType>> = Lazy::new(||
     m
 });
 
-fn is_overridable(t: SegmentType) -> bool {
+fn is_overridable(t: &SegmentType) -> bool {
     matches!(
         t,
         SegmentType::Literal | SegmentType::OpaqueId | SegmentType::Slug
@@ -395,14 +395,14 @@ fn is_overridable(t: SegmentType) -> bool {
 
 /// Return a hinted type for a param name when the value type is generic.
 /// `None` when no hint applies.
-pub fn param_name_hint(name: &str, current: SegmentType) -> Option<SegmentType> {
+pub fn param_name_hint(name: &str, current: &SegmentType) -> Option<SegmentType> {
     if name.is_empty() || !is_overridable(current) {
         return None;
     }
-    PARAM_NAME_HINTS.get(name.to_lowercase().as_str()).copied()
+    PARAM_NAME_HINTS.get(name.to_lowercase().as_str()).cloned()
 }
 
-pub fn display_type(t: SegmentType) -> &'static str {
+pub fn display_type(t: &SegmentType) -> &str {
     match t {
         SegmentType::Ipv4 | SegmentType::Ipv6 => "ip",
         _ => t.as_str(),
@@ -522,28 +522,11 @@ pub fn segment_type_from_str(s: &str) -> Option<SegmentType> {
     })
 }
 
-static CUSTOM_TYPE_NAMES: Lazy<Mutex<HashSet<&'static str>>> =
-    Lazy::new(|| Mutex::new(HashSet::new()));
-
 /// Total version of segment_type_from_str. Ruby models types as symbols, so
 /// any name is a valid type; unknown names (activated recognizer proposals
-/// like "ghp") become Custom variants backed by a leak-once interned string.
-/// The leak is bounded by the number of distinct custom type names seen in a
-/// process, which is tiny in practice.
+/// like "ghp") become Custom types.
 pub fn segment_type_from_name(s: &str) -> SegmentType {
-    if let Some(t) = segment_type_from_str(s) {
-        return t;
-    }
-    let mut names = CUSTOM_TYPE_NAMES.lock().unwrap();
-    let interned: &'static str = match names.get(s) {
-        Some(n) => n,
-        None => {
-            let leaked: &'static str = Box::leak(s.to_string().into_boxed_str());
-            names.insert(leaked);
-            leaked
-        }
-    };
-    SegmentType::Custom(CustomType(interned))
+    segment_type_from_str(s).unwrap_or_else(|| SegmentType::Custom(CustomType(s.into())))
 }
 
 fn ensemble(segment: &str, recognizers: &[std::sync::Arc<dyn Recognizer>]) -> Option<Verdict> {
@@ -680,8 +663,8 @@ impl SegmentClassifier {
         // the Vec) and compute without holding the lock.
         let recognizers = {
             let mut st = self.state.lock().unwrap();
-            if let Some(&v) = st.cache.get(segment) {
-                return v;
+            if let Some(v) = st.cache.get(segment) {
+                return v.clone();
             }
             if st.cache.len() >= CACHE_MAX {
                 st.cache.clear();
@@ -690,12 +673,12 @@ impl SegmentClassifier {
         };
         let t = compute_classification(segment, &recognizers);
         let mut st = self.state.lock().unwrap();
-        st.cache.insert(segment.to_string(), t);
+        st.cache.insert(segment.to_string(), t.clone());
         t
     }
 
-    pub fn variable(&self, t: SegmentType) -> bool {
-        t != SegmentType::Literal
+    pub fn variable(&self, t: &SegmentType) -> bool {
+        *t != SegmentType::Literal
     }
 
     pub fn register_recognizer(&self, r: std::sync::Arc<dyn Recognizer>) {
@@ -941,7 +924,7 @@ mod tests {
             assert_eq!(segment_type_from_name(t.as_str()), t);
         }
         let ghp = segment_type_from_name("ghp");
-        assert!(matches!(ghp, SegmentType::Custom(c) if c.as_str() == "ghp"));
+        assert!(matches!(&ghp, SegmentType::Custom(c) if c.as_str() == "ghp"));
         assert_eq!(segment_type_from_name("ghp"), ghp);
         assert_eq!(segment_type_from_name(ghp.as_str()), ghp);
     }

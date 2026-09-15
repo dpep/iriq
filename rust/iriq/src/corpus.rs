@@ -262,7 +262,7 @@ impl Corpus {
             events.push(Event::PositionSeen {
                 position: Position::path(keying_host.clone(), prefix.clone()),
                 value: e.value.clone(),
-                ty: e.ty,
+                ty: e.ty.clone(),
             });
             prefix.push('/');
             prefix.push_str(&placeholder_for(e));
@@ -423,7 +423,7 @@ impl Corpus {
         let mut prefix = String::new();
         for entry in &hinted {
             // classify_segment answers this whatever the evidence; skip the read.
-            let cls = if entry.variable && !stable_variable_type(entry.ty) {
+            let cls = if entry.variable && !stable_variable_type(&entry.ty) {
                 Classification::VariableIdentifier
             } else {
                 let evidence = self.storage.position_evidence(
@@ -444,7 +444,7 @@ impl Corpus {
     }
 
     fn corpus_token(&self, a: &Annotated, hints: bool) -> String {
-        if let Some(canon) = canonical_form(a.hint.ty, &a.hint.value) {
+        if let Some(canon) = canonical_form(&a.hint.ty, &a.hint.value) {
             return canon;
         }
         match a.classification {
@@ -461,7 +461,7 @@ fn placeholder_for_variable(a: &Annotated, hints: bool) -> String {
         if hints && !a.hint.hint.is_empty() {
             return format!("{{{}}}", a.hint.hint);
         }
-        return format!("{{{}}}", display_type(a.hint.ty));
+        return format!("{{{}}}", display_type(&a.hint.ty));
     }
     // Corpus-inferred: the classifier said literal, so there's no type to
     // show; with hints, name it after the prefix's last literal segment.
@@ -523,11 +523,11 @@ impl Corpus {
             return Ok(render_param(name, value, &self.classifier));
         };
         let t = Cluster::param_type_for(name, &stats);
-        if let Some(canon) = canonical_form(t, value) {
+        if let Some(canon) = canonical_form(&t, value) {
             return Ok(canon);
         }
-        if self.classifier.variable(t) {
-            return Ok(format!("{{{}}}", display_type(t)));
+        if self.classifier.variable(&t) {
+            return Ok(format!("{{{}}}", display_type(&t)));
         }
         Ok(value.to_string())
     }
@@ -535,7 +535,7 @@ impl Corpus {
 
 /// Dates and currencies print in canonical form (ISO date, upper-case code)
 /// rather than as a placeholder, as mechanical normalize does.
-fn canonical_form(t: SegmentType, value: &str) -> Option<String> {
+fn canonical_form(t: &SegmentType, value: &str) -> Option<String> {
     match t {
         SegmentType::Date => canonical_date(value),
         SegmentType::Currency => canonical_currency(value),
@@ -550,7 +550,7 @@ struct Annotated {
     classification: Classification,
 }
 
-fn stable_variable_type(t: SegmentType) -> bool {
+fn stable_variable_type(t: &SegmentType) -> bool {
     matches!(
         t,
         SegmentType::Version
@@ -579,7 +579,7 @@ fn classify_segment(
         }
         return Classification::Ambiguous;
     }
-    if entry.variable && !stable_variable_type(entry.ty) {
+    if entry.variable && !stable_variable_type(&entry.ty) {
         return Classification::VariableIdentifier;
     }
 

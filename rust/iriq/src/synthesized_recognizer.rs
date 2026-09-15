@@ -60,7 +60,7 @@ impl Recognizer for SynthesizedRecognizer {
             return None;
         }
         Some(Verdict {
-            ty: self.ty,
+            ty: self.ty.clone(),
             confidence: 1.0,
             specificity: self.specificity,
         })

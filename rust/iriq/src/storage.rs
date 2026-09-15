@@ -106,7 +106,7 @@ impl PositionEvidence {
         let v: usize = self
             .type_counts
             .iter()
-            .filter(|(t, _)| c.variable(**t))
+            .filter(|(t, _)| c.variable(t))
             .map(|(_, n)| *n)
             .sum();
         (v as f64) / (self.total as f64)

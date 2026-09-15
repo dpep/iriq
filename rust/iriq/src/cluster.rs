@@ -215,10 +215,10 @@ impl Cluster {
         }
         let t = stats.dominant_type();
 
-        if is_year_position(t, stats) {
+        if is_year_position(&t, stats) {
             return SegmentType::Year;
         }
-        if is_http_status_position(t, stats) {
+        if is_http_status_position(&t, stats) {
             return SegmentType::HttpStatus;
         }
 
@@ -232,7 +232,7 @@ impl Cluster {
             if date_frac >= DATE_CONFIDENCE_THRESHOLD {
                 return t;
             }
-            if let Some(alt) = dominant_excluding(stats, SegmentType::Date) {
+            if let Some(alt) = dominant_excluding(stats, &SegmentType::Date) {
                 return alt;
             }
             return SegmentType::Literal;
@@ -251,7 +251,7 @@ impl Cluster {
             }
         }
 
-        if let Some(hint) = param_name_hint(name, t) {
+        if let Some(hint) = param_name_hint(name, &t) {
             return hint;
         }
 
@@ -307,10 +307,10 @@ pub fn subtype_distribution(
         return HashMap::new();
     }
     let mut out = HashMap::new();
-    for &t in subtypes {
-        let n = *stats.type_counts.get(&t).unwrap_or(&0);
+    for t in subtypes {
+        let n = *stats.type_counts.get(t).unwrap_or(&0);
         if n > 0 {
-            out.insert(t, round_frac((n as f64) / (stats.total as f64)));
+            out.insert(t.clone(), round_frac((n as f64) / (stats.total as f64)));
         }
     }
     out
@@ -385,8 +385,8 @@ pub fn param_confidence(stats: &PositionStats) -> f64 {
     (c * 100.0).round() / 100.0
 }
 
-pub fn is_year_position(t: SegmentType, stats: &PositionStats) -> bool {
-    if t != SegmentType::Integer || stats.numeric_count == 0 {
+pub fn is_year_position(t: &SegmentType, stats: &PositionStats) -> bool {
+    if *t != SegmentType::Integer || stats.numeric_count == 0 {
         return false;
     }
     let card = stats.cardinality();
@@ -402,8 +402,8 @@ pub fn is_year_position(t: SegmentType, stats: &PositionStats) -> bool {
         && stats.numeric_max <= YEAR_RANGE_MAX
 }
 
-pub fn is_http_status_position(t: SegmentType, stats: &PositionStats) -> bool {
-    if t != SegmentType::Integer || stats.numeric_count == 0 {
+pub fn is_http_status_position(t: &SegmentType, stats: &PositionStats) -> bool {
+    if *t != SegmentType::Integer || stats.numeric_count == 0 {
         return false;
     }
     let card = stats.cardinality();
@@ -419,9 +419,9 @@ pub fn is_http_status_position(t: SegmentType, stats: &PositionStats) -> bool {
         && stats.numeric_max <= HTTP_STATUS_RANGE_MAX
 }
 
-pub fn dominant_excluding(stats: &PositionStats, skip: SegmentType) -> Option<SegmentType> {
-    let mut best: Option<(SegmentType, usize)> = None;
-    for (&t, &n) in &stats.type_counts {
+pub fn dominant_excluding(stats: &PositionStats, skip: &SegmentType) -> Option<SegmentType> {
+    let mut best: Option<(&SegmentType, usize)> = None;
+    for (t, &n) in &stats.type_counts {
         if t == skip {
             continue;
         }
@@ -436,7 +436,7 @@ pub fn dominant_excluding(stats: &PositionStats, skip: SegmentType) -> Option<Se
             }
         };
     }
-    best.map(|(t, _)| t)
+    best.map(|(t, _)| t.clone())
 }
 
 fn sort_param_summary(rows: &mut [ParamSummary]) {

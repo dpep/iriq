@@ -160,15 +160,15 @@ fn suggested_type_for(prefix: &str) -> String {
 }
 
 fn slug_or_opaque_dominant(stats: &PositionStats) -> bool {
-    let mut dom = SegmentType::Literal;
+    let mut dom = None;
     let mut max = 0usize;
-    for (&t, &c) in &stats.type_counts {
+    for (t, &c) in &stats.type_counts {
         if c > max {
             max = c;
-            dom = t;
+            dom = Some(t);
         }
     }
-    dom == SegmentType::Slug || dom == SegmentType::OpaqueId
+    matches!(dom, Some(SegmentType::Slug | SegmentType::OpaqueId))
 }
 
 #[cfg(test)]

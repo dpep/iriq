@@ -134,7 +134,7 @@ fn placeholder(entry: &crate::hints::SegmentHint, hints: bool) -> String {
     let p = if hints && !entry.hint.is_empty() {
         entry.hint.clone()
     } else {
-        display_type(entry.ty).to_string()
+        display_type(&entry.ty).to_string()
     };
     format!("{{{}}}", p)
 }
@@ -154,7 +154,7 @@ fn shape_query(iri: &Identifier, c: &SegmentClassifier) -> String {
 /// evidence on through this, so the two paths can't drift.
 pub(crate) fn render_param(name: &str, value: &str, c: &SegmentClassifier) -> String {
     let mut t = c.classify(value);
-    if let Some(h) = param_name_hint(name, t) {
+    if let Some(h) = param_name_hint(name, &t) {
         t = h;
     }
     let canon = match t {
@@ -164,8 +164,8 @@ pub(crate) fn render_param(name: &str, value: &str, c: &SegmentClassifier) -> St
     };
     match canon {
         Some(canon) => canon,
-        None if matches!(t, SegmentType::Date | SegmentType::Currency) || c.variable(t) => {
-            format!("{{{}}}", display_type(t))
+        None if matches!(t, SegmentType::Date | SegmentType::Currency) || c.variable(&t) => {
+            format!("{{{}}}", display_type(&t))
         }
         None => value.to_string(),
     }
