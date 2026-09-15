@@ -294,18 +294,17 @@ fn map_str_usize_to_value(m: &HashMap<String, usize>) -> Value {
 }
 
 pub fn load_memory_from_json(m: &mut MemoryStorage, data: &[u8], path: &Path) -> Result<()> {
+    // Reasons match Ruby's Storage::Json word for word.
+    const NOT_A_CORPUS: &str = "not an iriq corpus (no corpus keys at the top level)";
     let root: Value =
-        serde_json::from_slice(data).map_err(|e| Error::corrupt(path, e.to_string()))?;
+        serde_json::from_slice(data).map_err(|_| Error::corrupt(path, "not valid JSON"))?;
     let obj = root
         .as_object()
-        .ok_or_else(|| Error::corrupt(path, "root not an object"))?;
+        .ok_or_else(|| Error::corrupt(path, NOT_A_CORPUS))?;
     // `{}` is an empty corpus; any other object must be one we wrote, or a
     // save would overwrite someone else's JSON file.
     if !obj.is_empty() && !CORPUS_KEYS.iter().any(|k| obj.contains_key(*k)) {
-        return Err(Error::corrupt(
-            path,
-            "not an iriq corpus (no corpus keys at the top level)",
-        ));
+        return Err(Error::corrupt(path, NOT_A_CORPUS));
     }
 
     // Note: MemoryStorage owns the inner maps; we use the trait methods that

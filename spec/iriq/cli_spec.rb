@@ -656,6 +656,35 @@ describe Iriq::CLI do
     end
   end
 
+  describe "corpus errors" do
+    let(:dir) { Dir.mktmpdir("iriq-corpus-error") }
+    after { FileUtils.remove_entry(dir) }
+
+    it "reports every one as `corpus PATH: reason`, exit 1, code corpus_error under --json" do
+      path = File.join(dir, "notes.json")
+      File.write(path, %({"foo": 1}))
+      message = "corpus #{path}: not an iriq corpus (no corpus keys at the top level)"
+
+      expect(run("--corpus", path, "-n", "https://foo.com/x")).to eq(1)
+      expect(stderr.string).to eq("iriq: #{message}\n")
+
+      stderr.truncate(stderr.rewind)
+      expect(run("--json", "--corpus", path, "-n", "https://foo.com/x")).to eq(1)
+      expect(JSON.parse(stderr.string)).to eq("error" => { "code" => "corpus_error", "message" => message })
+      expect(File.read(path)).to eq(%({"foo": 1}))
+    end
+
+    it "reports a write SQLite refuses the same way, not as a backtrace" do
+      path = File.join(dir, "c.db")
+      Iriq::Corpus.open(path).tap { |c| c.observe("https://x.com/users/1") }.close
+      File.chmod(0o444, path)
+      skip "file permissions aren't enforced for this user" if File.writable?(path)
+
+      expect(run("--corpus", path, "-n", "https://x.com/users/2")).to eq(1)
+      expect(stderr.string).to eq("iriq: corpus #{path}: attempt to write a readonly database\n")
+    end
+  end
+
   describe "corpus commands" do
     let(:corpus_file) do
       f = Tempfile.new(["iriq-corpus-cmd", ".json"])

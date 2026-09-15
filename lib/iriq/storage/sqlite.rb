@@ -157,7 +157,7 @@ module Iriq
         return if version <= SCHEMA_VERSION
 
         @db.close
-        raise CorpusError, "#{@path} has schema version #{version}, newer than this iriq supports (#{SCHEMA_VERSION}); upgrade iriq"
+        raise CorpusError, "corpus #{@path}: schema version #{version} is newer than this iriq supports (#{SCHEMA_VERSION}); upgrade iriq"
       end
 
       def setup!
@@ -187,9 +187,9 @@ module Iriq
         @db.transaction
         yield self
         @db.commit
-      rescue
+      rescue => e
         @db.rollback rescue nil
-        raise
+        raise corpus_error(e)
       end
 
       # Wrap many observations in a single transaction. Cuts SQLite write
@@ -202,12 +202,18 @@ module Iriq
         begin
           yield
           @db.commit
-        rescue
+        rescue => e
           @db.rollback rescue nil
-          raise
+          raise corpus_error(e)
         ensure
           @in_batch = false
         end
+      end
+
+      # A write SQLite refuses (read-only file, full disk) reads like every
+      # other corpus failure: `corpus PATH: cause`. Anything else passes through.
+      def corpus_error(e)
+        e.is_a?(SQLite3::Exception) ? CorpusError.new("corpus #{@path}: #{e.message}") : e
       end
 
       # Saving is automatic — incremental UPSERTs hit disk on commit. flush

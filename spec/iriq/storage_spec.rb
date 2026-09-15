@@ -237,18 +237,19 @@ describe Iriq::Storage do
       path = File.join(@dir, "notes.json")
       File.write(path, %({"foo": 1}))
       expect { Iriq::Corpus.open(path) }
-        .to raise_error(Iriq::CorpusError, "#{path} is not an iriq corpus (no recognized keys); refusing to use it")
+        .to raise_error(Iriq::CorpusError, "corpus #{path}: not an iriq corpus (no corpus keys at the top level)")
       expect(File.read(path)).to eq(%({"foo": 1}))
     end
 
     it "refuses JSON that isn't an object, and malformed JSON" do
       list = File.join(@dir, "list.json")
       File.write(list, "[1, 2]")
-      expect { Iriq::Corpus.open(list) }.to raise_error(Iriq::CorpusError, /#{Regexp.escape(list)} is not an iriq corpus/)
+      expect { Iriq::Corpus.open(list) }
+        .to raise_error(Iriq::CorpusError, "corpus #{list}: not an iriq corpus (no corpus keys at the top level)")
 
       broken = File.join(@dir, "broken.json")
       File.write(broken, %({"host_counts": ))
-      expect { Iriq::Corpus.open(broken) }.to raise_error(Iriq::CorpusError, /#{Regexp.escape(broken)} is not valid JSON/)
+      expect { Iriq::Corpus.open(broken) }.to raise_error(Iriq::CorpusError, "corpus #{broken}: not valid JSON")
     end
 
     it "treats {} as an empty corpus" do
@@ -270,7 +271,7 @@ describe Iriq::Storage do
 
       expect { Iriq::Corpus.open(path) }.to raise_error(
         Iriq::CorpusError,
-        "#{path} has schema version 99, newer than this iriq supports (#{Iriq::Storage::Sqlite::SCHEMA_VERSION}); upgrade iriq",
+        "corpus #{path}: schema version 99 is newer than this iriq supports (#{Iriq::Storage::Sqlite::SCHEMA_VERSION}); upgrade iriq",
       )
       db = SQLite3::Database.new(path)
       expect(db.execute("SELECT name FROM sqlite_master WHERE type = 'table'").flatten).to eq(["meta"])

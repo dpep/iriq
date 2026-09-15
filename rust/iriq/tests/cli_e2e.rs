@@ -37,6 +37,43 @@ fn run(args: &[&str], stdin_data: &str) -> String {
     out
 }
 
+/// Every corpus failure reads `corpus PATH: reason`, and honors --json with a
+/// `corpus_error` envelope, as Ruby's CLI does.
+#[test]
+fn corpus_errors_name_the_corpus_and_honor_json() {
+    let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("corpus-error-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let notes = dir.join("notes.json");
+    let broken = dir.join("broken.json");
+    std::fs::write(&notes, r#"{"foo": 1}"#).unwrap();
+    std::fs::write(&broken, r#"{"host_counts": "#).unwrap();
+
+    for (path, reason) in [
+        (
+            &notes,
+            "not an iriq corpus (no corpus keys at the top level)",
+        ),
+        (&broken, "not valid JSON"),
+    ] {
+        let p = path.to_str().unwrap();
+        let message = format!("corpus {p}: {reason}");
+        let (_, err, ok) = run_full(&["--corpus", p, "-n", "https://foo.com/x"], "");
+        assert!(!ok);
+        assert_eq!(err, format!("iriq: {message}\n"));
+
+        let (_, err, ok) = run_full(&["--json", "--corpus", p, "-n", "https://foo.com/x"], "");
+        assert!(!ok);
+        let envelope: serde_json::Value = serde_json::from_str(&err).expect(&err);
+        assert_eq!(
+            envelope,
+            serde_json::json!({"error": {"code": "corpus_error", "message": message}})
+        );
+    }
+    assert_eq!(std::fs::read_to_string(&notes).unwrap(), r#"{"foo": 1}"#);
+}
+
 /// Liveness: `-n` emits each IRI as it arrives, not after EOF. With stdin held
 /// open, the first normalized line must appear; a slurping implementation would
 /// block on `read_to_string` and print nothing.

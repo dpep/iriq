@@ -228,8 +228,8 @@ fn run<R: Read, W: Write, E: Write>(
         if !pre_exists {
             if let Some(parent) = std::path::Path::new(path).parent() {
                 if let Err(e) = std::fs::create_dir_all(parent) {
-                    let _ = writeln!(stderr, "iriq: {}", e);
-                    return 1;
+                    let message = format!("corpus {path}: {e}");
+                    return emit_error(&mut stderr, opts.json, "corpus_error", &message, "", 1);
                 }
             }
         }
@@ -245,10 +245,7 @@ fn run<R: Read, W: Write, E: Write>(
                 }
                 corpus = Some(c);
             }
-            Err(e) => {
-                let _ = writeln!(stderr, "iriq: {}", describe(&e));
-                return 1;
-            }
+            Err(e) => return corpus_error(&mut stderr, opts.json, &e),
         }
     }
 
@@ -278,8 +275,7 @@ fn run<R: Read, W: Write, E: Write>(
     if let Some(mut c) = corpus {
         if let Some(ref path) = corpus_path {
             if let Err(e) = c.save(path) {
-                let _ = writeln!(stderr, "iriq: {}", describe(&e));
-                return 1;
+                return corpus_error(&mut stderr, opts.json, &e);
             }
         }
         let _ = c.close();
@@ -303,12 +299,14 @@ fn finish<W: Write, E: Write>(
     }
 }
 
-// Library errors name what failed and keep the cause in source().
-fn describe(e: &dyn std::error::Error) -> String {
-    match e.source() {
+// Every corpus failure reads `corpus <path>: <cause>`, code corpus_error, as in
+// Ruby. Library errors name what failed and keep the cause in source().
+fn corpus_error<E: Write>(stderr: &mut E, json: bool, e: &iriq::Error) -> u8 {
+    let message = match std::error::Error::source(e) {
         Some(cause) => format!("{e}: {cause}"),
         None => e.to_string(),
-    }
+    };
+    emit_error(stderr, json, "corpus_error", &message, "", 1)
 }
 
 // resolve_corpus_path applies the precedence chain:
@@ -663,8 +661,7 @@ fn cmd_summary<W: Write, E: Write>(
     let corpus: Option<&Corpus> = match corpus {
         Some(c) => {
             if let Err(e) = c.observe_iri(&iri) {
-                let _ = writeln!(stderr, "iriq: {}", describe(&e));
-                return Ok(1);
+                return Ok(corpus_error(stderr, opts.json, &e));
             }
             Some(&*c)
         }
@@ -948,8 +945,7 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
         Ok(())
     });
     if let Err(e) = observed {
-        let _ = writeln!(stderr, "iriq: {}", describe(&e));
-        return Ok(1);
+        return Ok(corpus_error(stderr, opts.json, &e));
     }
 
     if opts.stats {
@@ -1013,8 +1009,7 @@ fn stream_per_iri_sections<R: Read, W: Write, E: Write>(
             None => input.chunk(&mut line, None, opts, &mut rendered),
         };
         if let Err(e) = chunk {
-            let _ = writeln!(stderr, "iriq: {}", describe(&e));
-            return Ok(1);
+            return Ok(corpus_error(stderr, opts.json, &e));
         }
         stdout.write_all(&rendered.bytes)?;
         stdout.flush()?;
@@ -1599,8 +1594,7 @@ fn cmd_reinfer<W: Write, E: Write>(
     let n = c.observed_iri_count();
     let before = c.size();
     if let Err(e) = c.reinfer() {
-        let _ = writeln!(stderr, "iriq: {}", describe(&e));
-        return Ok(1);
+        return Ok(corpus_error(stderr, opts.json, &e));
     }
     let after = c.size();
     let noun = if n == 1 {
@@ -1653,10 +1647,7 @@ fn cmd_propose<W: Write, E: Write>(
                 }
                 return Ok(0);
             }
-            Err(e) => {
-                let _ = writeln!(stderr, "iriq: {}", describe(&e));
-                return Ok(1);
-            }
+            Err(e) => return Ok(corpus_error(stderr, opts.json, &e)),
         }
     }
 

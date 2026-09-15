@@ -29,10 +29,10 @@ module Iriq
         dump = begin
           JSON.parse(data)
         rescue JSON::ParserError
-          raise CorpusError, "#{path} is not valid JSON; refusing to use it as a corpus"
+          raise CorpusError, "corpus #{path}: not valid JSON"
         end
         unless dump.is_a?(Hash) && (dump.empty? || dump.keys.intersect?(DUMP_KEYS))
-          raise CorpusError, "#{path} is not an iriq corpus (no recognized keys); refusing to use it"
+          raise CorpusError, "corpus #{path}: not an iriq corpus (no corpus keys at the top level)"
         end
 
         load_dump!(dump)

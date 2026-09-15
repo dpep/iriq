@@ -327,6 +327,17 @@ fi
   db.execute("INSERT INTO meta VALUES (?, ?)", ["schema_version", "99"])
 ' "$corpus_dir/future.db")
 run_pair "refuse newer sqlite schema" "" --corpus "$corpus_dir/future.db" -n "https://foo.com/x"
+run_pair "refuse newer sqlite schema json" "" --json --corpus "$corpus_dir/future.db" -n "https://foo.com/x"
+printf '{"host_counts": ' > "$corpus_dir/broken.json"
+run_pair "refuse malformed json" "" --corpus "$corpus_dir/broken.json" -n "https://foo.com/x"
+# A write SQLite refuses reads like every other corpus failure. Skipped where
+# permissions aren't enforced (root).
+echo -n "https://x.com/users/1" | "$RUST_BIN" --corpus "$corpus_dir/ro.db" > /dev/null 2>&1
+chmod 444 "$corpus_dir/ro.db"
+if [[ ! -w "$corpus_dir/ro.db" ]]; then
+  run_pair "read-only sqlite corpus"      "" --corpus "$corpus_dir/ro.db" -n "https://x.com/users/2"
+  run_pair "read-only sqlite corpus json" "" --json --corpus "$corpus_dir/ro.db" -n "https://x.com/users/2"
+fi
 
 corpus_pair() {
   local label="$1" ext="$2"
