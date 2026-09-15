@@ -182,9 +182,11 @@ re-reads materialized views; it does not require re-running the pipeline.
   that fresh corpora share, and the first `Corpus#activate_proposal`
   call swaps to a private classifier so activations don't leak.
   External users registering their own Recognizer subclasses works
-  today via the same API; an *external* registry / discovery surface
-  (load Recognizers from a config file or env var) is still future
-  work.
+  today via the same API in Ruby; the Rust crate keeps its classifier,
+  recognizers and storage private, and a Rust corpus rebuilds its
+  classifier from the activations it has stored. An *external* registry /
+  discovery surface (load Recognizers from a config file or env var) is
+  still future work.
 - **ProposalStrategy**: pluggable via `Iriq::ProposalStrategy::DEFAULTS`.
   Adding a strategy = define a class with `#propose(storage, **opts)`
   and append. v1 ships one strategy (PrefixUnderscoreId); next-segment

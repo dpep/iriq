@@ -10,6 +10,7 @@ captured in the project history.
 ## Where to pick up next time
 
 Last updated: 2026-05-31, current version **v0.28.0**.
+This snapshot predates v0.29 onward; see [CHANGELOG.md](../CHANGELOG.md) for what has shipped since.
 
 **Phase 1**: complete (v0.11 → v0.19). The structural foundation —
 Recognizer ensemble, Position, Shape, Evidence, single Normalizer,
