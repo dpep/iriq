@@ -1,7 +1,7 @@
 //! `iriq completion` — script emission, the $SHELL fallback when no shell
 //! argument is given, and the unknown-shell error path (human + JSON envelope).
 
-use std::process::Command;
+mod common;
 
 struct Output {
     stdout: String,
@@ -11,8 +11,8 @@ struct Output {
 
 /// Run the binary with an explicit $SHELL for the child (None → unset).
 fn run(args: &[&str], shell: Option<&str>) -> Output {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_iriq"));
-    cmd.args(args).env("IRIQ_NO_CORPUS", "1");
+    let mut cmd = common::iriq();
+    cmd.args(args);
     match shell {
         Some(s) => cmd.env("SHELL", s),
         None => cmd.env_remove("SHELL"),

@@ -2,11 +2,13 @@
 //! normalization, not mechanical. Regression guard for the bug where the CLI
 //! observed into the corpus but normalized while ignoring it.
 
+mod common;
+
 use std::io::Write;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 fn run(args: &[&str], stdin_data: &str) -> String {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_iriq"))
+    let mut child = common::iriq()
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -63,4 +65,23 @@ fn cli_normalize_without_corpus_is_mechanical() {
     // No corpus → a literal slot stays literal.
     let out = run(&["-n", "https://foo.com/users/zoe/profile"], "");
     assert_eq!(out.trim(), "https://foo.com/users/zoe/profile");
+}
+
+/// The harness guard: even with the auto-corpus re-enabled, the default corpus
+/// lands in the sandbox home, never the developer's real one.
+#[test]
+fn harness_confines_the_default_corpus_to_the_sandbox() {
+    let home = common::sandbox_home();
+    std::fs::remove_dir_all(&home).unwrap();
+    let out = common::iriq()
+        .env_remove("IRIQ_NO_CORPUS")
+        .args(["-n", "https://foo.com/users/1"])
+        .output()
+        .expect("run iriq");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    assert!(
+        stderr.contains(&format!("created corpus at {}", home.display())),
+        "default corpus escaped the sandbox: {stderr}"
+    );
 }
