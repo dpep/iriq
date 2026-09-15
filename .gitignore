@@ -6,3 +6,6 @@ coverage
 
 # Claude Code local state (worktrees, session files)
 /.claude/
+
+# Local scratch, incl. tmp/research/ archives of user-testing rounds; never committed
+/tmp/

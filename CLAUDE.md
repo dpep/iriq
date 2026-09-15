@@ -43,6 +43,7 @@ iriq/
   script/                 ← shared dev scripts (fixture gen, parity, benches)
   spec/fixtures/          ← golden JSON shared by Ruby specs + Rust tests
   .github/workflows/      ← Ruby CI, Rust CI (tests + parity)
+  tmp/research/           ← local-only (gitignored) archive of user-testing rounds: findings, logs, harnesses
 ```
 
 Notes on this layout:
