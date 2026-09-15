@@ -153,7 +153,15 @@ module Iriq
         enable_wal!
         @db.execute("PRAGMA synchronous = NORMAL")
         @db.execute("PRAGMA foreign_keys = ON")
-        @in_batch = false
+        @in_batch       = false
+        @in_transaction = false
+        # Values tracked per position, remembered so each new value needn't
+        # re-count them. Exact only inside a transaction (the write lock is
+        # held) and while @counts_version still matches.
+        @value_counts   = {}
+        # PRAGMA data_version when @value_counts was last known exact; it
+        # changes only when another connection commits.
+        @counts_version = nil
       end
 
       # Checked before SCHEMA runs, so iriq never adds tables to a corpus
@@ -193,15 +201,7 @@ module Iriq
         # no-ops — the outer batch wraps everything in one txn for speed.
         return yield(self) if @in_batch
 
-        # IMMEDIATE takes the write lock up front. A deferred transaction that
-        # reads first can't upgrade once another process commits: SQLite
-        # reports busy without consulting busy_timeout.
-        @db.transaction(:immediate)
-        yield self
-        @db.commit
-      rescue => e
-        @db.rollback rescue nil
-        raise corpus_error(e)
+        write_transaction { yield self }
       end
 
       # Wrap many observations in a single transaction. Cuts SQLite write
@@ -210,16 +210,34 @@ module Iriq
         return yield if @in_batch
 
         @in_batch = true
-        @db.transaction(:immediate) # see #transaction
         begin
-          yield
-          @db.commit
-        rescue => e
-          @db.rollback rescue nil
-          raise corpus_error(e)
+          write_transaction { yield }
         ensure
           @in_batch = false
         end
+      end
+
+      # IMMEDIATE takes the write lock up front. A deferred transaction that
+      # reads first can't upgrade once another process commits: SQLite
+      # reports busy without consulting busy_timeout.
+      private def write_transaction
+        @db.transaction(:immediate)
+        @in_transaction = true
+        # Under the write lock no one else can commit until we do, so the
+        # version read now holds for the whole transaction.
+        version = @db.get_first_value("PRAGMA data_version")
+        @value_counts.clear unless version == @counts_version
+        @counts_version = version
+        result = yield
+        @db.commit
+        result
+      rescue => e
+        @db.rollback rescue nil
+        @value_counts.clear
+        @counts_version = nil
+        raise corpus_error(e)
+      ensure
+        @in_transaction = false
       end
 
       # SQLite failures inside a transaction become CorpusErrors; anything else
@@ -293,16 +311,18 @@ module Iriq
           WHERE host = ? AND scope = ? AND locator = ? AND value = ?
         SQL
         if @db.changes.zero?
-          card = @db.get_first_value(
-            "SELECT COUNT(*) FROM position_values WHERE host = ? AND scope = ? AND locator = ?",
-            [host, scope, locator],
+          where = [host, scope, locator]
+          card = (@in_transaction && @value_counts[where]) || @db.get_first_value(
+            "SELECT COUNT(*) FROM position_values WHERE host = ? AND scope = ? AND locator = ?", where,
           )
           if card < @max_values_per_position
             @db.execute(
               "INSERT INTO position_values (host, scope, locator, value, count) VALUES (?, ?, ?, ?, 1)",
               [host, scope, locator, value],
             )
+            card += 1
           end
+          @value_counts[where] = card if @in_transaction
         end
       end
 
@@ -414,6 +434,7 @@ module Iriq
       # Drop every materialized view without touching the source-IRI log.
       # Corpus#reinfer calls this before replaying the log.
       def clear_materialized_views
+        @value_counts.clear
         @db.execute_batch(<<~SQL)
           DELETE FROM host_counts;
           DELETE FROM path_length_counts;
