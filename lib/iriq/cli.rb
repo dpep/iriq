@@ -719,14 +719,6 @@ module Iriq
       exit_code
     end
 
-    def read_input(path)
-      if path.nil? || path == "-"
-        stdin.read.lines
-      else
-        File.readlines(path)
-      end
-    end
-
     def read_text(path)
       read_guard { path.nil? || path == "-" ? stdin.read : File.read(path) }
     end
