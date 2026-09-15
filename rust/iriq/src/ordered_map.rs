@@ -7,7 +7,7 @@ use std::collections::HashMap;
 /// ("?flag" → nil) from an empty one ("?flag=" → ""). Downstream consumers
 /// treat both as "" (Ruby calls `.to_s`); only the raw parse dump surfaces
 /// the difference — use `iter_raw` there.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OrderedMap {
     keys: Vec<String>,
     values: HashMap<String, Option<String>>,

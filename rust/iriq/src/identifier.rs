@@ -17,7 +17,7 @@ impl Kind {
 
 /// Parsed IRI. For URN-style inputs only Scheme + NSS are populated;
 /// Host/Path are empty.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Identifier {
     pub original: String,
     pub scheme: String,
