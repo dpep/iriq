@@ -76,6 +76,8 @@ pub struct Corpus {
     /// The shared default classifier until a recognizer is activated, then a
     /// private copy (see `reapply_activated_recognizers`).
     classifier: Arc<SegmentClassifier>,
+    /// The stored activations `classifier` was built from.
+    activations: Vec<serde_json::Value>,
     host_strategy: HostStrategy,
     storage: Box<dyn Storage>,
 }
@@ -85,6 +87,7 @@ impl Corpus {
     pub fn new() -> Self {
         Corpus {
             classifier: DEFAULT_CLASSIFIER_ARC.clone(),
+            activations: Vec::new(),
             host_strategy: HostStrategy::Full,
             storage: Box::new(MemoryStorage::new(DEFAULT_MAX_VALUES_PER_POSITION)),
         }
@@ -96,6 +99,7 @@ impl Corpus {
         let storage = open_storage(path.as_ref(), DEFAULT_MAX_VALUES_PER_POSITION)?;
         let mut cp = Corpus {
             classifier: DEFAULT_CLASSIFIER_ARC.clone(),
+            activations: Vec::new(),
             host_strategy: HostStrategy::Full,
             storage,
         };
@@ -208,22 +212,25 @@ impl Corpus {
 
     /// The classifier is a function of the stored activations: the shared
     /// default when there are none, otherwise a private copy holding exactly
-    /// the stored set, so a live corpus and its reopened self agree.
+    /// the stored set, so a live corpus and its reopened self agree. Rebuilt
+    /// only when the set changed, so the classifier keeps its cache.
     fn reapply_activated_recognizers(&mut self) -> Result<()> {
-        let mut recognizers = Vec::new();
-        self.storage.each_activated_recognizer(&mut |v| {
-            if let Some(r) = SynthesizedRecognizer::from_dump(v) {
-                recognizers.push(r);
-            }
-        })?;
-        if recognizers.is_empty() {
+        let mut stored = Vec::new();
+        self.storage
+            .each_activated_recognizer(&mut |v| stored.push(v.clone()))?;
+        if stored == self.activations {
             return Ok(());
         }
-        let classifier = SegmentClassifier::new();
-        for r in recognizers {
-            classifier.register_recognizer(Arc::new(r));
-        }
-        self.classifier = Arc::new(classifier);
+        self.classifier = if stored.is_empty() {
+            DEFAULT_CLASSIFIER_ARC.clone()
+        } else {
+            let classifier = SegmentClassifier::new();
+            for r in stored.iter().filter_map(SynthesizedRecognizer::from_dump) {
+                classifier.register_recognizer(Arc::new(r));
+            }
+            Arc::new(classifier)
+        };
+        self.activations = stored;
         Ok(())
     }
 
@@ -361,8 +368,15 @@ impl Corpus {
     /// panic then continues); Memory and JSON corpora apply each write as it
     /// happens. A batch opened inside a batch joins it: only the outermost
     /// commits or rolls back, so a failure `f` swallows keeps its writes.
+    /// A batch classifies with every recognizer activated before it began,
+    /// including those another process activated.
     pub fn batch<T>(&mut self, f: impl FnOnce(&mut Corpus) -> Result<T>) -> Result<T> {
-        self.storage.batch_begin()?;
+        if self.storage.batch_begin()? {
+            if let Err(e) = self.reapply_activated_recognizers() {
+                let _ = self.storage.batch_rollback();
+                return Err(e);
+            }
+        }
         // Unwind safety: the rollback below is what restores consistency.
         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self))) {
             Ok(Ok(value)) => {
@@ -714,6 +728,33 @@ mod tests {
         }
         assert_eq!(c.classifier.recognizer_count(), live);
         assert_eq!(c.activated_recognizer_count().unwrap(), 1);
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[test]
+    fn a_writer_observes_with_recognizers_another_connection_activated() {
+        let dir =
+            std::env::temp_dir().join(format!("iriq-corpus-activated-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("c.db");
+
+        let mut writer = Corpus::open(&path).unwrap();
+        writer.observe("https://x.com/t/tok_Ab12Cd").unwrap();
+        // Another process activating commits the same way a second connection does.
+        Corpus::open(&path)
+            .unwrap()
+            .activate_proposal(&proposal("tok_", "tok"))
+            .unwrap();
+
+        writer.observe("https://x.com/t/tok_Ef34Gh").unwrap();
+        let shapes: Vec<String> = writer
+            .clusters()
+            .unwrap()
+            .into_iter()
+            .map(|c| format!("{} x{}", c.shape, c.count))
+            .collect();
+        assert_eq!(shapes, ["/t/{tok} x2"]);
     }
 
     #[test]

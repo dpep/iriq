@@ -33,11 +33,11 @@ pub struct SqliteStorage {
     depth: usize,
     /// Tracked values per position, counted inside a batch so each new value
     /// needn't re-count them. Exact only while this connection holds the
-    /// write lock and, across batches, while `counts_version` still matches.
+    /// write lock and, across batches, while `data_version` still matches.
     value_counts: HashMap<Position, usize>,
-    /// `PRAGMA data_version` as of the batch that filled `value_counts`; it
-    /// changes when any other connection commits.
-    counts_version: Option<i64>,
+    /// `PRAGMA data_version` as of this connection's last batch; it changes
+    /// when any other connection commits.
+    data_version: Option<i64>,
 }
 
 impl SqliteStorage {
@@ -116,7 +116,7 @@ impl SqliteStorage {
             path: path.to_path_buf(),
             depth: 0,
             value_counts: HashMap::new(),
-            counts_version: None,
+            data_version: None,
         })
     }
 
@@ -665,25 +665,27 @@ impl Storage for SqliteStorage {
     // A batch inside a batch joins it, as in Ruby. A savepoint per nested
     // batch would let it roll back alone, but costs a statement journal per
     // observation on every batched ingest.
-    fn batch_begin(&mut self) -> Result<()> {
+    fn batch_begin(&mut self) -> Result<bool> {
         if self.depth > 0 {
             self.depth += 1;
-            return Ok(());
+            return Ok(false);
         }
         let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         c.execute_batch("BEGIN IMMEDIATE")
             .map_err(|e| Error::sqlite(&self.path, e))?;
         // Under the write lock no one else can commit until we do, so a
-        // version read now stays true for the whole batch.
+        // version read now stays true for the whole batch. An unreadable
+        // version counts as changed.
         let version = c
             .query_row("PRAGMA data_version", [], |r| r.get::<_, i64>(0))
             .ok();
-        if version.is_none() || version != self.counts_version {
+        let changed = version.is_none() || version != self.data_version;
+        if changed {
             self.value_counts.clear();
         }
-        self.counts_version = version;
+        self.data_version = version;
         self.depth = 1;
-        Ok(())
+        Ok(changed)
     }
     fn batch_commit(&mut self) -> Result<()> {
         self.depth -= 1;

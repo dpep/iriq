@@ -53,9 +53,11 @@ pub trait Storage: Send + Sync {
     fn activated_recognizer_count(&self) -> Result<usize>;
 
     /// One backend transaction around many writes. SQLite turns
-    /// O(observations) commits into one; Memory + JSON are no-ops.
-    fn batch_begin(&mut self) -> Result<()> {
-        Ok(())
+    /// O(observations) commits into one; Memory + JSON are no-ops. Returns
+    /// whether another connection may have committed since this one's
+    /// previous batch began, making anything read from storage before stale.
+    fn batch_begin(&mut self) -> Result<bool> {
+        Ok(false)
     }
     fn batch_commit(&mut self) -> Result<()> {
         Ok(())
