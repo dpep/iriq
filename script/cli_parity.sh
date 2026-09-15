@@ -572,6 +572,40 @@ else
   diff <(echo "$ruby_nums_out") <(echo "$rust_nums_out") | sed 's/^/    /' || true
 fi
 
+# Cluster JSON key order is compared byte-for-byte, not through jq -S: segment
+# values by descending count then value, param distributions in Ruby's order,
+# the same from memory and read back from either corpus backend.
+order_stream=$(
+  printf 'https://foo.com/users/%s\n' 5 6 11 5 6 11 11 3
+  i=0
+  for s in active active active active active active archived archived archived archived archived \
+           draft draft draft draft pending pending pending closed closed closed; do
+    if (( i % 2 == 0 )); then n=$i; else n="$i.5"; fi
+    if (( i % 3 == 0 )); then f="img$i.png"; else f="doc$i.pdf"; fi
+    echo "https://foo.com/items/1?status=$s&n=$n&f=$f"
+    i=$((i + 1))
+  done
+)
+run_pair "cluster -J key order (memory)" "$order_stream" -C cluster -J
+for ext in .json .db; do
+  ruby_order="$corpus_dir/ruby-order$ext"
+  rust_order="$corpus_dir/rust-order$ext"
+  echo -n "$order_stream" | (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_order") > /dev/null
+  echo -n "$order_stream" | "$RUST_BIN" --corpus "$rust_order" > /dev/null
+  run_pair "cluster -J key order ($ext readback, ruby corpus)" "" --corpus "$ruby_order" cluster -J
+  # Each runtime reading the corpus the other wrote.
+  ruby_order_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$rust_order" cluster -J < /dev/null) )
+  rust_order_out=$( "$RUST_BIN" --corpus "$ruby_order" cluster -J < /dev/null )
+  if [[ "$ruby_order_out" == "$rust_order_out" ]]; then
+    pass_count=$((pass_count + 1))
+  else
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH: cluster -J key order ($ext, each reads the other's corpus)"
+    diff <(echo "$ruby_order_out") <(echo "$rust_order_out") | sed 's/^/    /' || true
+  fi
+done
+
 # --reinfer parity. After observing the same stream, both CLIs should
 # produce identical --reinfer output, and --stats afterward should still
 # match (idempotent replay).
@@ -732,6 +766,98 @@ activate_pair() {
 
 activate_pair "JSON storage"   ".json"
 activate_pair "SQLite storage" ".db"
+
+held_stream=""
+for i in $(seq 1 25); do
+  held_stream+="https://api.github.com/auth/ghp_aaaa$(printf '%04d' "$i")xyzzy"$'\n'
+done
+
+# Copy a corpus file with any SQLite sidecars.
+copy_corpus() {
+  local from="$1" to="$2" suffix
+  rm -f "$to" "$to-wal" "$to-shm"
+  for suffix in "" -wal -shm; do
+    [[ -e "$from$suffix" ]] && cp "$from$suffix" "$to$suffix"
+  done
+  return 0
+}
+
+# An activated recognizer matches its prefix plus letters and digits, the
+# whole segment; any other ghp_ segment is classified as if it weren't there.
+# Both runtimes read a copy of the same activated corpus (-n observes into it).
+for ext in .json .db; do
+  ghp_corpus="$corpus_dir/ghp$ext"
+  echo -n "$held_stream" | (cd "$REPO_ROOT" && $RUBY --corpus "$ghp_corpus") > /dev/null 2>&1
+  (cd "$REPO_ROOT" && $RUBY --corpus "$ghp_corpus" --propose-recognizers --activate-above 0.9) < /dev/null > /dev/null
+  for seg in ghp_abc123 ghp_abc-def ghp_a.b ghp_ ghp_x_y GHP_abc1; do
+    copy_corpus "$ghp_corpus" "$corpus_dir/ghp-ruby$ext"
+    copy_corpus "$ghp_corpus" "$corpus_dir/ghp-rust$ext"
+    ruby_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$corpus_dir/ghp-ruby$ext" -n "https://api.github.com/auth/$seg") < /dev/null 2>&1 )
+    rust_out=$( "$RUST_BIN" --corpus "$corpus_dir/ghp-rust$ext" -n "https://api.github.com/auth/$seg" < /dev/null 2>&1 )
+    if [[ "$ruby_out" == "$rust_out" ]]; then
+      pass_count=$((pass_count + 1))
+    else
+      fail_count=$((fail_count + 1))
+      echo
+      echo "MISMATCH: activated ghp_ recognizer on $seg ($ext)"
+      diff <(echo "$ruby_out") <(echo "$rust_out") | sed 's/^/    /' || true
+    fi
+  done
+done
+
+# An activation is its prefix and type: re-activating one the corpus holds
+# changes nothing, whichever runtime stored it and at whatever specificity
+# (older Rust binaries stored 0.3). Each runtime re-runs the activation on its
+# own copy of the same corpus.
+stored_activation_count() {
+  (cd "$REPO_ROOT" && bundle exec ruby -ririq -e \
+    'c = Iriq::Corpus.open(ARGV[0]); puts c.activated_recognizer_count; c.close' "$1")
+}
+
+held_activation_pair() {
+  local label="$1" held="$2"
+  local ruby_copy="$corpus_dir/held-ruby-copy.${held##*.}"
+  local rust_copy="$corpus_dir/held-rust-copy.${held##*.}"
+  copy_corpus "$held" "$ruby_copy"
+  copy_corpus "$held" "$rust_copy"
+  local ruby_out rust_out counts
+  ruby_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_copy" --propose-recognizers --activate-above 0.9) < /dev/null 2>&1 )
+  rust_out=$( "$RUST_BIN" --corpus "$rust_copy" --propose-recognizers --activate-above 0.9 < /dev/null 2>&1 )
+  counts="$(stored_activation_count "$ruby_copy") $(stored_activation_count "$rust_copy")"
+  if [[ "$ruby_out" == "$rust_out" && "$ruby_out" != *activated:* && "$counts" == "1 1" ]]; then
+    pass_count=$((pass_count + 1))
+  else
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH: re-activating a held recognizer ($label)"
+    echo "  stored activations after (ruby rust): $counts"
+    diff <(echo "$ruby_out") <(echo "$rust_out") | sed 's/^/    /' || true
+  fi
+}
+
+for ext in .json .db; do
+  for activator in ruby rust; do
+    held="$corpus_dir/held-$activator$ext"
+    if [[ "$activator" == ruby ]]; then
+      echo -n "$held_stream" | (cd "$REPO_ROOT" && $RUBY --corpus "$held") > /dev/null
+      (cd "$REPO_ROOT" && $RUBY --corpus "$held" --propose-recognizers --activate-above 0.9) < /dev/null > /dev/null
+    else
+      echo -n "$held_stream" | "$RUST_BIN" --corpus "$held" > /dev/null
+      "$RUST_BIN" --corpus "$held" --propose-recognizers --activate-above 0.9 < /dev/null > /dev/null
+    fi
+    held_activation_pair "activated by $activator, $ext" "$held"
+  done
+  # Views that still propose ghp_, beside a row stored at another specificity.
+  held="$corpus_dir/held-0.3$ext"
+  echo -n "$held_stream" | (cd "$REPO_ROOT" && $RUBY --corpus "$held") > /dev/null
+  (cd "$REPO_ROOT" && bundle exec ruby -ririq -e '
+    c = Iriq::Corpus.open(ARGV[0])
+    c.storage.record_activated_recognizer({ "prefix" => "ghp_", "type" => "ghp", "specificity" => 0.3 })
+    c.save(ARGV[0])
+    c.close
+  ' "$held")
+  held_activation_pair "stored at specificity 0.3, $ext" "$held"
+done
 
 # A proposal never takes a built-in type name: `literal_` proposes
 # `literal_id`, and activating it classifies new values as {literal_id}.
