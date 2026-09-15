@@ -193,7 +193,10 @@ module Iriq
         # no-ops — the outer batch wraps everything in one txn for speed.
         return yield(self) if @in_batch
 
-        @db.transaction
+        # IMMEDIATE takes the write lock up front. A deferred transaction that
+        # reads first can't upgrade once another process commits: SQLite
+        # reports busy without consulting busy_timeout.
+        @db.transaction(:immediate)
         yield self
         @db.commit
       rescue => e
@@ -207,7 +210,7 @@ module Iriq
         return yield if @in_batch
 
         @in_batch = true
-        @db.transaction
+        @db.transaction(:immediate) # see #transaction
         begin
           yield
           @db.commit

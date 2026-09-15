@@ -82,5 +82,41 @@ describe "re-runnable inference" do
       expect(reopened.size).to eq(1)
       reopened.close
     end
+
+    # A transaction that reads before it writes can't take the write lock
+    # once another process has committed (SQLite reports busy without
+    # waiting), so reinfer must hold the lock from its first statement.
+    it "waits for a writer that tries to commit mid-replay instead of failing" do
+      skip "fork not supported on this platform" unless Process.respond_to?(:fork)
+      seed = Iriq::Corpus.open(@path)
+      3.times { |i| seed.observe("https://foo.com/users/#{i}") }
+      seed.close
+
+      corpus = Iriq::Corpus.open(@path)
+      writer = nil
+      allow(corpus.storage).to receive(:each_observed_iri).and_wrap_original do |original, &block|
+        original.call(&block)
+        writer = fork do
+          other = Iriq::Corpus.open(@path)
+          other.observe("https://foo.com/users/99")
+          other.close
+          exit!(0)
+        rescue Exception # rubocop:disable Lint/RescueException
+          exit!(1)
+        end
+        # Give the writer time to commit, if nothing holds the write lock.
+        deadline = Time.now + 1
+        sleep 0.02 until Time.now > deadline || Process.wait(writer, Process::WNOHANG)
+      end
+
+      expect { corpus.reinfer }.not_to raise_error
+      Process.wait(writer) rescue Errno::ECHILD
+      corpus.close
+
+      reopened = Iriq::Corpus.open(@path)
+      expect(reopened.observed_iri_count).to eq(4)
+      expect(reopened.host_counts["foo.com"]).to eq(4)
+      reopened.close
+    end
   end
 end

@@ -24,6 +24,7 @@
 <!-- lane: ruby-perf -->
 - **Ruby, SQLite corpora: `-n` with a corpus does far less work per URL.** Normalizing a URL read every value tracked at each of its path positions and its whole cluster, and observing one reloaded the whole cluster; both now read only what they use. Output is unchanged. 10k URLs into a fresh `.db` went from ~2400G to ~90G instructions (157s → 5s of CPU on the benchmark box).
 - Ruby: a corpus file iriq can't open, read or write is a clean `iriq: corpus PATH: reason` error (exit 1, `corpus_error` under `--json`) instead of a backtrace — a `.db` that isn't a database, an unreadable or directory `.json`, a corpus directory that can't be created, a failed JSON save. The reasons match the Rust CLI's (`file is not a database`, `Permission denied (os error 13)`).
+- Ruby, SQLite corpora: `--reinfer` (and `--activate-above`, which reinfers) waits for concurrent writers instead of failing with `corpus PATH: database is locked`, as the Rust CLI does. Every Ruby corpus transaction now takes the write lock when it begins.
 - `--propose-recognizers --activate-above F` with nothing to activate now says `no proposals at or above confidence F`; it said "coverage", but `F` is a confidence threshold.
 <!-- /lane: ruby-perf -->
 
