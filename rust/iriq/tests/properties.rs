@@ -17,11 +17,24 @@ fn ruby_strip(s: &str) -> &str {
 
 // The same messy-injection pool the Ruby property spec uses: spaces, braces,
 // pipes, NULs-as-escapes, bad percent-escapes, Unicode whitespace/quotes,
-// and URL metacharacters.
+// and URL metacharacters. Plus classes where Rust's Unicode-aware defaults
+// diverge from Ruby: non-ASCII Nd digits (2/3/4-byte) and capital sigma.
 const INJECTIONS: &[&str] = &[
     " ", "{", "}", "|", "%00", "%zz", "%", "%%", "\\", "^", "<", ">", "\u{00A0}", "\u{3000}",
-    "\u{201C}", "\u{201D}", "é", "例", "🦀", "\t", "..", "//", "?", "#", ":", "@",
+    "\u{201C}", "\u{201D}", "é", "例", "🦀", "\t", "..", "//", "?", "#", ":", "@", "\u{661}",
+    "\u{966}", "𝟎", "Σ",
 ];
+
+/// Digit runs mixing ASCII and non-ASCII Nd digits, in the integer / compact
+/// date / ISO / slash date shapes the classifier slices up.
+fn digit_shaped_value() -> impl Strategy<Value = String> {
+    let run = || "[0-9\u{660}-\u{669}\u{966}-\u{96F}]{1,10}";
+    prop_oneof![
+        run().prop_map(|s| s),
+        (run(), run(), run()).prop_map(|(a, b, c)| format!("{a}-{b}-{c}")),
+        (run(), run(), run()).prop_map(|(a, b, c)| format!("{a}/{b}/{c}")),
+    ]
+}
 
 fn clean_url() -> impl Strategy<Value = String> {
     (
@@ -201,6 +214,12 @@ proptest! {
         for input in &inputs {
             let _ = corpus.normalize(input);
         }
+    }
+
+    #[test]
+    fn digit_shaped_values_never_panic(value in digit_shaped_value()) {
+        check_invariants(&format!("https://x.com/{value}"));
+        check_invariants(&format!("https://x.com/a?d={value}"));
     }
 }
 
