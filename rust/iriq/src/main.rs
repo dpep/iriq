@@ -25,8 +25,8 @@ Usage: iriq [options] <input>
        iriq [options] < text
        iriq cluster [options] [file]
 
-<input> may be an IRI, a file path (extracted automatically), or piped
-text via stdin.
+<input> may be an IRI, a file to extract IRIs from (an existing file wins
+unless the argument contains ://), or piped text via stdin.
 
 Sections (combine freely):
   -n, --normalize       Shape — variable parts become placeholders
@@ -34,6 +34,7 @@ Sections (combine freely):
   -p, --parse           Parsed fields
   -e, --explain         Annotated trace — per-segment notes about why
                         each placeholder / canonical value was chosen
+                        (mechanical rules only, even with a corpus)
 
 Corpus + stats:
       --corpus PATH     Use a specific corpus file (overrides the default).
@@ -41,11 +42,14 @@ Corpus + stats:
                         are SQLite; anything else is JSON.
   -C, --no-corpus       Disable corpus persistence for this invocation.
                         Same as IRIQ_NO_CORPUS=1 in the environment.
-      --reset           Delete the corpus database (default path or the
-                        one resolved via --corpus / IRIQ_CORPUS) and exit.
+      --reset           Delete the corpus (default path or the one
+                        resolved via --corpus / IRIQ_CORPUS), its SQLite
+                        sidecars and JSON temp files, and exit.
       --host MODE       Host-keying strategy for clustering:
                         full (default), registrable (or reg) strips
-                        subdomains, none ignores host entirely.
+                        subdomains, none ignores host entirely. Keys
+                        IRIs as they're observed (-C included) and on
+                        --reinfer; existing clusters keep their keys.
       --stats           Print rolling aggregates
       --reinfer         Replay the source-IRI log through the current
                         classifier + reducers; rebuilds materialized
@@ -78,20 +82,23 @@ Other:
   -h, --help            Show this message
   -j, --json            Emit JSON instead of human-readable output
   -J, --ndjson          Newline-delimited JSON (one object per line). Implies --json.
+                        Streams per IRI only with -n/-p/-c/-e; alone, it
+                        prints the URL list or clusters at end of input.
   -N, --no-hints        Use {integer} placeholders instead of {user_id}
       --no-scheme-less  Skip foo.com/path extraction (explicit-scheme only)
   -V, --version         Print version
 
 Subcommands:
-  cluster [file]        Force cluster view (default for ≥10 IRIs anyway)
+  cluster [file]        Observe file (or stdin), then show every cluster
+                        in the corpus (default view for ≥10 IRIs anyway)
   completion <shell>    Print shell completion script (bash | zsh)
 
 Examples:
   iriq foo.com/users/456
   iriq -n https://foo.com/users/123
-  iriq ./access.log                     # auto-detect file → extract URLs
+  iriq access.log                       # extract URLs (request paths have no host)
   cat README.md | iriq -n               # one normalized URL per line
-  tail -f access.log | iriq -J          # live stream → NDJSON per IRI
+  tail -f app.log | iriq -nJ            # live stream → NDJSON per IRI
   cat README.md | iriq --corpus c.json
 "#;
 

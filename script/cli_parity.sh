@@ -678,6 +678,17 @@ activate_pair() {
     diff <(echo "$ruby_out") <(echo "$rust_out") | sed 's/^/    /' || true
     echo "$ruby_out" | grep -q '{ghp}' || echo "    (ruby output lacks {ghp} placeholder)"
   fi
+  # Running the same activation again activates nothing new, so reports none.
+  ruby_out=$( (cd "$REPO_ROOT" && $RUBY --corpus "$ruby_path" --propose-recognizers --activate-above 0.9 < /dev/null) )
+  rust_out=$(   "$RUST_BIN" --corpus "$rust_path" --propose-recognizers --activate-above 0.9 < /dev/null )
+  if [[ "$ruby_out" == "$rust_out" ]] && [[ "$ruby_out" != *activated:* ]]; then
+    pass_count=$((pass_count + 1))
+  else
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH: activate-above twice $label"
+    diff <(echo "$ruby_out") <(echo "$rust_out") | sed 's/^/    /' || true
+  fi
 }
 
 activate_pair "JSON storage"   ".json"

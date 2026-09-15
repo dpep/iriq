@@ -18,7 +18,7 @@ describe "Recognizer auto-activation" do
 
       expect(recognizer).to be_a(Iriq::SynthesizedRecognizer)
       expect(recognizer.prefix).to eq("ghp_")
-      expect(corpus.classifier.recognizers.last).to eq(recognizer)
+      expect(corpus.classifier.recognizers.last.to_dump).to eq(recognizer.to_dump)
     end
 
     it "doesn't leak activation into the module-level DEFAULT classifier" do
@@ -68,6 +68,28 @@ describe "Recognizer auto-activation" do
         c2.close
       end
     end
+
+    # The activation row and the reinfer commit together: a stored activation
+    # always has views classified through it.
+    it "stores nothing and keeps the old classifier when the reinfer fails" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "corpus.db")
+        corpus = Iriq::Corpus.open(path)
+        25.times { |i| corpus.observe("https://api.github.com/auth/ghp_aaaa#{i.to_s.rjust(4, '0')}xyzzy") }
+        proposal = corpus.propose_recognizers.first
+        before = corpus.stats_for("api.github.com", "/auth").type_counts
+        SQLite3::Database.new(path) do |db|
+          db.execute("CREATE TRIGGER boom BEFORE INSERT ON host_counts BEGIN SELECT RAISE(ABORT, 'boom'); END")
+        end
+
+        expect { corpus.activate_proposal(proposal) }.to raise_error(Iriq::CorpusError, /boom/)
+
+        expect(corpus.activated_recognizer_count).to eq(0)
+        expect(corpus.classifier.classify("ghp_abcdef123")).not_to eq(:ghp)
+        expect(corpus.stats_for("api.github.com", "/auth").type_counts).to eq(before)
+        corpus.close
+      end
+    end
   end
 
   describe "Corpus#activate_proposals_above" do
@@ -82,6 +104,93 @@ describe "Recognizer auto-activation" do
       observe_pat_stream
       # 1.5 is unreachable; coverage maxes at 1.0
       expect(corpus.activate_proposals_above(1.5)).to be_empty
+    end
+  end
+
+  describe "activating a recognizer the corpus already holds" do
+    it "changes nothing" do
+      observe_pat_stream
+      proposal = corpus.propose_recognizers.first
+      corpus.activate_proposal(proposal)
+      expect(corpus).not_to receive(:reinfer)
+
+      corpus.activate_proposal(proposal)
+
+      expect(corpus.activated_recognizer_count).to eq(1)
+      expect(corpus.classifier.recognizers.grep(Iriq::SynthesizedRecognizer).size).to eq(1)
+    end
+
+    it "changes nothing when another corpus on the same file activated it" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "corpus.db")
+        first = Iriq::Corpus.open(path)
+        25.times { |i| first.observe("https://api.github.com/auth/ghp_aaaa#{i.to_s.rjust(4, '0')}xyzzy") }
+        proposal = first.propose_recognizers.first
+        second = Iriq::Corpus.open(path)
+        first.activate_proposal(proposal)
+        expect(second).not_to receive(:reinfer)
+
+        second.activate_proposal(proposal)
+
+        expect(second.activated_recognizer_count).to eq(1)
+        first.close
+        second.close
+      end
+    end
+
+    it "isn't reported by activate_proposals_above" do
+      observe_pat_stream
+      stale = corpus.propose_recognizers.first
+      corpus.activate_proposal(stale)
+      # A proposal made before the activation still clears the threshold.
+      allow(corpus).to receive(:propose_recognizers).and_return([stale])
+
+      expect(corpus.activate_proposals_above(0.5)).to be_empty
+    end
+  end
+
+  # A transaction classifies with exactly the stored activation set as of its
+  # start, including activations another corpus on the same file committed.
+  describe "activations another corpus commits" do
+    around do |example|
+      Dir.mktmpdir do |dir|
+        @path = File.join(dir, "corpus.db")
+        example.run
+      end
+    end
+
+    def observe_prefixed(corpus, host, route, prefix)
+      25.times { |i| corpus.observe("https://#{host}/#{route}/#{prefix}aaaa#{i.to_s.rjust(4, '0')}xyzzy") }
+    end
+
+    it "reach a corpus opened before them from its next observation" do
+      writer = Iriq::Corpus.open(@path)
+      observe_prefixed(writer, "api.github.com", "auth", "ghp_")
+      activator = Iriq::Corpus.open(@path)
+      activator.activate_proposal(activator.propose_recognizers.first)
+
+      writer.observe("https://api.github.com/auth/ghp_zzzz9999xyzzy")
+
+      expect(writer.classifier.classify("ghp_zzzz9999xyzzy")).to eq(:ghp)
+      expect(writer.stats_for("api.github.com", "/auth").type_counts[:ghp]).to eq(26)
+      writer.close
+      activator.close
+    end
+
+    it "are kept by an activation made through a corpus opened before them" do
+      stale = Iriq::Corpus.open(@path)
+      observe_prefixed(stale, "api.github.com", "auth", "ghp_")
+      observe_prefixed(stale, "api.stripe.com", "keys", "sk_")
+      proposals = stale.propose_recognizers.to_h { |p| [p.prefix, p] }
+      other = Iriq::Corpus.open(@path)
+      other.activate_proposal(proposals.fetch("ghp_"))
+
+      stale.activate_proposal(proposals.fetch("sk_"))
+
+      expect(stale.stats_for("api.github.com", "/auth").type_counts[:ghp]).to eq(25)
+      expect(stale.stats_for("api.stripe.com", "/keys").type_counts[:sk]).to eq(25)
+      stale.close
+      other.close
     end
   end
 end

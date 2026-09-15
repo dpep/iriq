@@ -233,6 +233,13 @@ module Iriq
       recognizer
     end
 
+    # A copy registers recognizers without touching the original.
+    def initialize_copy(source)
+      super
+      @recognizers = source.recognizers
+      @cache       = {}
+    end
+
     # Snapshot of the live ensemble. Useful for tests and tooling that
     # want to inspect which Recognizers a corpus is consulting.
     def recognizers

@@ -54,6 +54,10 @@ module Iriq
         unless HOST_STRATEGIES.include?(host_strategy)
 
       @classifier    = classifier
+      # Stored activations layer onto the base; @activations is the set
+      # @classifier was built from.
+      @base_classifier = classifier
+      @activations     = []
       @host_strategy = host_strategy
       @storage       = storage || Storage::Memory.new(
         classifier: classifier,
@@ -95,15 +99,16 @@ module Iriq
     # replay against alternate reducers / thresholds for re-runnable
     # inference. See lib/iriq/event.rb and lib/iriq/reducer.rb.
     def observe(input)
-      iri    = coerce(input)
-      events = events_for(iri)
+      iri = coerce(input)
 
-      @storage.transaction do |s|
-        events.each { |e| Reducer.apply(e, s) }
-        s.record_observation(iri.canonical) if s.respond_to?(:record_observation)
+      addition = batch do
+        # Derived inside the batch, which may have just adopted activations.
+        events = events_for(iri)
+        events.each { |e| Reducer.apply(e, @storage) }
+        @storage.record_observation(iri.canonical) if @storage.respond_to?(:record_observation)
+        events.find { |e| e.is_a?(Event::ClusterAddition) }
       end
 
-      addition = events.find { |e| e.is_a?(Event::ClusterAddition) }
       Observation.new(corpus: self, identifier: iri, cluster_key: addition.key)
     end
 
@@ -119,13 +124,13 @@ module Iriq
     # Wrapped in a single backend transaction so a failure mid-replay
     # leaves the prior views intact.
     def reinfer
-      @storage.transaction do |s|
+      batch do
         iris = []
-        s.each_observed_iri { |canonical| iris << canonical }
-        s.clear_materialized_views
+        @storage.each_observed_iri { |canonical| iris << canonical }
+        @storage.clear_materialized_views
         iris.each do |canonical|
           iri = Parser.parse(canonical)
-          events_for(iri).each { |e| Reducer.apply(e, s) }
+          events_for(iri).each { |e| Reducer.apply(e, @storage) }
         end
       end
       nil
@@ -151,38 +156,28 @@ module Iriq
       strategies.flat_map { |s| s.propose(@storage, **opts) }
     end
 
-    # Promote a RecognizerProposal into a live Recognizer for this corpus.
-    #
-    # Mechanics:
-    #   1. Synthesize a SynthesizedRecognizer from the proposal's prefix.
-    #   2. Switch to a per-corpus classifier (if we were sharing the
-    #      module-level DEFAULT) so activation doesn't leak to other
-    #      corpora using the same default singleton.
-    #   3. Register the Recognizer on the classifier — the ensemble
-    #      picks it up on the next classify() call.
-    #   4. Persist the activation in storage so reopens re-apply it.
-    #   5. Reinfer so existing observations get re-classified through
-    #      the new Recognizer.
+    # Promote a RecognizerProposal into a live Recognizer for this corpus:
+    # store the activation, then reinfer existing observations through it.
+    # Both commit in one transaction — a failure leaves neither behind, in
+    # storage or in this corpus's classifier. Activating a recognizer the
+    # corpus already holds changes nothing.
     #
     # Returns the synthesized Recognizer.
     def activate_proposal(proposal)
       recognizer = SynthesizedRecognizer.from_proposal(proposal)
-      ensure_per_corpus_classifier!
-      @classifier.register_recognizer(recognizer)
-      if @storage.respond_to?(:record_activated_recognizer)
-        @storage.record_activated_recognizer(recognizer.to_dump)
-      end
-      reinfer
+      activate(recognizer)
       recognizer
     end
 
     # Convenience: activate every proposal whose confidence clears the
-    # given threshold. Returns the activated Recognizers. Confidence
-    # incorporates both per-position coverage AND cross-host
+    # given threshold. Returns the Recognizers this call newly activated.
+    # Confidence incorporates both per-position coverage AND cross-host
     # corroboration — see RecognizerProposal#compute_confidence.
     def activate_proposals_above(confidence_threshold, **propose_opts)
-      proposals = propose_recognizers(**propose_opts)
-      proposals.select { |p| p.confidence >= confidence_threshold }.map { |p| activate_proposal(p) }
+      propose_recognizers(**propose_opts)
+        .select { |p| p.confidence >= confidence_threshold }
+        .map { |p| SynthesizedRecognizer.from_proposal(p) }
+        .select { |r| activate(r) }
     end
 
     # Number of activated recognizers persisted with this corpus.
@@ -377,31 +372,59 @@ module Iriq
     # Wrap many observations in a single backend transaction. For SQLite this
     # turns thousands of fsyncs into one; for in-memory backends it's a
     # no-op. Use when ingesting a batch.
-    def batch(&block)
-      @storage.batch(&block)
+    #
+    # Every write runs in one, and classifies with exactly the activations
+    # stored as of its start — including any another connection committed.
+    def batch
+      @storage.batch do |changed|
+        reapply_activated_recognizers! if changed
+        yield
+      end
     end
 
     private
 
-    # If we're still sharing the module-level DEFAULT classifier, switch
-    # to our own copy so register_recognizer doesn't leak into other
-    # corpora using the same default singleton.
-    def ensure_per_corpus_classifier!
-      return if @classifier != SegmentClassifier::DEFAULT
+    # Whether this call activated `recognizer`. The dedup check runs under
+    # the write lock, so two corpora racing to activate it can't both win.
+    def activate(recognizer)
+      dump = recognizer.to_dump
+      previous = nil
+      activated = batch do
+        next false if stored_activations.include?(dump)
 
-      @classifier = SegmentClassifier.new
+        previous = [@classifier, @activations]
+        @storage.record_activated_recognizer(dump)
+        reapply_activated_recognizers!
+        reinfer
+        true
+      end
+      previous = nil
+      activated
+    ensure
+      # A rolled-back activation mustn't linger in the classifier.
+      @classifier, @activations = previous if previous
     end
 
-    # On Corpus.open, walk the stored activations and register each one
-    # on this corpus's classifier. Switches to a per-corpus classifier
-    # if any activations exist.
-    def reapply_activated_recognizers!
-      return if @storage.activated_recognizer_count.zero?
+    def stored_activations
+      [].tap { |stored| @storage.each_activated_recognizer { |dump| stored << dump } }
+    end
 
-      ensure_per_corpus_classifier!
-      @storage.each_activated_recognizer do |dump|
-        @classifier.register_recognizer(SynthesizedRecognizer.from_dump(dump))
+    # The classifier is a function of the stored activations: the base
+    # classifier when there are none, otherwise a private copy of it holding
+    # exactly the stored set (so nothing leaks into a shared DEFAULT). Rebuilt
+    # only when the set changed, so the classifier keeps its cache.
+    def reapply_activated_recognizers!
+      stored = stored_activations
+      return if stored == @activations
+
+      @classifier = if stored.empty?
+        @base_classifier
+      else
+        @base_classifier.dup.tap do |c|
+          stored.each { |dump| c.register_recognizer(SynthesizedRecognizer.from_dump(dump)) }
+        end
       end
+      @activations = stored
     end
 
     def coerce(input)
