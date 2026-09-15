@@ -62,25 +62,47 @@ $ iriq -n https://shop.com/pricing/usd?currency=eur
 https://shop.com/pricing/USD?currency=EUR     # currency upcased
 ```
 
-```sh
-$ cat access.log | iriq                       # ≥ 10 IRIs → cluster view
-[190] docs.example.com  /users/{user_id}
-[186] app.example.com   /users/{user_id}
-...
-
-$ cat access.log | iriq --stats               # rolling aggregates
-$ iriq ./access.log -n                        # auto-detect file → normalize each
-$ iriq -J < access.log                        # newline-delimited JSON
-$ iriq --corpus team.db < access.log          # use a specific corpus file
-```
-
-Per-IRI output (`-n`, `-p`, `-c`, `-J`) streams — each line is read, classified,
-and flushed as it arrives, so iriq works on an unbounded live feed:
+Pipe in text, or name a file, and iriq extracts every URL in it:
 
 ```sh
-$ tail -f access.log | iriq -n                # one shape per line, as logs land
-$ tail -f access.log | iriq -J                # same, as newline-delimited JSON
+$ cat urls.log | iriq                         # ≥ 10 IRIs → cluster view
+[6] api.example.com  /api/{version}/users/{user_id}
+    https://api.example.com/api/v1/users/123
+    https://api.example.com/api/v1/users/456
+    https://api.example.com/api/v1/users/789
+    + 3 more
+
+[3] api.example.com  /orders/{order_uuid}
+    https://api.example.com/orders/5f0c6a52-8b2e-4c1a-9f3d-2e7b1c9a0d11?status=open
+    https://api.example.com/orders/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d?status=closed
+    https://api.example.com/orders/7c9e6679-7425-40de-944b-e07fc1f90ae7?status=open
+    status  string  conf 0.17  (2 distinct, 100%)
+
+[3] api.example.com  /products/{product_id}
+    https://api.example.com/products/blue-widget
+    https://api.example.com/products/red-gadget
+    https://api.example.com/products/green-gizmo
+
+$ cat urls.log | iriq --stats                 # rolling aggregates
+$ iriq urls.log -n                            # a file argument → normalize each URL
+$ iriq -nJ < urls.log                         # one JSON line per URL
+$ iriq --corpus team.db < urls.log            # use a specific corpus file
 ```
+
+Reading a web server's access log? Its request lines have no host, so see
+[Access logs](#access-logs) first.
+
+Per-IRI sections (`-n`, `-c`, `-p`, `-e`) stream: each line is read, observed,
+rendered from the corpus as it stands, and flushed, so iriq works on an
+unbounded live feed:
+
+```sh
+$ tail -f app.log | iriq -n                   # one shape per line, as logs land
+$ tail -f app.log | iriq -nJ                  # same, as newline-delimited JSON
+```
+
+`-J` on its own doesn't stream. Like the default view, it waits for the end of
+input, then prints the URL list (fewer than 10 IRIs) or one object per cluster.
 
 **Every invocation observes into a persistent corpus by default**, so iriq gets
 smarter the more you run it. The corpus-only types (e.g. `enum` / `http_status`)
@@ -101,11 +123,20 @@ $ iriq --corpus demo.db cluster
     https://api.foo.com/orders/1?status=closed
     https://api.foo.com/orders/2?status=open
     + 37 more
-    status  enum  (2 distinct, 100%)
+    status  enum  conf 0.73  (2 distinct, 100%)
 ```
 
-These learned types also flow into normalized output: once the corpus has pegged
-`?status` as an enum, `iriq -n …?status=open` renders `?status={enum}`.
+`conf` is how much evidence backs the type, from 0 to 1. These learned types
+also flow into normalized output:
+
+```sh
+$ iriq --corpus demo.db -n 'https://api.foo.com/orders/99?status=open'
+https://api.foo.com/orders/{order_id}?status={enum}
+```
+
+The corpus only acts on evidence: it changes a shape only at a position or
+param it has seen at least 5 times. Until then, `-n` prints exactly what `-C`
+would. Dates and currencies always print canonically (`2024-01-15`, `USD`).
 
 The default corpus lives at `$XDG_DATA_HOME/iriq/default.db` (Linux),
 `~/Library/Application Support/iriq/default.db` (macOS), or
@@ -117,7 +148,7 @@ $ iriq --no-corpus -n https://foo.com/users/123    # one-shot ephemeral; or -C
 $ IRIQ_NO_CORPUS=1 iriq -n https://foo.com/users/123  # globally disable
 $ IRIQ_CORPUS=/path/to/work.db iriq -n https://foo.com/users/123  # override path
 $ iriq --corpus team.db https://foo.com/users/123  # explicit override (wins over env)
-$ iriq --reset                                     # delete the corpus DB and exit
+$ iriq --reset                                     # delete the corpus and exit
 ```
 
 ### Two ways to normalize
@@ -129,8 +160,9 @@ Pick by the question you're asking:
   lowercased, default port dropped; path and query left alone). Handy, but
   table stakes — plenty of libraries do it.
 - **`--normalize`** *(the default)* — find the URL's *shape*, erasing the
-  specifics into placeholders. `…/pull/42` → `…/pull/{id}`. This is the part
-  you came to iriq for.
+  specifics into placeholders. `…/pull/42` → `…/pull/{pull_id}`. A shape
+  ignores the `#fragment`, so `-n` drops it. This is the part you came to iriq
+  for.
 
 Same input, two questions: "what's the clean form of *this* URL?" vs "what
 *kind* of URL is this?" The second is iriq's reason to exist.
@@ -141,7 +173,7 @@ Same input, two questions: "what's the clean form of *this* URL?" vs "what
 # Homebrew (recommended)
 brew install dpep/tools/iriq
 
-# Cargo, from crates.io
+# Cargo, from crates.io (Rust 1.85 or newer)
 cargo install iriq
 ```
 
@@ -186,7 +218,8 @@ what produces `{user_id}` from `/users/123` and `{order_id}` from `/orders/456`.
 Semantic types (`version`, `locale`, `currency`, `date`, `boolean`) skip the
 hint and surface as `{type}` — `/api/v1/status` renders as `/api/{version}/status`,
 not the misleading `/api/{api_id}/status`. Pass `-N` / `--no-hints` for
-mechanical placeholders (`{integer}` instead of `{user_id}`).
+mechanical placeholders (`{integer}` instead of `{user_id}`); a slot only the
+corpus knows is variable renders `{value}`.
 
 ### Types only the corpus can see
 
@@ -209,9 +242,43 @@ so classification improves as more data comes in — handy for an unbounded stre
 of identifiers. The default corpus already persists; `--corpus PATH` points iriq
 at a specific file instead, to keep separate corpora or share one across runs.
 
-A `.db` / `.sqlite` / `.sqlite3` path is stored in SQLite (WAL journaling, incremental
-UPSERTs — multiple `iriq --corpus` processes can write concurrently); a
-`.json` path writes a plain JSON file instead.
+The extension picks the backend, and the two behave differently:
+
+- **`.db` / `.sqlite` / `.sqlite3` (SQLite)** — the default, and the one to
+  share. Many `iriq` processes can write at once; each waits up to 30 seconds
+  for another's transaction to finish. `--reinfer` runs as one transaction, and
+  writers wait for it. Use SQLite for streams and concurrent writers.
+- **Anything else (JSON)** — read when iriq starts and written once, when it
+  exits cleanly. It's single-writer: when two processes use one file, the last
+  to exit wins. A streaming run that's killed, Ctrl-C included, saves nothing.
+
+A few things to know:
+
+- The cluster view (`iriq cluster`, or 10+ piped IRIs) shows the whole corpus,
+  not just this input. Add `-C` to cluster one input on its own.
+- iriq keeps every IRI it observes, repeats included, so `--reinfer` can replay
+  them. That log grows without bound.
+- `--reset` deletes the corpus file, its SQLite `-wal` / `-shm` sidecars, and any
+  temp files a JSON save left behind. Don't reset a corpus another process is
+  writing: that process carries on, exits 0, and its writes are lost with the
+  deleted file.
+- iriq refuses a corpus file it can't safely use rather than overwrite it — a
+  JSON file that isn't an iriq corpus, or a SQLite corpus written by a newer
+  iriq (upgrade to open it).
+
+### Host keying
+
+By default every hostname gets its own clusters. `--host reg` keys by
+registrable domain, so `api.foo.com` and `www.foo.com` both cluster under
+`foo.com`; `--host none` ignores the host. The mode applies when observations
+are recorded, when you `--reinfer`, and to a `-C` run's throwaway corpus. It
+doesn't re-key a report of an existing corpus: `iriq --host reg cluster` shows
+the clusters as they were recorded. To re-key a corpus, reinfer it:
+
+```sh
+$ iriq --corpus c.db --host reg --reinfer
+reinferred 3 observations: 3 → 1 cluster
+```
 
 ### Re-runnable inference
 
@@ -271,6 +338,42 @@ Known limitations (intentional):
 
 Disable scheme-less extraction with `--no-scheme-less`.
 
+### Access logs
+
+Extraction needs URLs with a host. A web server's request line
+(`"GET /api/v1/users/123 HTTP/1.1"`) has none, so on a raw access log iriq
+finds only the full URLs on each line, usually the Referer:
+
+```sh
+$ cat access.log | iriq
+[12] example.com  /referrer
+    https://example.com/referrer
+    + 11 more
+```
+
+Pull out the path and give it a host first. In the common and combined log
+formats, the path is the seventh field:
+
+```sh
+$ awk '{print "https://api.example.com" $7}' access.log | iriq
+[6] api.example.com  /api/{version}/users/{user_id}
+    https://api.example.com/api/v1/users/123
+    https://api.example.com/api/v1/users/456
+    https://api.example.com/api/v1/users/789
+    + 3 more
+
+[3] api.example.com  /orders/{order_uuid}
+    https://api.example.com/orders/5f0c6a52-8b2e-4c1a-9f3d-2e7b1c9a0d11?status=open
+    https://api.example.com/orders/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d?status=closed
+    https://api.example.com/orders/7c9e6679-7425-40de-944b-e07fc1f90ae7?status=open
+    status  string  conf 0.17  (2 distinct, 100%)
+
+[3] api.example.com  /products/{product_id}
+    https://api.example.com/products/blue-widget
+    https://api.example.com/products/red-gadget
+    https://api.example.com/products/green-gizmo
+```
+
 ## How it works
 
 Under the shape sits one idea: **Position + Evidence**. A *Position* is a slot
@@ -285,24 +388,26 @@ underneath. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full model.
 **Single input** — combined parse + normalize summary; trim with section flags
 (`-p`, `-n`).
 
-**Piped stdin** — extraction runs by default. Output auto-switches: small inputs
-get a deduplicated URL list, larger inputs (≥ 10 IRIs) get the cluster view via
-an ephemeral corpus.
+**Piped stdin, or a file argument** — extraction runs by default. With no
+section flag, iriq reads all of the input, then prints a deduplicated URL list
+(fewer than 10 IRIs) or the cluster view of the corpus (10 or more). With a
+section flag, it prints each IRI's result as the line arrives. `-n` is
+corpus-informed; `-e` is mechanical even with a corpus.
 
 | Flag                | Effect                                                  |
 | ------------------- | ------------------------------------------------------- |
 | `-p, --parse`       | Show parsed fields                                      |
 | `-n, --normalize`   | Show the shape-normalized form                          |
 | `-c, --canonical`   | Show the canonical form (no shape normalization)        |
-| `-e, --explain`     | Annotated trace — per-segment notes about why each placeholder / canonical value was chosen |
+| `-e, --explain`     | Annotated trace — per-segment notes about why each placeholder / canonical value was chosen. Mechanical, even with a corpus |
 | `-j, --json`        | Emit JSON                                               |
-| `-J, --ndjson`      | Newline-delimited JSON (one object per line); implies `--json` |
+| `-J, --ndjson`      | Newline-delimited JSON; implies `--json`. With a section flag (`-nJ`), one line per IRI as it arrives; alone, the URL list or clusters at end of input |
 | `-N, --no-hints`    | Use `{integer}` etc. instead of `{user_id}`             |
 | `--no-scheme-less`  | Skip `foo.com/path`-style extraction (explicit-scheme only) |
 | `--corpus PATH`     | Use a specific corpus file (`.json` or `.db`/`.sqlite`/`.sqlite3`). Overrides the default |
 | `-C, --no-corpus`   | Disable corpus persistence for this invocation (same as `IRIQ_NO_CORPUS=1`) |
-| `--reset`           | Delete the corpus database and exit                     |
-| `--host MODE`       | Host-keying for clustering: `full` (default), `reg` strips subdomains, `none` ignores host |
+| `--reset`           | Delete the corpus file, its SQLite sidecars and JSON temp files, and exit |
+| `--host MODE`       | Host keying: `full` (default), `reg` strips subdomains, `none` ignores host. Applies when observing, to `--reinfer`, and with `-C` |
 | `--stats`           | Print rolling aggregates                                |
 | `--reinfer`         | Drop the materialized views and replay the source-IRI log through the current classifier + reducers |
 | `--propose-recognizers` | Scan observed values for shape patterns that recur enough to suggest a new recognizer. Combine with `--json` for structured output |
@@ -311,6 +416,7 @@ an ephemeral corpus.
 | `--min-coverage F`      | Proposal threshold; default 0.7                   |
 | `--min-hosts N`         | Threshold for both proposals and cross-host shapes; default 1 / 2 respectively |
 | `--activate-above F`    | With `--propose-recognizers`, auto-activate every proposal whose confidence is ≥ F |
+| `cluster [file]`        | Force the cluster view                            |
 | `completion bash\|zsh`  | Print shell completion script (Homebrew installs this automatically) |
 | `-V, --version`     | Print version                                           |
 
@@ -321,11 +427,21 @@ Environment variables:
 | `IRIQ_CORPUS=PATH`   | Set the corpus path (overrides the default)             |
 | `IRIQ_NO_CORPUS=1`   | Disable the default corpus (equivalent to `-C`)         |
 
-A positional argument that doesn't parse as an IRI but IS an existing file is
-read and extracted from automatically — `iriq ./access.log` and
-`iriq /var/log/foo.log` Just Work. (pipe with `cat` to disambiguate)
+A positional argument that names an existing file is read as a file, unless it
+contains `://` — `iriq access.log` and `iriq /var/log/foo.log` both work. A
+path-like argument (`/x`, `./x`, `../x`) that doesn't exist is an error; a bare
+name that isn't a file, like `foo.log`, parses as a host (`https://foo.log/`).
 
-Exit codes: `0` success, `1` usage error, `2` parse error.
+Errors go to stderr as `iriq: MESSAGE`, or, with `--json` / `-J`, as
+`{"error":{"code":"…","message":"…"}}`. A corpus error names the file:
+`iriq: corpus team.db: attempt to write a readonly database`.
+
+| Exit  | Meaning | JSON codes |
+| ----- | ------- | ---------- |
+| `0`   | Success | |
+| `1`   | Bad option or argument, missing or unreadable input, unusable corpus, or stdout failed | `option_error`, `unknown_shell`, `file_not_found`, `read_error`, `invalid_utf8`, `corpus_error`, `stdout_error` |
+| `2`   | The input isn't a parseable IRI | `parse_error` |
+| `141` | The reader went away (`iriq … \| head`); iriq stops quietly | |
 
 ## Rust library
 
@@ -334,23 +450,36 @@ cargo add iriq
 ```
 
 ```rust
-use iriq::{parse, normalize, Corpus};
+use iriq::{normalize, parse, Corpus};
 
-let iri = parse("https://foo.com/users/123")?;
-iri.host;             // "foo.com"
-iri.path_segments;    // ["users", "123"]
-iri.canonical();      // "https://foo.com/users/123"
+fn main() -> iriq::Result<()> {
+    let iri = parse("https://foo.com/users/123")?;
+    println!("{} {:?}", iri.host, iri.path_segments); // foo.com ["users", "123"]
+    println!("{}", normalize("https://foo.com/users/123")?); // https://foo.com/users/{user_id}
 
-normalize("https://foo.com/users/123")?;   // "https://foo.com/users/{user_id}"
-
-// Streaming clustering against a persistent corpus.
-let mut corpus = Corpus::open("c.db")?;
-corpus.observe("https://foo.com/users/1")?;
-corpus.save("c.db")?;
+    // A persistent corpus: SQLite for .db, JSON otherwise.
+    let mut corpus = Corpus::open("c.db")?;
+    for n in 1..=3 {
+        corpus.observe(&format!("https://foo.com/users/{n}"))?;
+    }
+    for cluster in corpus.clusters()? {
+        println!("[{}] {} {}", cluster.count, cluster.host, cluster.shape); // [3] foo.com /users/{user_id}
+    }
+    corpus.save("c.db")?; // flushes in place; a .json corpus is written only here
+    Ok(())
+}
 ```
 
-Full API on [docs.rs/iriq](https://docs.rs/iriq); see the
-[crate README](rust/iriq/README.md) for the library tour.
+Every `Corpus` operation returns `iriq::Result`, whose `iriq::Error` names the
+corpus that failed. SQLite comes from the default-on `sqlite` feature;
+`cargo add iriq --no-default-features` drops it and keeps in-memory and JSON
+corpora. Requires Rust 1.85 or newer. A long-lived `Corpus` sees recognizers
+another process activated at its next `batch` or `observe`, not in reads
+outside one.
+
+The [crate README](rust/iriq/README.md) is the library tour: reading clusters
+and params, batches, sharing a corpus, and errors. Full API on
+[docs.rs/iriq](https://docs.rs/iriq).
 
 ## Limitations (intentional)
 
