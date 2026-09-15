@@ -158,31 +158,25 @@ module Iriq
     # Promote a RecognizerProposal into a live Recognizer for this corpus:
     # store the activation, then reinfer existing observations through it.
     # Both commit in one transaction — a failure leaves neither behind, in
-    # storage or in this corpus's classifier.
+    # storage or in this corpus's classifier. Activating a recognizer the
+    # corpus already holds changes nothing.
     #
     # Returns the synthesized Recognizer.
     def activate_proposal(proposal)
       recognizer = SynthesizedRecognizer.from_proposal(proposal)
-      previous = nil
-      batch do
-        previous = [@classifier, @activations]
-        @storage.record_activated_recognizer(recognizer.to_dump)
-        reapply_activated_recognizers!
-        reinfer
-      end
-      previous = nil
+      activate(recognizer)
       recognizer
-    ensure
-      @classifier, @activations = previous if previous
     end
 
     # Convenience: activate every proposal whose confidence clears the
-    # given threshold. Returns the activated Recognizers. Confidence
-    # incorporates both per-position coverage AND cross-host
+    # given threshold. Returns the Recognizers this call newly activated.
+    # Confidence incorporates both per-position coverage AND cross-host
     # corroboration — see RecognizerProposal#compute_confidence.
     def activate_proposals_above(confidence_threshold, **propose_opts)
-      proposals = propose_recognizers(**propose_opts)
-      proposals.select { |p| p.confidence >= confidence_threshold }.map { |p| activate_proposal(p) }
+      propose_recognizers(**propose_opts)
+        .select { |p| p.confidence >= confidence_threshold }
+        .map { |p| SynthesizedRecognizer.from_proposal(p) }
+        .select { |r| activate(r) }
     end
 
     # Number of activated recognizers persisted with this corpus.
@@ -383,13 +377,37 @@ module Iriq
 
     private
 
+    # Whether this call activated `recognizer`. The dedup check runs under
+    # the write lock, so two corpora racing to activate it can't both win.
+    def activate(recognizer)
+      dump = recognizer.to_dump
+      previous = nil
+      activated = batch do
+        next false if stored_activations.include?(dump)
+
+        previous = [@classifier, @activations]
+        @storage.record_activated_recognizer(dump)
+        reapply_activated_recognizers!
+        reinfer
+        true
+      end
+      previous = nil
+      activated
+    ensure
+      # A rolled-back activation mustn't linger in the classifier.
+      @classifier, @activations = previous if previous
+    end
+
+    def stored_activations
+      [].tap { |stored| @storage.each_activated_recognizer { |dump| stored << dump } }
+    end
+
     # The classifier is a function of the stored activations: the base
     # classifier when there are none, otherwise a private copy of it holding
     # exactly the stored set (so nothing leaks into a shared DEFAULT). Rebuilt
     # only when the set changed, so the classifier keeps its cache.
     def reapply_activated_recognizers!
-      stored = []
-      @storage.each_activated_recognizer { |dump| stored << dump }
+      stored = stored_activations
       return if stored == @activations
 
       @classifier = if stored.empty?

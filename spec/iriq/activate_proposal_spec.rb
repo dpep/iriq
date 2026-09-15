@@ -106,4 +106,46 @@ describe "Recognizer auto-activation" do
       expect(corpus.activate_proposals_above(1.5)).to be_empty
     end
   end
+
+  describe "activating a recognizer the corpus already holds" do
+    it "changes nothing" do
+      observe_pat_stream
+      proposal = corpus.propose_recognizers.first
+      corpus.activate_proposal(proposal)
+      expect(corpus).not_to receive(:reinfer)
+
+      corpus.activate_proposal(proposal)
+
+      expect(corpus.activated_recognizer_count).to eq(1)
+      expect(corpus.classifier.recognizers.grep(Iriq::SynthesizedRecognizer).size).to eq(1)
+    end
+
+    it "changes nothing when another corpus on the same file activated it" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "corpus.db")
+        first = Iriq::Corpus.open(path)
+        25.times { |i| first.observe("https://api.github.com/auth/ghp_aaaa#{i.to_s.rjust(4, '0')}xyzzy") }
+        proposal = first.propose_recognizers.first
+        second = Iriq::Corpus.open(path)
+        first.activate_proposal(proposal)
+        expect(second).not_to receive(:reinfer)
+
+        second.activate_proposal(proposal)
+
+        expect(second.activated_recognizer_count).to eq(1)
+        first.close
+        second.close
+      end
+    end
+
+    it "isn't reported by activate_proposals_above" do
+      observe_pat_stream
+      stale = corpus.propose_recognizers.first
+      corpus.activate_proposal(stale)
+      # A proposal made before the activation still clears the threshold.
+      allow(corpus).to receive(:propose_recognizers).and_return([stale])
+
+      expect(corpus.activate_proposals_above(0.5)).to be_empty
+    end
+  end
 end
