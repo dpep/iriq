@@ -14,7 +14,7 @@ use crate::parser::parse;
 use crate::position::{Position, PositionScope};
 use crate::position_stats::{PositionStats, DEFAULT_MAX_VALUES_PER_POSITION};
 use crate::storage::{PositionEvidence, Storage};
-use crate::storage_json::rebuild_numeric_stats;
+use crate::storage_json::load_counts;
 use crate::storage_memory::MemoryStorage;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{Map, Value};
@@ -145,15 +145,16 @@ impl SqliteStorage {
             };
             let mut ps = PositionStats::new(self.max_values);
             ps.total = total as usize;
-            ps.value_counts = c
+            let values: Vec<(String, usize)> = c
                 .prepare_cached(
-                    "SELECT value, count FROM position_values WHERE host = ? AND scope = ? AND locator = ?",
+                    "SELECT value, count FROM position_values WHERE host = ? AND scope = ? AND locator = ? \
+                     ORDER BY value",
                 )?
                 .query_map(key, |r| {
                     Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as usize))
                 })?
                 .collect::<rusqlite::Result<_>>()?;
-            ps.type_counts = c
+            let types: HashMap<SegmentType, usize> = c
                 .prepare_cached(
                     "SELECT type, count FROM position_types WHERE host = ? AND scope = ? AND locator = ?",
                 )?
@@ -164,7 +165,7 @@ impl SqliteStorage {
                     ))
                 })?
                 .collect::<rusqlite::Result<_>>()?;
-            rebuild_numeric_stats(&mut ps);
+            load_counts(&mut ps, values, types);
             Ok(Some(ps))
         })
     }
@@ -536,15 +537,16 @@ impl Storage for SqliteStorage {
             };
             let mut stats = PositionStats::new(self.max_values);
             stats.total = total as usize;
-            stats.value_counts = c
+            let values: Vec<(String, usize)> = c
                 .prepare_cached(
-                    "SELECT value, count FROM cluster_param_values WHERE cluster_key = ? AND name = ?",
+                    "SELECT value, count FROM cluster_param_values WHERE cluster_key = ? AND name = ? \
+                     ORDER BY value",
                 )?
                 .query_map(params![cluster_key, name], |r| {
                     Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as usize))
                 })?
                 .collect::<rusqlite::Result<_>>()?;
-            stats.type_counts = c
+            let types: HashMap<SegmentType, usize> = c
                 .prepare_cached(
                     "SELECT type, count FROM cluster_param_types WHERE cluster_key = ? AND name = ?",
                 )?
@@ -555,7 +557,7 @@ impl Storage for SqliteStorage {
                     ))
                 })?
                 .collect::<rusqlite::Result<_>>()?;
-            rebuild_numeric_stats(&mut stats);
+            load_counts(&mut stats, values, types);
             Ok(Some(stats))
         };
         read().map_err(|e| Error::sqlite(&self.path, e))
@@ -806,8 +808,10 @@ fn load_cluster(c: &Connection, key: &str, max_values: usize) -> rusqlite::Resul
         stats.total = total;
         cluster.param_stats.insert(name, stats);
     }
+    let mut values: HashMap<String, Vec<(String, usize)>> = HashMap::new();
     let mut stmt = c.prepare_cached(
-        "SELECT name, value, count FROM cluster_param_values WHERE cluster_key = ?",
+        "SELECT name, value, count FROM cluster_param_values WHERE cluster_key = ? \
+         ORDER BY name, value",
     )?;
     let rows = stmt.query_map(params![key], |r| {
         Ok((
@@ -818,10 +822,9 @@ fn load_cluster(c: &Connection, key: &str, max_values: usize) -> rusqlite::Resul
     })?;
     for row in rows {
         let (name, value, count) = row?;
-        if let Some(stats) = cluster.param_stats.get_mut(&name) {
-            stats.value_counts.insert(value, count);
-        }
+        values.entry(name).or_default().push((value, count));
     }
+    let mut types: HashMap<String, HashMap<SegmentType, usize>> = HashMap::new();
     let mut stmt = c.prepare_cached(
         "SELECT name, type, count FROM cluster_param_types WHERE cluster_key = ?",
     )?;
@@ -834,12 +837,17 @@ fn load_cluster(c: &Connection, key: &str, max_values: usize) -> rusqlite::Resul
     })?;
     for row in rows {
         let (name, ty, count) = row?;
-        if let Some(stats) = cluster.param_stats.get_mut(&name) {
-            stats.type_counts.insert(segment_type_from_name(&ty), count);
-        }
+        types
+            .entry(name)
+            .or_default()
+            .insert(segment_type_from_name(&ty), count);
     }
-    for stats in cluster.param_stats.values_mut() {
-        rebuild_numeric_stats(stats);
+    for (name, stats) in cluster.param_stats.iter_mut() {
+        load_counts(
+            stats,
+            values.remove(name).unwrap_or_default(),
+            types.remove(name).unwrap_or_default(),
+        );
     }
     Ok(Some(cluster))
 }

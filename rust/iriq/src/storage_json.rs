@@ -484,50 +484,58 @@ fn parse_position_stats(obj: &Map<String, Value>) -> PositionStats {
         max
     });
     ps.total = obj.get("total").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-    if let Some(vc) = obj.get("value_counts").and_then(|v| v.as_object()) {
-        for (k, v) in vc {
-            if let Some(n) = v.as_u64() {
-                ps.value_counts.insert(k.clone(), n as usize);
-            }
-        }
-    }
-    if let Some(tc) = obj.get("type_counts").and_then(|v| v.as_object()) {
-        for (k, v) in tc {
-            if let Some(n) = v.as_u64() {
-                ps.type_counts
-                    .insert(crate::classifier::segment_type_from_name(k), n as usize);
-            }
-        }
-    }
-    rebuild_numeric_stats(&mut ps);
+    // In file order: serde_json's `preserve_order` keeps it.
+    let counts = |key: &str| -> Vec<(String, usize)> {
+        obj.get(key)
+            .and_then(|v| v.as_object())
+            .map(|m| {
+                m.iter()
+                    .filter_map(|(k, v)| Some((k.clone(), v.as_u64()? as usize)))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let types = counts("type_counts")
+        .into_iter()
+        .map(|(name, n)| (crate::classifier::segment_type_from_name(&name), n))
+        .collect();
+    load_counts(&mut ps, counts("value_counts"), types);
     ps
 }
 
-/// Rebuild a reloaded position's numeric range from its value counts, by the
-/// rule `PositionStats::observe` applies live: only integer/float positions
-/// have a range, and a value that overflows to ±inf counts as an observation
-/// but never enters min/max/avg. Lossy at the value cap: values dropped there
-/// are gone from the range too.
-pub(crate) fn rebuild_numeric_stats(stats: &mut PositionStats) {
+/// Fill a reloaded position's value and type counts, rebuilding its numeric
+/// range by the rule `PositionStats::observe` applies live: only integer/float
+/// positions have a range, and a value that overflows to ±inf counts as an
+/// observation but never enters min/max/avg. Lossy at the value cap: values
+/// dropped there are gone from the range too.
+///
+/// `values` come in the order the corpus stores them. The float sum depends on
+/// the order, and a hash map's would change `avg` from one load to the next.
+pub(crate) fn load_counts(
+    stats: &mut PositionStats,
+    values: Vec<(String, usize)>,
+    types: HashMap<SegmentType, usize>,
+) {
+    stats.type_counts = types;
     let numeric = [SegmentType::Integer, SegmentType::Float]
         .iter()
         .any(|t| stats.type_counts.get(t).is_some_and(|&n| n > 0));
-    if !numeric {
-        return;
-    }
-    for (value, &count) in &stats.value_counts {
-        let Some(num) = value.parse::<f64>().ok().filter(|n| n.is_finite()) else {
-            continue;
-        };
-        for _ in 0..count {
-            if stats.numeric_count == 0 || num < stats.numeric_min {
-                stats.numeric_min = num;
+    if numeric {
+        for (value, count) in &values {
+            let Some(num) = value.parse::<f64>().ok().filter(|n| n.is_finite()) else {
+                continue;
+            };
+            for _ in 0..*count {
+                if stats.numeric_count == 0 || num < stats.numeric_min {
+                    stats.numeric_min = num;
+                }
+                if stats.numeric_count == 0 || num > stats.numeric_max {
+                    stats.numeric_max = num;
+                }
+                stats.numeric_count += 1;
+                stats.numeric_sum += num;
             }
-            if stats.numeric_count == 0 || num > stats.numeric_max {
-                stats.numeric_max = num;
-            }
-            stats.numeric_count += 1;
-            stats.numeric_sum += num;
         }
     }
+    stats.value_counts = values.into_iter().collect();
 }
