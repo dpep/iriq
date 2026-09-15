@@ -1,0 +1,18 @@
+{
+  "query": "https://foo.com/d",
+  "inputs": [
+    "https://foo.com/d?f=b.pdf",
+    "https://foo.com/d?f=b.pdf",
+    "https://foo.com/d?f=b.pdf",
+    "https://foo.com/d?f=c.zzz"
+  ],
+  "expected": {
+    "f": {
+      "type": "file",
+      "kind_distribution": {
+        "document": 0.75,
+        "unknown": 0.25
+      }
+    }
+  }
+}

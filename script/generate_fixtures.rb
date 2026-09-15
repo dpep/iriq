@@ -49,9 +49,16 @@ PARSER_INPUTS = [
   "https://ΑΣ-x.com/users/1",
   # Fully-qualified (trailing-dot) host survives parsing verbatim.
   "https://api.foo.com./x",
+  "https://ΑΣ-x.com/",
+  "https://ΟΔΟΣ/x",
 ].freeze
 
 CLASSIFIER_INPUTS = [
+  # Unicode edges the Rust core lane converged onto Ruby: digit and space
+  # classes are ASCII (Nd digits aren't digits; NBSP doesn't end a URL), while
+  # the boolean match is case-insensitive with Unicode folding (ſ ~ s).
+  "٢٠٢٤-٠١-٠١", "2024٠١٠١", "v𝟎", "+1٥٥٥1234567", "4٥.5,-122.6",
+  "http://x.com/a b", "http://x.com/a b", "http://x.com/ab", "falſe",
   "users", "Profile", "123", "0", "9999999",
   "3.14", "-2.5", "1.0",
   "f47ac10b-58cc-4372-a567-0e02b2c3d479",
@@ -371,7 +378,8 @@ write_fixture("corpus_normalize", { "cases" => corpus_normalize_cases })
 
 # Numeric range — digit strings too long to be finite (±Infinity) still count
 # toward type/value counts but are excluded from min/max/avg. `huge` is all
-# non-finite (no range at all); `mixed` keeps only the finite values' range.
+# non-finite, so it has no range keys at all (absent, not null); `mixed` and
+# `v` keep only their finite values' range.
 huge = "1" * 400
 numeric_inputs = [
   "https://foo.com/n?mixed=#{huge}",
@@ -380,17 +388,15 @@ numeric_inputs = [
   "https://foo.com/n?mixed=5",
   "https://foo.com/n?huge=#{huge}",
   "https://foo.com/n?huge=9#{huge}",
+  "https://foo.com/n?v=1",
+  "https://foo.com/n?v=#{huge}",
 ]
 numeric_corpus = Iriq::Corpus.new
 numeric_inputs.each { |u| numeric_corpus.observe(u) }
 numeric_expected = numeric_corpus.params_for("https://foo.com/n").to_h do |row|
-  [row[:name], {
-    "type"  => row[:type].to_s,
-    "count" => row[:count],
-    "min"   => row[:min],
-    "max"   => row[:max],
-    "avg"   => row[:avg],
-  }]
+  entry = { "type" => row[:type].to_s, "count" => row[:count] }
+  %i[min max avg].each { |k| entry[k.to_s] = row[k] if row.key?(k) }
+  [row[:name], entry]
 end
 write_fixture("numeric_range", {
   "query"    => "https://foo.com/n",
@@ -398,11 +404,40 @@ write_fixture("numeric_range", {
   "expected" => numeric_expected,
 })
 
+# File param kinds — a value with an unrecognized extension lands in an
+# `unknown` bucket rather than being dropped from kind_distribution.
+file_inputs = (["https://foo.com/d?f=b.pdf"] * 3) + ["https://foo.com/d?f=c.zzz"]
+file_corpus = Iriq::Corpus.new
+file_inputs.each { |u| file_corpus.observe(u) }
+file_expected = file_corpus.params_for("https://foo.com/d").to_h do |row|
+  [row[:name], {
+    "type"              => row[:type].to_s,
+    "kind_distribution" => row[:kind_distribution]&.transform_keys(&:to_s),
+  }]
+end
+write_fixture("file_kind_distribution", {
+  "query"    => "https://foo.com/d",
+  "inputs"   => file_inputs,
+  "expected" => file_expected,
+})
+
+# canonical_date — ASCII date forms canonicalize to ISO; Unicode Nd digits
+# never form a date (nil).
+CANONICAL_DATE_INPUTS = [
+  "2024-01-15", "20240115", "2024/01/15", "01/15/2024", "1/5/2024",
+  "2024-٠١-١٥", "12/٣١/2024",
+].freeze
+canonical_date_cases = CANONICAL_DATE_INPUTS.map do |v|
+  { "input" => v, "canonical" => Iriq::SegmentClassifier.canonical_date(v) }
+end
+write_fixture("canonical_date", { "cases" => canonical_date_cases })
+
 # Registrable domain — the host key under --host registrable. Trailing-dot
-# (fully-qualified) and non-ASCII hosts are the known divergence edges.
+# (fully-qualified), empty-label, and non-ASCII hosts are the known edges.
 REGISTRABLE_HOSTS = [
   "api.foo.com", "api.foo.com.", "foo.com", "a.b.example.co.uk",
   "news.example.co.uk.", "localhost", "127.0.0.1", "ασ-x.com", "api.ασ-x.com",
+  "www.foo.co.uk.", "x.y.z...", "foo.com.", "a..b", "..", "١.٢.٣.٤",
 ].freeze
 registrable_cases = REGISTRABLE_HOSTS.map do |host|
   { "host" => host, "registrable" => Iriq::RegistrableDomain.for(host) }

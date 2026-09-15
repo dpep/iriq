@@ -420,6 +420,38 @@
         "nss": null,
         "canonical": "https://api.foo.com./x"
       }
+    },
+    {
+      "input": "https://ΑΣ-x.com/",
+      "identifier": {
+        "original": "https://ΑΣ-x.com/",
+        "kind": "url",
+        "scheme": "https",
+        "host": "ασ-x.com",
+        "port": null,
+        "path_segments": [],
+        "query_params": {},
+        "fragment": null,
+        "nss": null,
+        "canonical": "https://ασ-x.com"
+      }
+    },
+    {
+      "input": "https://ΟΔΟΣ/x",
+      "identifier": {
+        "original": "https://ΟΔΟΣ/x",
+        "kind": "url",
+        "scheme": "https",
+        "host": "οδοσ",
+        "port": null,
+        "path_segments": [
+          "x"
+        ],
+        "query_params": {},
+        "fragment": null,
+        "nss": null,
+        "canonical": "https://οδοσ/x"
+      }
     }
   ]
 }

@@ -35,6 +35,30 @@
     {
       "host": "api.ασ-x.com",
       "registrable": "ασ-x.com"
+    },
+    {
+      "host": "www.foo.co.uk.",
+      "registrable": "foo.co.uk"
+    },
+    {
+      "host": "x.y.z...",
+      "registrable": "y.z"
+    },
+    {
+      "host": "foo.com.",
+      "registrable": "foo.com."
+    },
+    {
+      "host": "a..b",
+      "registrable": ".b"
+    },
+    {
+      "host": "..",
+      "registrable": ".."
+    },
+    {
+      "host": "١.٢.٣.٤",
+      "registrable": "٣.٤"
     }
   ]
 }
