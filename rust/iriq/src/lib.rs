@@ -59,4 +59,4 @@ pub use trace::{trace, trace_identifier, TraceResult, TraceRow};
 #[doc(hidden)]
 pub use classifier::{canonical_date, SegmentClassifier};
 
-pub const VERSION: &str = "0.34.0";
+pub const VERSION: &str = "0.35.0";

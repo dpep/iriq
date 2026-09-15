@@ -1,4 +1,4 @@
-###  Unreleased
+###  0.35.0  (2026-09-15)
 
 A hardening round. Rust library consumers have migration work; CLI users mostly get fixes, plus a few rules made explicit.
 
