@@ -710,7 +710,9 @@ fn compute_classification(
     recognizers: &[std::sync::Arc<dyn Recognizer>],
 ) -> SegmentType {
     let bytes = segment.as_bytes();
-    let size = bytes.len();
+    // Ruby's String#size counts characters, and /i folds U+017F to `s`, so
+    // "falſe" must reach the 4..=5 boolean guard.
+    let size = segment.chars().count();
     if size == 0 {
         return SegmentType::Literal;
     }

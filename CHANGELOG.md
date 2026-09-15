@@ -1,6 +1,7 @@
 ###  Unreleased
 <!-- lane: rust-core -->
 - **Bugfix (Rust): a URL containing non-ASCII digits could crash the CLI.** A path segment or query value mixing ASCII digits with digits from another script (`https://x.com/1०००००००`, `?d=2024-٠١-١٥`) panicked in the classifier (exit 101). Rust now treats "digit" as ASCII `0-9`, as Ruby always has, so those values are plain literals.
+- **Bugfix (Rust): non-ASCII digits and spaces classified differently from Ruby.** `?v=1.٥` was `{float}` and `?v=v𝟎` was `{version}` (Ruby: literal); `?u=http://x.com/a<NBSP>b` stayed literal (Ruby: `{url}`, since only ASCII whitespace ends a URL); `registrable_domain("١.٢.٣.٤")` was treated as an IPv4 literal. Rust now matches Ruby on all of these.
 <!-- /lane: rust-core -->
 
 ###  0.34.0  (2026-08-12)
