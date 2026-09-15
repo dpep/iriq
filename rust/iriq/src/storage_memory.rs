@@ -1,5 +1,6 @@
 use crate::classifier::SegmentType;
 use crate::cluster::Cluster;
+use crate::errors::Result;
 use crate::identifier::Identifier;
 use crate::position::Position;
 use crate::position_stats::{PositionStats, DEFAULT_MAX_VALUES_PER_POSITION};
@@ -43,23 +44,27 @@ impl Storage for MemoryStorage {
         self.max_values
     }
 
-    fn increment_host(&mut self, host: &str) {
+    fn increment_host(&mut self, host: &str) -> Result<()> {
         *self.host_counts.entry(host.to_string()).or_insert(0) += 1;
+        Ok(())
     }
-    fn increment_path_length(&mut self, length: usize) {
+    fn increment_path_length(&mut self, length: usize) -> Result<()> {
         *self.path_length_counts.entry(length).or_insert(0) += 1;
+        Ok(())
     }
-    fn increment_raw_shape(&mut self, shape: &str) {
+    fn increment_raw_shape(&mut self, shape: &str) -> Result<()> {
         *self.raw_shape_counts.entry(shape.to_string()).or_insert(0) += 1;
+        Ok(())
     }
-    fn increment_fingerprint(&mut self, shape: &str) {
+    fn increment_fingerprint(&mut self, shape: &str) -> Result<()> {
         *self
             .fingerprint_counts
             .entry(shape.to_string())
             .or_insert(0) += 1;
+        Ok(())
     }
 
-    fn observe_position(&mut self, pos: &Position, value: &str, t: SegmentType) {
+    fn observe_position(&mut self, pos: &Position, value: &str, t: SegmentType) -> Result<()> {
         let max = self.max_values;
         if !self.position_stats.contains_key(pos) {
             self.position_stats
@@ -67,6 +72,7 @@ impl Storage for MemoryStorage {
             self.position_keys.push(pos.clone());
         }
         self.position_stats.get_mut(pos).unwrap().observe(value, t);
+        Ok(())
     }
 
     fn add_to_cluster(
@@ -76,7 +82,7 @@ impl Storage for MemoryStorage {
         scheme: &str,
         shape: &str,
         iri: &Identifier,
-    ) {
+    ) -> Result<()> {
         let max = self.max_values;
         if !self.clusters.contains_key(key) {
             self.clusters.insert(
@@ -92,6 +98,7 @@ impl Storage for MemoryStorage {
             self.cluster_keys.push(key.to_string());
         }
         self.clusters.get_mut(key).unwrap().add(iri);
+        Ok(())
     }
 
     fn host_counts(&self) -> HashMap<String, usize> {
@@ -144,8 +151,9 @@ impl Storage for MemoryStorage {
         self.clusters.len()
     }
 
-    fn record_observation(&mut self, canonical: &str) {
+    fn record_observation(&mut self, canonical: &str) -> Result<()> {
         self.observed_iris.push(canonical.to_string());
+        Ok(())
     }
     fn each_observed_iri(&self, f: &mut dyn FnMut(&str)) {
         for c in &self.observed_iris {
@@ -155,7 +163,7 @@ impl Storage for MemoryStorage {
     fn observed_iri_count(&self) -> usize {
         self.observed_iris.len()
     }
-    fn clear_materialized_views(&mut self) {
+    fn clear_materialized_views(&mut self) -> Result<()> {
         self.host_counts.clear();
         self.path_length_counts.clear();
         self.raw_shape_counts.clear();
@@ -164,9 +172,10 @@ impl Storage for MemoryStorage {
         self.position_keys.clear();
         self.clusters.clear();
         self.cluster_keys.clear();
+        Ok(())
     }
 
-    fn record_activated_recognizer(&mut self, dump: serde_json::Value) {
+    fn record_activated_recognizer(&mut self, dump: serde_json::Value) -> Result<()> {
         let prefix = dump
             .get("prefix")
             .and_then(|v| v.as_str())
@@ -175,11 +184,12 @@ impl Storage for MemoryStorage {
             for existing in &mut self.activated_recognizers {
                 if existing.get("prefix").and_then(|v| v.as_str()) == Some(p) {
                     *existing = dump;
-                    return;
+                    return Ok(());
                 }
             }
         }
         self.activated_recognizers.push(dump);
+        Ok(())
     }
     fn each_activated_recognizer(&self, f: &mut dyn FnMut(&serde_json::Value)) {
         for d in &self.activated_recognizers {
@@ -190,7 +200,7 @@ impl Storage for MemoryStorage {
         self.activated_recognizers.len()
     }
 
-    fn save_to(&mut self, path: &std::path::Path) -> crate::errors::Result<()> {
+    fn save_to(&mut self, path: &std::path::Path) -> Result<()> {
         crate::storage_json::dump_memory_to_json(self, path)
     }
 }

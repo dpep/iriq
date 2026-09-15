@@ -122,35 +122,31 @@ impl Corpus {
 
     pub fn observe(&mut self, input: &str) -> Result<()> {
         let iri = parse(input)?;
-        self.observe_iri(&iri);
-        Ok(())
+        self.observe_iri(&iri)
     }
 
-    pub fn observe_iri(&mut self, iri: &Identifier) {
-        let events = self.events_for_iri(iri);
-        for e in events {
-            apply_event(e, self.storage.as_mut());
-        }
-        self.storage.record_observation(&iri.canonical());
+    pub fn observe_iri(&mut self, iri: &Identifier) -> Result<()> {
+        self.replay(iri)?;
+        self.storage.record_observation(&iri.canonical())
     }
 
     /// Same as `observe` but used during `reinfer` — doesn't record the
     /// IRI again into the source log.
-    fn replay(&mut self, iri: &Identifier) {
-        let events = self.events_for_iri(iri);
-        for e in events {
-            apply_event(e, self.storage.as_mut());
+    fn replay(&mut self, iri: &Identifier) -> Result<()> {
+        for e in self.events_for_iri(iri) {
+            apply_event(e, self.storage.as_mut())?;
         }
+        Ok(())
     }
 
     pub fn reinfer(&mut self) -> Result<()> {
         let mut iris = Vec::new();
         self.storage
             .each_observed_iri(&mut |c| iris.push(c.to_string()));
-        self.storage.clear_materialized_views();
+        self.storage.clear_materialized_views()?;
         for canonical in iris {
             let iri = parse(&canonical)?;
-            self.replay(&iri);
+            self.replay(&iri)?;
         }
         Ok(())
     }
@@ -175,7 +171,7 @@ impl Corpus {
                 ty: r.ty,
                 specificity: r.specificity,
             }));
-        self.storage.record_activated_recognizer(r.dump());
+        self.storage.record_activated_recognizer(r.dump())?;
         self.reinfer()?;
         Ok(r)
     }
@@ -337,11 +333,23 @@ impl Corpus {
         self.storage.close()
     }
 
-    /// Wrap many observations in a single backend transaction.
-    pub fn batch<F: FnOnce(&mut Corpus)>(&mut self, fn_: F) -> Result<()> {
+    /// Run `f` as one backend transaction. On SQLite it commits when `f`
+    /// returns `Ok` and rolls back when `f` returns `Err`; Memory and JSON
+    /// corpora apply each write as it happens.
+    pub fn batch<T>(&mut self, f: impl FnOnce(&mut Corpus) -> Result<T>) -> Result<T> {
         self.storage.batch_begin()?;
-        fn_(self);
-        self.storage.batch_commit()
+        match f(self) {
+            Ok(value) => {
+                self.storage.batch_commit()?;
+                Ok(value)
+            }
+            Err(e) => {
+                // `e` is the failure worth reporting; SQLite may already have
+                // ended the transaction, making ROLLBACK itself fail.
+                let _ = self.storage.batch_rollback();
+                Err(e)
+            }
+        }
     }
 
     pub fn params_for(&self, input: &str) -> Vec<ParamSummary> {
@@ -569,7 +577,7 @@ fn popular_outlier(stats: &PositionStats, value: &str) -> bool {
     stats.value_fraction(value) >= POPULAR_BASELINE_MULTIPLE * baseline
 }
 
-fn apply_event(e: Event, s: &mut dyn Storage) {
+fn apply_event(e: Event, s: &mut dyn Storage) -> Result<()> {
     match e {
         Event::HostSeen { host } => s.increment_host(&host),
         Event::PathLengthSeen { length } => s.increment_path_length(length),

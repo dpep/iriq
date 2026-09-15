@@ -11,6 +11,7 @@
 
 <!-- lane: rust-storage -->
 - **Rust library: breaking — corpus operations return `iriq::Error`.** What you must do: replace `std::io::Error` / `ParseError` in your `Corpus` error handling with `iriq::Error` (or `iriq::Result<T>`). It is `#[non_exhaustive]` with `Parse`, `Io`, `Corrupt`, `Unsupported`, and (with the `sqlite` feature) `Sqlite` variants; every storage variant carries the corpus `path`, and `Display` names the corpus while the cause is in `source()`. `ParseError`'s field is now private (use `.message()`), its `Display` drops the `iriq: ` prefix, and `Corpus::open` / `save` take `impl AsRef<Path>`. The pure functions (`parse`, `normalize`, `trace`, `explain`) still fail only with `ParseError`.
+- **Bugfix (Rust): SQLite write failures were silently discarded.** A read-only, full, or otherwise failing `.db` corpus accepted every observation, wrote nothing, and the CLI exited 0 — so a cron job could lose data indefinitely without a sign. Every storage write now reports its failure: the CLI exits 1 with `iriq: corpus <path>: <cause>` (e.g. `attempt to write a readonly database`), and the library returns `Error::Sqlite`. Library consumers: `Corpus::observe_iri` now returns `Result<()>`, and `Corpus::batch` takes a closure returning `Result<T>` — on SQLite the batch commits on `Ok` and rolls back on `Err`, matching Ruby.
 <!-- /lane: rust-storage -->
 
 ###  0.34.0  (2026-08-12)

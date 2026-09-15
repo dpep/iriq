@@ -619,7 +619,10 @@ fn cmd_summary<W: Write, E: Write>(
     // passing --corpus.
     let corpus: Option<&Corpus> = match corpus {
         Some(c) => {
-            c.observe_iri(&iri);
+            if let Err(e) = c.observe_iri(&iri) {
+                let _ = writeln!(stderr, "iriq: {}", describe(&e));
+                return 1;
+            }
             Some(&*c)
         }
         None => None,
@@ -896,11 +899,16 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
         (None, Some(c)) => c,
         _ => unreachable!(),
     };
-    let _ = working.batch(|c| {
+    let observed = working.batch(|c| {
         for iri in &iris {
-            c.observe_iri(iri);
+            c.observe_iri(iri)?;
         }
+        Ok(())
     });
+    if let Err(e) = observed {
+        let _ = writeln!(stderr, "iriq: {}", describe(&e));
+        return 1;
+    }
 
     if !opts.sections.is_empty() {
         // Corpus-informed only when the caller actually had a corpus (auto-

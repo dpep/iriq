@@ -9,15 +9,15 @@ use std::path::Path;
 
 /// Persistence layer behind a Corpus. Phase-2 ships Memory, JSON, and
 /// SQLite (optional via feature). Backends update materialized views and
-/// own the source-IRI log used by Reinfer.
+/// own the source-IRI log used by Reinfer. Every write reports failure.
 pub trait Storage: Send + Sync {
     fn max_values(&self) -> usize;
 
-    fn increment_host(&mut self, host: &str);
-    fn increment_path_length(&mut self, length: usize);
-    fn increment_raw_shape(&mut self, shape: &str);
-    fn increment_fingerprint(&mut self, shape: &str);
-    fn observe_position(&mut self, pos: &Position, value: &str, t: SegmentType);
+    fn increment_host(&mut self, host: &str) -> Result<()>;
+    fn increment_path_length(&mut self, length: usize) -> Result<()>;
+    fn increment_raw_shape(&mut self, shape: &str) -> Result<()>;
+    fn increment_fingerprint(&mut self, shape: &str) -> Result<()>;
+    fn observe_position(&mut self, pos: &Position, value: &str, t: SegmentType) -> Result<()>;
     fn add_to_cluster(
         &mut self,
         key: &str,
@@ -25,7 +25,7 @@ pub trait Storage: Send + Sync {
         scheme: &str,
         shape: &str,
         iri: &Identifier,
-    );
+    ) -> Result<()>;
 
     fn host_counts(&self) -> HashMap<String, usize>;
     fn path_length_counts(&self) -> HashMap<usize, usize>;
@@ -54,21 +54,24 @@ pub trait Storage: Send + Sync {
     fn cluster_for(&self, key: &str) -> Option<Cluster>;
     fn cluster_size(&self) -> usize;
 
-    fn record_observation(&mut self, canonical: &str);
+    fn record_observation(&mut self, canonical: &str) -> Result<()>;
     fn each_observed_iri(&self, f: &mut dyn FnMut(&str));
     fn observed_iri_count(&self) -> usize;
-    fn clear_materialized_views(&mut self);
+    fn clear_materialized_views(&mut self) -> Result<()>;
 
-    fn record_activated_recognizer(&mut self, dump: serde_json::Value);
+    fn record_activated_recognizer(&mut self, dump: serde_json::Value) -> Result<()>;
     fn each_activated_recognizer(&self, f: &mut dyn FnMut(&serde_json::Value));
     fn activated_recognizer_count(&self) -> usize;
 
-    /// Wraps a closure in a single backend transaction. SQLite turns
-    /// O(observations) fsyncs into one; Memory + JSON are no-ops.
+    /// One backend transaction around many writes. SQLite turns
+    /// O(observations) commits into one; Memory + JSON are no-ops.
     fn batch_begin(&mut self) -> Result<()> {
         Ok(())
     }
     fn batch_commit(&mut self) -> Result<()> {
+        Ok(())
+    }
+    fn batch_rollback(&mut self) -> Result<()> {
         Ok(())
     }
 

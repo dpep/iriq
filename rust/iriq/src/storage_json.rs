@@ -30,8 +30,7 @@ impl JsonStorage {
         if let Ok(meta) = std::fs::metadata(path) {
             if meta.len() > 0 {
                 let data = std::fs::read(path).map_err(|e| Error::io(path, e))?;
-                load_memory_from_json(&mut s.inner, &data)
-                    .map_err(|reason| Error::corrupt(path, reason))?;
+                load_memory_from_json(&mut s.inner, &data, path)?;
             }
         }
         Ok(s)
@@ -43,20 +42,20 @@ impl Storage for JsonStorage {
         self.inner.max_values()
     }
 
-    fn increment_host(&mut self, host: &str) {
-        self.inner.increment_host(host);
+    fn increment_host(&mut self, host: &str) -> Result<()> {
+        self.inner.increment_host(host)
     }
-    fn increment_path_length(&mut self, length: usize) {
-        self.inner.increment_path_length(length);
+    fn increment_path_length(&mut self, length: usize) -> Result<()> {
+        self.inner.increment_path_length(length)
     }
-    fn increment_raw_shape(&mut self, shape: &str) {
-        self.inner.increment_raw_shape(shape);
+    fn increment_raw_shape(&mut self, shape: &str) -> Result<()> {
+        self.inner.increment_raw_shape(shape)
     }
-    fn increment_fingerprint(&mut self, shape: &str) {
-        self.inner.increment_fingerprint(shape);
+    fn increment_fingerprint(&mut self, shape: &str) -> Result<()> {
+        self.inner.increment_fingerprint(shape)
     }
-    fn observe_position(&mut self, pos: &Position, value: &str, t: SegmentType) {
-        self.inner.observe_position(pos, value, t);
+    fn observe_position(&mut self, pos: &Position, value: &str, t: SegmentType) -> Result<()> {
+        self.inner.observe_position(pos, value, t)
     }
     fn add_to_cluster(
         &mut self,
@@ -65,8 +64,8 @@ impl Storage for JsonStorage {
         scheme: &str,
         shape: &str,
         iri: &Identifier,
-    ) {
-        self.inner.add_to_cluster(key, host, scheme, shape, iri);
+    ) -> Result<()> {
+        self.inner.add_to_cluster(key, host, scheme, shape, iri)
     }
 
     fn host_counts(&self) -> HashMap<String, usize> {
@@ -96,8 +95,8 @@ impl Storage for JsonStorage {
     fn cluster_size(&self) -> usize {
         self.inner.cluster_size()
     }
-    fn record_observation(&mut self, canonical: &str) {
-        self.inner.record_observation(canonical);
+    fn record_observation(&mut self, canonical: &str) -> Result<()> {
+        self.inner.record_observation(canonical)
     }
     fn each_observed_iri(&self, f: &mut dyn FnMut(&str)) {
         self.inner.each_observed_iri(f);
@@ -105,11 +104,11 @@ impl Storage for JsonStorage {
     fn observed_iri_count(&self) -> usize {
         self.inner.observed_iri_count()
     }
-    fn clear_materialized_views(&mut self) {
-        self.inner.clear_materialized_views();
+    fn clear_materialized_views(&mut self) -> Result<()> {
+        self.inner.clear_materialized_views()
     }
-    fn record_activated_recognizer(&mut self, dump: Value) {
-        self.inner.record_activated_recognizer(dump);
+    fn record_activated_recognizer(&mut self, dump: Value) -> Result<()> {
+        self.inner.record_activated_recognizer(dump)
     }
     fn each_activated_recognizer(&self, f: &mut dyn FnMut(&Value)) {
         self.inner.each_activated_recognizer(f);
@@ -259,9 +258,12 @@ fn map_str_usize_to_value(m: &HashMap<String, usize>) -> Value {
     Value::Object(o)
 }
 
-pub fn load_memory_from_json(m: &mut MemoryStorage, data: &[u8]) -> Result<(), String> {
-    let root: Value = serde_json::from_slice(data).map_err(|e| e.to_string())?;
-    let obj = root.as_object().ok_or("root not an object")?;
+pub fn load_memory_from_json(m: &mut MemoryStorage, data: &[u8], path: &Path) -> Result<()> {
+    let root: Value =
+        serde_json::from_slice(data).map_err(|e| Error::corrupt(path, e.to_string()))?;
+    let obj = root
+        .as_object()
+        .ok_or_else(|| Error::corrupt(path, "root not an object"))?;
 
     // Note: MemoryStorage owns the inner maps; we use the trait methods that
     // increment one-by-one (since there's no direct setter). For loading,
@@ -279,7 +281,7 @@ pub fn load_memory_from_json(m: &mut MemoryStorage, data: &[u8]) -> Result<(), S
         for (k, v) in map {
             if let Some(n) = v.as_u64() {
                 for _ in 0..n {
-                    m.increment_host(k);
+                    m.increment_host(k)?;
                 }
             }
         }
@@ -288,7 +290,7 @@ pub fn load_memory_from_json(m: &mut MemoryStorage, data: &[u8]) -> Result<(), S
         for (k, v) in map {
             if let Some(n) = v.as_u64() {
                 for _ in 0..n {
-                    m.increment_raw_shape(k);
+                    m.increment_raw_shape(k)?;
                 }
             }
         }
@@ -297,7 +299,7 @@ pub fn load_memory_from_json(m: &mut MemoryStorage, data: &[u8]) -> Result<(), S
         for (k, v) in map {
             if let Some(n) = v.as_u64() {
                 for _ in 0..n {
-                    m.increment_fingerprint(k);
+                    m.increment_fingerprint(k)?;
                 }
             }
         }
@@ -306,10 +308,10 @@ pub fn load_memory_from_json(m: &mut MemoryStorage, data: &[u8]) -> Result<(), S
         for (k, v) in map {
             let len: usize = k
                 .parse()
-                .map_err(|e: std::num::ParseIntError| e.to_string())?;
+                .map_err(|e: std::num::ParseIntError| Error::corrupt(path, e.to_string()))?;
             if let Some(n) = v.as_u64() {
                 for _ in 0..n {
-                    m.increment_path_length(len);
+                    m.increment_path_length(len)?;
                 }
             }
         }
@@ -353,7 +355,9 @@ pub fn load_memory_from_json(m: &mut MemoryStorage, data: &[u8]) -> Result<(), S
     if let Some(clu) = obj.get("clusterer").and_then(|v| v.as_object()) {
         if let Some(clusters) = clu.get("clusters").and_then(|v| v.as_object()) {
             for (key, cobj) in clusters {
-                let cobj = cobj.as_object().ok_or("cluster value not an object")?;
+                let cobj = cobj
+                    .as_object()
+                    .ok_or_else(|| Error::corrupt(path, "cluster value not an object"))?;
                 let host = cobj
                     .get("host")
                     .and_then(|v| v.as_str())
@@ -412,7 +416,7 @@ pub fn load_memory_from_json(m: &mut MemoryStorage, data: &[u8]) -> Result<(), S
     if let Some(arr) = obj.get("observed_iris").and_then(|v| v.as_array()) {
         for s in arr {
             if let Some(s) = s.as_str() {
-                m.record_observation(s);
+                m.record_observation(s)?;
             }
         }
         // record_observation also appends to the log; we want to set
@@ -424,7 +428,7 @@ pub fn load_memory_from_json(m: &mut MemoryStorage, data: &[u8]) -> Result<(), S
     }
     if let Some(arr) = obj.get("activated_recognizers").and_then(|v| v.as_array()) {
         for v in arr {
-            m.record_activated_recognizer(v.clone());
+            m.record_activated_recognizer(v.clone())?;
         }
     }
     Ok(())

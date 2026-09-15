@@ -68,11 +68,11 @@ fn cli_normalize_without_corpus_is_mechanical() {
 }
 
 /// The harness guard: even with the auto-corpus re-enabled, the default corpus
-/// lands in the sandbox home, never the developer's real one.
+/// lands in the sandbox home, never the developer's real one. Only this test
+/// creates a corpus there, so the "created" notice always appears.
 #[test]
 fn harness_confines_the_default_corpus_to_the_sandbox() {
     let home = common::sandbox_home();
-    std::fs::remove_dir_all(&home).unwrap();
     let out = common::iriq()
         .env_remove("IRIQ_NO_CORPUS")
         .args(["-n", "https://foo.com/users/1"])

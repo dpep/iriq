@@ -123,92 +123,83 @@ impl Storage for SqliteStorage {
         self.max_values
     }
 
-    fn increment_host(&mut self, host: &str) {
+    fn increment_host(&mut self, host: &str) -> Result<()> {
         let c = self.conn.lock().unwrap();
-        let mut stmt = c
-            .prepare_cached(
-                "INSERT INTO host_counts (host, count) VALUES (?, 1) ON CONFLICT(host) DO UPDATE SET count = count + 1",
-            )
-            .unwrap();
-        let _ = stmt.execute(params![host]);
+        c.prepare_cached(
+            "INSERT INTO host_counts (host, count) VALUES (?, 1) ON CONFLICT(host) DO UPDATE SET count = count + 1",
+        )
+        .and_then(|mut s| s.execute(params![host]))
+        .map_err(|e| Error::sqlite(&self.path, e))?;
+        Ok(())
     }
-    fn increment_path_length(&mut self, length: usize) {
+    fn increment_path_length(&mut self, length: usize) -> Result<()> {
         let c = self.conn.lock().unwrap();
-        let mut stmt = c
-            .prepare_cached(
-                "INSERT INTO path_length_counts (length, count) VALUES (?, 1) ON CONFLICT(length) DO UPDATE SET count = count + 1",
-            )
-            .unwrap();
-        let _ = stmt.execute(params![length as i64]);
+        c.prepare_cached(
+            "INSERT INTO path_length_counts (length, count) VALUES (?, 1) ON CONFLICT(length) DO UPDATE SET count = count + 1",
+        )
+        .and_then(|mut s| s.execute(params![length as i64]))
+        .map_err(|e| Error::sqlite(&self.path, e))?;
+        Ok(())
     }
-    fn increment_raw_shape(&mut self, shape: &str) {
+    fn increment_raw_shape(&mut self, shape: &str) -> Result<()> {
         let c = self.conn.lock().unwrap();
-        let mut stmt = c
-            .prepare_cached(
-                "INSERT INTO raw_shape_counts (shape, count) VALUES (?, 1) ON CONFLICT(shape) DO UPDATE SET count = count + 1",
-            )
-            .unwrap();
-        let _ = stmt.execute(params![shape]);
+        c.prepare_cached(
+            "INSERT INTO raw_shape_counts (shape, count) VALUES (?, 1) ON CONFLICT(shape) DO UPDATE SET count = count + 1",
+        )
+        .and_then(|mut s| s.execute(params![shape]))
+        .map_err(|e| Error::sqlite(&self.path, e))?;
+        Ok(())
     }
-    fn increment_fingerprint(&mut self, shape: &str) {
+    fn increment_fingerprint(&mut self, shape: &str) -> Result<()> {
         let c = self.conn.lock().unwrap();
-        let mut stmt = c
-            .prepare_cached(
-                "INSERT INTO fingerprint_counts (shape, count) VALUES (?, 1) ON CONFLICT(shape) DO UPDATE SET count = count + 1",
-            )
-            .unwrap();
-        let _ = stmt.execute(params![shape]);
+        c.prepare_cached(
+            "INSERT INTO fingerprint_counts (shape, count) VALUES (?, 1) ON CONFLICT(shape) DO UPDATE SET count = count + 1",
+        )
+        .and_then(|mut s| s.execute(params![shape]))
+        .map_err(|e| Error::sqlite(&self.path, e))?;
+        Ok(())
     }
 
-    fn observe_position(&mut self, pos: &Position, value: &str, t: SegmentType) {
+    fn observe_position(&mut self, pos: &Position, value: &str, t: SegmentType) -> Result<()> {
         let c = self.conn.lock().unwrap();
+        let err = |e| Error::sqlite(&self.path, e);
         let scope = pos.scope.as_str();
-        {
-            let mut stmt = c
-                .prepare_cached(
-                    "INSERT INTO position_stats (host, scope, locator, total) VALUES (?, ?, ?, 1) \
-                     ON CONFLICT(host, scope, locator) DO UPDATE SET total = total + 1",
-                )
-                .unwrap();
-            let _ = stmt.execute(params![pos.host, scope, pos.locator]);
-        }
-        {
-            let mut stmt = c
-                .prepare_cached(
-                    "INSERT INTO position_types (host, scope, locator, type, count) VALUES (?, ?, ?, ?, 1) \
-                     ON CONFLICT(host, scope, locator, type) DO UPDATE SET count = count + 1",
-                )
-                .unwrap();
-            let _ = stmt.execute(params![pos.host, scope, pos.locator, t.as_str()]);
-        }
-        let updated = {
-            let mut stmt = c
-                .prepare_cached(
-                    "UPDATE position_values SET count = count + 1 WHERE host = ? AND scope = ? AND locator = ? AND value = ?",
-                )
-                .unwrap();
-            stmt.execute(params![pos.host, scope, pos.locator, value])
-                .unwrap_or(0)
-        };
+        c.prepare_cached(
+            "INSERT INTO position_stats (host, scope, locator, total) VALUES (?, ?, ?, 1) \
+             ON CONFLICT(host, scope, locator) DO UPDATE SET total = total + 1",
+        )
+        .and_then(|mut s| s.execute(params![pos.host, scope, pos.locator]))
+        .map_err(err)?;
+        c.prepare_cached(
+            "INSERT INTO position_types (host, scope, locator, type, count) VALUES (?, ?, ?, ?, 1) \
+             ON CONFLICT(host, scope, locator, type) DO UPDATE SET count = count + 1",
+        )
+        .and_then(|mut s| s.execute(params![pos.host, scope, pos.locator, t.as_str()]))
+        .map_err(err)?;
+        let updated = c
+            .prepare_cached(
+                "UPDATE position_values SET count = count + 1 WHERE host = ? AND scope = ? AND locator = ? AND value = ?",
+            )
+            .and_then(|mut s| s.execute(params![pos.host, scope, pos.locator, value]))
+            .map_err(err)?;
         if updated == 0 {
-            let card: i64 = {
-                let mut stmt = c
-                    .prepare_cached(
-                        "SELECT COUNT(*) FROM position_values WHERE host = ? AND scope = ? AND locator = ?",
-                    )
-                    .unwrap();
-                stmt.query_row(params![pos.host, scope, pos.locator], |r| r.get(0))
-                    .unwrap_or(0)
-            };
+            let card: i64 = c
+                .prepare_cached(
+                    "SELECT COUNT(*) FROM position_values WHERE host = ? AND scope = ? AND locator = ?",
+                )
+                .and_then(|mut s| {
+                    s.query_row(params![pos.host, scope, pos.locator], |r| r.get(0))
+                })
+                .map_err(err)?;
             if (card as usize) < self.max_values {
-                let mut stmt = c
-                    .prepare_cached(
-                        "INSERT INTO position_values (host, scope, locator, value, count) VALUES (?, ?, ?, ?, 1)",
-                    )
-                    .unwrap();
-                let _ = stmt.execute(params![pos.host, scope, pos.locator, value]);
+                c.prepare_cached(
+                    "INSERT INTO position_values (host, scope, locator, value, count) VALUES (?, ?, ?, ?, 1)",
+                )
+                .and_then(|mut s| s.execute(params![pos.host, scope, pos.locator, value]))
+                .map_err(err)?;
             }
         }
+        Ok(())
     }
 
     fn add_to_cluster(
@@ -218,43 +209,35 @@ impl Storage for SqliteStorage {
         scheme: &str,
         shape: &str,
         iri: &Identifier,
-    ) {
+    ) -> Result<()> {
         let c = self.conn.lock().unwrap();
-        {
-            let mut stmt = c
-                .prepare_cached(
-                    "INSERT INTO clusters (key, host, scheme, shape, count, ord) \
-                     VALUES (?, ?, ?, ?, 1, (SELECT COALESCE(MAX(ord), 0) + 1 FROM clusters)) \
-                     ON CONFLICT(key) DO UPDATE SET count = count + 1",
-                )
-                .unwrap();
-            let _ = stmt.execute(params![key, host, scheme, shape]);
-        }
+        let err = |e| Error::sqlite(&self.path, e);
+        c.prepare_cached(
+            "INSERT INTO clusters (key, host, scheme, shape, count, ord) \
+             VALUES (?, ?, ?, ?, 1, (SELECT COALESCE(MAX(ord), 0) + 1 FROM clusters)) \
+             ON CONFLICT(key) DO UPDATE SET count = count + 1",
+        )
+        .and_then(|mut s| s.execute(params![key, host, scheme, shape]))
+        .map_err(err)?;
 
-        let examples_count: i64 = {
-            let mut stmt = c
-                .prepare_cached("SELECT COUNT(*) FROM cluster_examples WHERE cluster_key = ?")
-                .unwrap();
-            stmt.query_row(params![key], |r| r.get(0)).unwrap_or(0)
-        };
+        let examples_count: i64 = c
+            .prepare_cached("SELECT COUNT(*) FROM cluster_examples WHERE cluster_key = ?")
+            .and_then(|mut s| s.query_row(params![key], |r| r.get(0)))
+            .map_err(err)?;
         if (examples_count as usize) < MAX_CLUSTER_EXAMPLES {
             let canon = iri.canonical();
-            let exists: i64 = {
-                let mut stmt = c
-                    .prepare_cached(
-                        "SELECT COUNT(*) FROM cluster_examples WHERE cluster_key = ? AND canonical = ?",
-                    )
-                    .unwrap();
-                stmt.query_row(params![key, canon], |r| r.get(0))
-                    .unwrap_or(0)
-            };
+            let exists: i64 = c
+                .prepare_cached(
+                    "SELECT COUNT(*) FROM cluster_examples WHERE cluster_key = ? AND canonical = ?",
+                )
+                .and_then(|mut s| s.query_row(params![key, canon], |r| r.get(0)))
+                .map_err(err)?;
             if exists == 0 {
-                let mut stmt = c
-                    .prepare_cached(
-                        "INSERT INTO cluster_examples (cluster_key, position, canonical) VALUES (?, ?, ?)",
-                    )
-                    .unwrap();
-                let _ = stmt.execute(params![key, examples_count, canon]);
+                c.prepare_cached(
+                    "INSERT INTO cluster_examples (cluster_key, position, canonical) VALUES (?, ?, ?)",
+                )
+                .and_then(|mut s| s.execute(params![key, examples_count, canon]))
+                .map_err(err)?;
             }
         }
 
@@ -264,61 +247,50 @@ impl Storage for SqliteStorage {
                     "INSERT INTO cluster_segments (cluster_key, position, value, count) VALUES (?, ?, ?, 1) \
                      ON CONFLICT(cluster_key, position, value) DO UPDATE SET count = count + 1",
                 )
-                .unwrap();
+                .map_err(err)?;
             for (i, seg) in iri.path_segments.iter().enumerate() {
-                let _ = stmt.execute(params![key, i as i64, seg]);
+                stmt.execute(params![key, i as i64, seg]).map_err(err)?;
             }
         }
 
         let classifier = &DEFAULT_CLASSIFIER;
         for (name, v) in iri.query_params.iter() {
             let t = classifier.classify(v);
-            {
-                let mut stmt = c
-                    .prepare_cached(
-                        "INSERT INTO cluster_params (cluster_key, name, total) VALUES (?, ?, 1) \
-                         ON CONFLICT(cluster_key, name) DO UPDATE SET total = total + 1",
-                    )
-                    .unwrap();
-                let _ = stmt.execute(params![key, name]);
-            }
-            {
-                let mut stmt = c
-                    .prepare_cached(
-                        "INSERT INTO cluster_param_types (cluster_key, name, type, count) VALUES (?, ?, ?, 1) \
-                         ON CONFLICT(cluster_key, name, type) DO UPDATE SET count = count + 1",
-                    )
-                    .unwrap();
-                let _ = stmt.execute(params![key, name, t.as_str()]);
-            }
-            let updated = {
-                let mut stmt = c
-                    .prepare_cached(
-                        "UPDATE cluster_param_values SET count = count + 1 WHERE cluster_key = ? AND name = ? AND value = ?",
-                    )
-                    .unwrap();
-                stmt.execute(params![key, name, v]).unwrap_or(0)
-            };
+            c.prepare_cached(
+                "INSERT INTO cluster_params (cluster_key, name, total) VALUES (?, ?, 1) \
+                 ON CONFLICT(cluster_key, name) DO UPDATE SET total = total + 1",
+            )
+            .and_then(|mut s| s.execute(params![key, name]))
+            .map_err(err)?;
+            c.prepare_cached(
+                "INSERT INTO cluster_param_types (cluster_key, name, type, count) VALUES (?, ?, ?, 1) \
+                 ON CONFLICT(cluster_key, name, type) DO UPDATE SET count = count + 1",
+            )
+            .and_then(|mut s| s.execute(params![key, name, t.as_str()]))
+            .map_err(err)?;
+            let updated = c
+                .prepare_cached(
+                    "UPDATE cluster_param_values SET count = count + 1 WHERE cluster_key = ? AND name = ? AND value = ?",
+                )
+                .and_then(|mut s| s.execute(params![key, name, v]))
+                .map_err(err)?;
             if updated == 0 {
-                let card: i64 = {
-                    let mut stmt = c
-                        .prepare_cached(
-                            "SELECT COUNT(*) FROM cluster_param_values WHERE cluster_key = ? AND name = ?",
-                        )
-                        .unwrap();
-                    stmt.query_row(params![key, name], |r| r.get(0))
-                        .unwrap_or(0)
-                };
+                let card: i64 = c
+                    .prepare_cached(
+                        "SELECT COUNT(*) FROM cluster_param_values WHERE cluster_key = ? AND name = ?",
+                    )
+                    .and_then(|mut s| s.query_row(params![key, name], |r| r.get(0)))
+                    .map_err(err)?;
                 if (card as usize) < self.max_values {
-                    let mut stmt = c
-                        .prepare_cached(
-                            "INSERT INTO cluster_param_values (cluster_key, name, value, count) VALUES (?, ?, ?, 1)",
-                        )
-                        .unwrap();
-                    let _ = stmt.execute(params![key, name, v]);
+                    c.prepare_cached(
+                        "INSERT INTO cluster_param_values (cluster_key, name, value, count) VALUES (?, ?, ?, 1)",
+                    )
+                    .and_then(|mut s| s.execute(params![key, name, v]))
+                    .map_err(err)?;
                 }
             }
         }
+        Ok(())
     }
 
     fn host_counts(&self) -> HashMap<String, usize> {
@@ -617,12 +589,12 @@ impl Storage for SqliteStorage {
         n as usize
     }
 
-    fn record_observation(&mut self, canonical: &str) {
+    fn record_observation(&mut self, canonical: &str) -> Result<()> {
         let c = self.conn.lock().unwrap();
-        let _ = c.execute(
-            "INSERT INTO observed_iris (canonical) VALUES (?)",
-            params![canonical],
-        );
+        c.prepare_cached("INSERT INTO observed_iris (canonical) VALUES (?)")
+            .and_then(|mut s| s.execute(params![canonical]))
+            .map_err(|e| Error::sqlite(&self.path, e))?;
+        Ok(())
     }
     fn each_observed_iri(&self, f: &mut dyn FnMut(&str)) {
         let c = self.conn.lock().unwrap();
@@ -641,7 +613,7 @@ impl Storage for SqliteStorage {
             .unwrap_or(0);
         n as usize
     }
-    fn clear_materialized_views(&mut self) {
+    fn clear_materialized_views(&mut self) -> Result<()> {
         let c = self.conn.lock().unwrap();
         for q in [
             "DELETE FROM host_counts",
@@ -658,10 +630,11 @@ impl Storage for SqliteStorage {
             "DELETE FROM cluster_param_values",
             "DELETE FROM cluster_param_types",
         ] {
-            let _ = c.execute(q, []);
+            c.execute(q, []).map_err(|e| Error::sqlite(&self.path, e))?;
         }
+        Ok(())
     }
-    fn record_activated_recognizer(&mut self, dump: Value) {
+    fn record_activated_recognizer(&mut self, dump: Value) -> Result<()> {
         let c = self.conn.lock().unwrap();
         let prefix = dump
             .get("prefix")
@@ -677,11 +650,13 @@ impl Storage for SqliteStorage {
             .get("specificity")
             .and_then(|v| v.as_f64())
             .unwrap_or(1.0);
-        let _ = c.execute(
+        c.execute(
             "INSERT INTO activated_recognizers (prefix, type, specificity) VALUES (?, ?, ?) \
              ON CONFLICT(prefix) DO UPDATE SET type = excluded.type, specificity = excluded.specificity",
             params![prefix, ty, spec],
-        );
+        )
+        .map_err(|e| Error::sqlite(&self.path, e))?;
+        Ok(())
     }
     fn each_activated_recognizer(&self, f: &mut dyn FnMut(&Value)) {
         let c = self.conn.lock().unwrap();
@@ -729,19 +704,25 @@ impl Storage for SqliteStorage {
         c.execute_batch("COMMIT")
             .map_err(|e| Error::sqlite(&self.path, e))
     }
+    fn batch_rollback(&mut self) -> Result<()> {
+        let c = self.conn.lock().unwrap();
+        c.execute_batch("ROLLBACK")
+            .map_err(|e| Error::sqlite(&self.path, e))
+    }
 
     fn flush(&mut self) -> Result<()> {
         Ok(())
     }
     fn close(&mut self) -> Result<()> {
         let c = self.conn.lock().unwrap();
+        // Checkpointing only compacts the WAL; committed data is already safe.
         let _ = c.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
         Ok(())
     }
     fn save_to(&mut self, path: &Path) -> Result<()> {
         // Mirror the contents into a fresh MemoryStorage and write JSON.
         let mut mem = MemoryStorage::new(self.max_values);
-        mirror_into_memory(self, &mut mem);
+        mirror_into_memory(self, &mut mem)?;
         crate::storage_json::dump_memory_to_json(&mem, path)
     }
     fn path(&self) -> Option<&Path> {
@@ -762,25 +743,25 @@ fn counts_hash(c: &Connection, table: &str, key_col: &str) -> HashMap<String, us
     out
 }
 
-fn mirror_into_memory(src: &SqliteStorage, dst: &mut MemoryStorage) {
+fn mirror_into_memory(src: &SqliteStorage, dst: &mut MemoryStorage) -> Result<()> {
     for (k, v) in src.host_counts() {
         for _ in 0..v {
-            dst.increment_host(&k);
+            dst.increment_host(&k)?;
         }
     }
     for (k, v) in src.path_length_counts() {
         for _ in 0..v {
-            dst.increment_path_length(k);
+            dst.increment_path_length(k)?;
         }
     }
     for (k, v) in src.raw_shape_counts() {
         for _ in 0..v {
-            dst.increment_raw_shape(&k);
+            dst.increment_raw_shape(&k)?;
         }
     }
     for (k, v) in src.fingerprint_counts() {
         for _ in 0..v {
-            dst.increment_fingerprint(&k);
+            dst.increment_fingerprint(&k)?;
         }
     }
     src.each_position_stats(&mut |pos, stats| {
@@ -789,6 +770,43 @@ fn mirror_into_memory(src: &SqliteStorage, dst: &mut MemoryStorage) {
     for c in src.clusters() {
         dst.insert_cluster(c.key.clone(), c);
     }
-    src.each_observed_iri(&mut |c| dst.record_observation(c));
-    src.each_activated_recognizer(&mut |v| dst.record_activated_recognizer(v.clone()));
+    let mut observed = Vec::new();
+    src.each_observed_iri(&mut |c| observed.push(c.to_string()));
+    for c in &observed {
+        dst.record_observation(c)?;
+    }
+    let mut recognizers = Vec::new();
+    src.each_activated_recognizer(&mut |v| recognizers.push(v.clone()));
+    for v in recognizers {
+        dst.record_activated_recognizer(v)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Corpus;
+
+    #[test]
+    fn a_write_failing_late_in_an_observation_is_reported() {
+        let dir = std::env::temp_dir().join(format!("iriq-sqlite-late-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("c.db");
+        let mut corpus = Corpus::open(&path).unwrap();
+        // The source-log insert is the last write an observation makes.
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER no_obs BEFORE INSERT ON observed_iris \
+                 BEGIN SELECT RAISE(ABORT, 'simulated write failure'); END;",
+            )
+            .unwrap();
+
+        let err = corpus.observe("https://x.com/users/1").unwrap_err();
+        let cause = std::error::Error::source(&err).unwrap().to_string();
+        assert!(cause.contains("simulated write failure"), "{cause}");
+        assert_eq!(corpus.observed_iri_count(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
