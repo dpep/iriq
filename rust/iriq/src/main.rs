@@ -722,14 +722,14 @@ fn cmd_summary<W: Write, E: Write>(
 
     if opts.json {
         if sections.len() == 1 {
-            let payload = section_payload(&iri, sections[0], opts, corpus);
+            let payload = section_payload(&iri, sections[0], opts, corpus)?;
             write_json(stdout, &payload)?;
         } else {
             // Multi-section JSON: fixed key order parse / canonical / normalize / explain.
             let mut payload = serde_json::Map::new();
             for s in ["parse", "canonical", "normalize", "explain"] {
                 if let Some(sec) = sections.iter().find(|sec| sec.name() == s) {
-                    payload.insert(s.to_string(), section_payload(&iri, *sec, opts, corpus));
+                    payload.insert(s.to_string(), section_payload(&iri, *sec, opts, corpus)?);
                 }
             }
             write_json(stdout, &Value::Object(payload))?;
@@ -744,20 +744,29 @@ fn cmd_summary<W: Write, E: Write>(
 // Corpus-informed when a corpus is loaded; mechanical otherwise. This is what
 // makes `iriq -n --corpus c.db` reflect observed distributions (e.g. a
 // high-cardinality literal slot collapsing to a placeholder).
-fn normalize_section(iri: &Identifier, opts: &Opts, corpus: Option<&Corpus>) -> String {
+fn normalize_section(
+    iri: &Identifier,
+    opts: &Opts,
+    corpus: Option<&Corpus>,
+) -> iriq::Result<String> {
     match corpus {
         Some(c) => c.normalize_identifier(iri, opts.hints),
-        None => normalize_identifier(iri, opts.hints),
+        None => Ok(normalize_identifier(iri, opts.hints)),
     }
 }
 
-fn section_payload(iri: &Identifier, sec: Section, opts: &Opts, corpus: Option<&Corpus>) -> Value {
-    match sec {
+fn section_payload(
+    iri: &Identifier,
+    sec: Section,
+    opts: &Opts,
+    corpus: Option<&Corpus>,
+) -> iriq::Result<Value> {
+    Ok(match sec {
         Section::Parse => identifier_json(iri),
         Section::Canonical => Value::String(iri.canonical()),
-        Section::Normalize => Value::String(normalize_section(iri, opts, corpus)),
+        Section::Normalize => Value::String(normalize_section(iri, opts, corpus)?),
         Section::Explain => serde_json::to_value(trace_identifier(iri, opts.hints)).unwrap(),
-    }
+    })
 }
 
 fn identifier_json(iri: &Identifier) -> Value {
@@ -814,7 +823,7 @@ fn emit_sections_human<W: Write>(
     sections: &[Section],
     opts: &Opts,
     corpus: Option<&Corpus>,
-) -> io::Result<()> {
+) -> Result<(), Failure> {
     let multi = sections.len() > 1;
     for (i, sec) in sections.iter().enumerate() {
         if i > 0 {
@@ -829,7 +838,7 @@ fn emit_sections_human<W: Write>(
                 writeln!(stdout, "{}", iri.canonical())?;
             }
             Section::Normalize => {
-                writeln!(stdout, "{}", normalize_section(iri, opts, corpus))?;
+                writeln!(stdout, "{}", normalize_section(iri, opts, corpus)?)?;
             }
             Section::Explain => {
                 emit_explain_human(stdout, &trace_identifier(iri, opts.hints))?;
@@ -994,7 +1003,7 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
         return Ok(0);
     }
     if explicit_cluster || iris.len() >= LARGE_BATCH_THRESHOLD {
-        emit_clusters(stdout, &working.clusters(), opts)?;
+        emit_clusters(stdout, &working.clusters()?, opts)?;
         return Ok(0);
     }
     emit_url_list(stdout, &iris, opts)?;
@@ -1103,7 +1112,7 @@ impl<'a> LineInput<'a> {
                 if let Some(c) = corpus.as_deref_mut() {
                     c.observe_iri(&iri)?;
                 }
-                rendered.push(&iri, opts, corpus.as_deref());
+                rendered.push(&iri, opts, corpus.as_deref())?;
             }
             if !self.reader.buffer().contains(&b'\n') || !self.next_line(line) {
                 return Ok(());
@@ -1122,30 +1131,34 @@ struct Rendered {
 }
 
 impl Rendered {
-    fn push(&mut self, iri: &Identifier, opts: &Opts, corpus: Option<&Corpus>) {
+    fn push(&mut self, iri: &Identifier, opts: &Opts, corpus: Option<&Corpus>) -> iriq::Result<()> {
         if opts.json && !opts.ndjson {
-            self.json.push(iri_payload(iri, opts, corpus));
+            self.json.push(iri_payload(iri, opts, corpus)?);
         } else {
-            emit_one_iri_section(&mut self.bytes, iri, self.count, opts, corpus)
-                .expect("writing to a Vec cannot fail");
+            match emit_one_iri_section(&mut self.bytes, iri, self.count, opts, corpus) {
+                Ok(()) => {}
+                Err(Failure::Corpus(e)) => return Err(e),
+                Err(Failure::Io(e)) => unreachable!("writing to a Vec cannot fail: {e}"),
+            }
         }
         self.count += 1;
+        Ok(())
     }
 }
 
 // One IRI's JSON: the bare value for a single section, else an object keyed
 // parse / canonical / normalize / explain.
-fn iri_payload(iri: &Identifier, opts: &Opts, corpus: Option<&Corpus>) -> Value {
+fn iri_payload(iri: &Identifier, opts: &Opts, corpus: Option<&Corpus>) -> iriq::Result<Value> {
     if opts.sections.len() == 1 {
         return section_payload(iri, opts.sections[0], opts, corpus);
     }
     let mut m = serde_json::Map::new();
     for s in ["parse", "canonical", "normalize", "explain"] {
         if let Some(sec) = opts.sections.iter().find(|sec| sec.name() == s) {
-            m.insert(s.to_string(), section_payload(iri, *sec, opts, corpus));
+            m.insert(s.to_string(), section_payload(iri, *sec, opts, corpus)?);
         }
     }
-    Value::Object(m)
+    Ok(Value::Object(m))
 }
 
 // Emit one IRI's sections in human or NDJSON form (i is its index in the whole
@@ -1156,9 +1169,9 @@ fn emit_one_iri_section<W: Write>(
     i: usize,
     opts: &Opts,
     corpus: Option<&Corpus>,
-) -> io::Result<()> {
+) -> Result<(), Failure> {
     if opts.ndjson {
-        let payload = iri_payload(iri, opts, corpus);
+        let payload = iri_payload(iri, opts, corpus)?;
         writeln!(stdout, "{}", serde_json::to_string(&payload).unwrap())?;
         return Ok(());
     }
@@ -1171,7 +1184,7 @@ fn emit_one_iri_section<W: Write>(
                 writeln!(stdout, "{}", iri.canonical())?;
             }
             Section::Normalize => {
-                writeln!(stdout, "{}", normalize_section(iri, opts, corpus))?;
+                writeln!(stdout, "{}", normalize_section(iri, opts, corpus)?)?;
             }
             _ => {}
         }
@@ -1192,7 +1205,7 @@ fn emit_one_iri_section<W: Write>(
                 writeln!(stdout, "{}", iri.canonical())?;
             }
             Section::Normalize => {
-                writeln!(stdout, "{}", normalize_section(iri, opts, corpus))?;
+                writeln!(stdout, "{}", normalize_section(iri, opts, corpus)?)?;
             }
             Section::Explain => emit_explain_human(stdout, &trace_identifier(iri, opts.hints))?,
         }
@@ -1550,14 +1563,15 @@ fn cmd_stats<W: Write, E: Write>(
     Ok(0)
 }
 
-fn emit_stats<W: Write>(stdout: &mut W, corpus: &Corpus, opts: &Opts) -> io::Result<()> {
-    let hosts_full = corpus.host_counts();
+fn emit_stats<W: Write>(stdout: &mut W, corpus: &Corpus, opts: &Opts) -> Result<(), Failure> {
+    let hosts_full = corpus.host_counts()?;
     let observations: usize = hosts_full.values().copied().sum();
     let hosts = top_n_map(&hosts_full, TOP_N_STATS);
-    let shapes_full = corpus.fingerprint_counts();
+    let shapes_full = corpus.fingerprint_counts()?;
     let shapes = top_n_map(&shapes_full, TOP_N_STATS);
-    let raw_full = corpus.raw_shape_counts();
+    let raw_full = corpus.raw_shape_counts()?;
     let raw = top_n_map(&raw_full, TOP_N_STATS);
+    let clusters = corpus.size()?;
 
     if opts.json {
         let mut out = serde_json::Map::new();
@@ -1567,7 +1581,7 @@ fn emit_stats<W: Write>(stdout: &mut W, corpus: &Corpus, opts: &Opts) -> io::Res
         );
         out.insert(
             "clusters".to_string(),
-            Value::Number((corpus.size() as u64).into()),
+            Value::Number((clusters as u64).into()),
         );
         out.insert("hosts".to_string(), kv_to_value(&hosts));
         out.insert("shapes".to_string(), kv_to_value(&shapes));
@@ -1577,7 +1591,7 @@ fn emit_stats<W: Write>(stdout: &mut W, corpus: &Corpus, opts: &Opts) -> io::Res
     }
 
     writeln!(stdout, "observations: {}", observations)?;
-    writeln!(stdout, "clusters:     {}", corpus.size())?;
+    writeln!(stdout, "clusters:     {}", clusters)?;
     writeln!(stdout)?;
     writeln!(stdout, "top hosts:")?;
     for (k, v) in &hosts {
@@ -1625,10 +1639,10 @@ fn cmd_reinfer<W: Write, E: Write>(
             1,
         ));
     };
-    let n = c.observed_iri_count();
-    let before = c.size();
+    let n = c.observed_iri_count()?;
+    let before = c.size()?;
     c.reinfer()?;
-    let after = c.size();
+    let after = c.size()?;
     let noun = if n == 1 {
         "observation"
     } else {
@@ -1679,7 +1693,7 @@ fn cmd_propose<W: Write, E: Write>(
         return Ok(0);
     }
 
-    let proposals = c.propose_recognizers(popts);
+    let proposals = c.propose_recognizers(popts)?;
     if opts.json {
         let arr: Vec<Value> = proposals.iter().map(proposal_json).collect();
         write_json(stdout, &Value::Array(arr))?;
@@ -1689,7 +1703,7 @@ fn cmd_propose<W: Write, E: Write>(
         writeln!(
             stdout,
             "no recognizer proposals ({} observations scanned)",
-            c.observed_iri_count()
+            c.observed_iri_count()?
         )?;
         return Ok(0);
     }
@@ -1781,7 +1795,7 @@ fn cmd_cross_host_shapes<W: Write, E: Write>(
             1,
         ));
     };
-    let shapes = c.cross_host_shapes(opts.min_hosts);
+    let shapes = c.cross_host_shapes(opts.min_hosts)?;
     if opts.json {
         let arr: Vec<Value> = shapes
             .iter()
@@ -1807,7 +1821,7 @@ fn cmd_cross_host_shapes<W: Write, E: Write>(
         return Ok(0);
     }
     if shapes.is_empty() {
-        let size = c.size();
+        let size = c.size()?;
         let noun = if size == 1 { "cluster" } else { "clusters" };
         writeln!(stdout, "no cross-host shapes ({} {} scanned)", size, noun)?;
         return Ok(0);

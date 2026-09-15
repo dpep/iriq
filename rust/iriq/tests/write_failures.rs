@@ -40,7 +40,7 @@ fn observing_into_a_read_only_corpus_is_an_error_naming_it() {
         .expect_err("observe into a read-only corpus");
     assert!(matches!(err, Error::Sqlite { .. }), "{err:?}");
     assert!(err.to_string().contains(path.to_str().unwrap()), "{err}");
-    assert_eq!(c.observed_iri_count(), 1);
+    assert_eq!(c.observed_iri_count().unwrap(), 1);
 }
 
 #[test]
@@ -54,7 +54,7 @@ fn a_failed_batch_is_an_error_and_keeps_nothing() {
         c.observe("https://x.com/users/3")
     });
     assert!(result.is_err(), "batch into a read-only corpus succeeded");
-    assert_eq!(c.observed_iri_count(), 1);
+    assert_eq!(c.observed_iri_count().unwrap(), 1);
 }
 
 #[test]

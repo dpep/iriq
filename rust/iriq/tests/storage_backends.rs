@@ -104,7 +104,7 @@ fn sqlite_round_trips_query_param_stats() {
     let before = {
         let mut c = Corpus::open(path).unwrap();
         observe_param_stream(&mut c);
-        let rows = param_rows(&c.params_for(QUERY));
+        let rows = param_rows(&c.params_for(QUERY).unwrap());
         c.close().unwrap();
         rows
     };
@@ -116,7 +116,7 @@ fn sqlite_round_trips_query_param_stats() {
     );
 
     let reopened = Corpus::open(path).unwrap();
-    assert_eq!(param_rows(&reopened.params_for(QUERY)), before);
+    assert_eq!(param_rows(&reopened.params_for(QUERY).unwrap()), before);
     cleanup(&p);
 }
 
@@ -143,7 +143,7 @@ fn a_panic_inside_batch_rolls_back_and_later_writes_persist() {
     drop(c);
 
     // u/0 was rolled back with the panicking batch; everything after persisted.
-    assert_eq!(Corpus::open(&p).unwrap().observed_iri_count(), 3);
+    assert_eq!(Corpus::open(&p).unwrap().observed_iri_count().unwrap(), 3);
     cleanup(&p);
 }
 
@@ -173,12 +173,15 @@ fn an_observation_failing_part_way_leaves_nothing_behind() {
     drop(c);
 
     let reopened = Corpus::open(&p).unwrap();
-    assert_eq!(reopened.observed_iri_count(), 1);
+    assert_eq!(reopened.observed_iri_count().unwrap(), 1);
     assert_eq!(
-        reopened.host_counts(),
+        reopened.host_counts().unwrap(),
         std::collections::HashMap::from([("x.com".to_string(), 1)])
     );
-    assert_eq!(reopened.raw_shape_counts().values().sum::<usize>(), 1);
+    assert_eq!(
+        reopened.raw_shape_counts().unwrap().values().sum::<usize>(),
+        1
+    );
     cleanup(&p);
 }
 
@@ -202,7 +205,10 @@ fn saving_to_another_spelling_of_the_live_path_flushes_in_place() {
         data.starts_with(b"SQLite format 3\0"),
         "live corpus overwritten with JSON"
     );
-    assert_eq!(Corpus::open(&live).unwrap().observed_iri_count(), 1);
+    assert_eq!(
+        Corpus::open(&live).unwrap().observed_iri_count().unwrap(),
+        1
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -231,7 +237,7 @@ fn observe_one_and_huge(c: &mut Corpus) {
 }
 
 fn v_range(c: &Corpus) -> (f64, f64, f64) {
-    let rows = c.params_for("https://inf.com/p?v=1");
+    let rows = c.params_for("https://inf.com/p?v=1").unwrap();
     let v = rows
         .iter()
         .find(|p| p.name == "v")
@@ -287,7 +293,7 @@ fn an_empty_json_object_is_an_empty_corpus() {
     let p = temp_path("empty_object.json");
     std::fs::write(&p, b"{}").unwrap();
 
-    assert_eq!(Corpus::open(&p).unwrap().observed_iri_count(), 0);
+    assert_eq!(Corpus::open(&p).unwrap().observed_iri_count().unwrap(), 0);
     cleanup(&p);
 }
 
@@ -320,7 +326,7 @@ fn concurrent_json_saves_to_one_path_all_succeed() {
     });
 
     // Last writer wins; whichever it was, the file is a whole corpus.
-    assert_eq!(Corpus::open(&p).unwrap().observed_iri_count(), 1);
+    assert_eq!(Corpus::open(&p).unwrap().observed_iri_count().unwrap(), 1);
     cleanup(&p);
 }
 
@@ -333,7 +339,7 @@ fn sqlite_resave_to_same_path_is_idempotent() {
 
     let mut c = Corpus::open(path).unwrap();
     observe_param_stream(&mut c);
-    let before = param_rows(&c.params_for(QUERY));
+    let before = param_rows(&c.params_for(QUERY).unwrap());
     // Saving a SQLite corpus back to its own path must not rewrite it as JSON.
     c.save(path).unwrap();
     c.close().unwrap();
@@ -342,7 +348,7 @@ fn sqlite_resave_to_same_path_is_idempotent() {
     assert!(data.starts_with(b"SQLite format 3\0"), "file was clobbered");
 
     let reopened = Corpus::open(path).unwrap();
-    assert_eq!(param_rows(&reopened.params_for(QUERY)), before);
-    assert_eq!(reopened.host_counts().get("foo.com"), Some(&10));
+    assert_eq!(param_rows(&reopened.params_for(QUERY).unwrap()), before);
+    assert_eq!(reopened.host_counts().unwrap().get("foo.com"), Some(&10));
     cleanup(&p);
 }

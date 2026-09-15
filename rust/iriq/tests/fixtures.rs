@@ -268,7 +268,7 @@ fn fixture_param_summary() {
     for u in &fx.inputs {
         c.observe(u).unwrap();
     }
-    let rows = c.params_for(&fx.query);
+    let rows = c.params_for(&fx.query).unwrap();
     assert_eq!(rows.len(), fx.expected.len(), "param count");
     let by_name: HashMap<&str, &ParamSummary> = rows.iter().map(|r| (r.name.as_str(), r)).collect();
     for (name, want) in &fx.expected {
@@ -314,7 +314,7 @@ fn fixture_corpus_normalize() {
         }
         let iri = parse(&case.input).unwrap();
         assert_eq!(
-            c.normalize_identifier(&iri, case.hints),
+            c.normalize_identifier(&iri, case.hints).unwrap(),
             case.output,
             "{:?} hints={} after {} observations",
             case.input,
@@ -348,7 +348,7 @@ fn params_after<T>(fx: &ParamsFx<T>) -> HashMap<String, ParamSummary> {
     for u in &fx.inputs {
         c.observe(u).unwrap();
     }
-    let rows = c.params_for(&fx.query);
+    let rows = c.params_for(&fx.query).unwrap();
     assert_eq!(rows.len(), fx.expected.len(), "param count");
     rows.into_iter().map(|r| (r.name.clone(), r)).collect()
 }

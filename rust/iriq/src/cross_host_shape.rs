@@ -1,4 +1,5 @@
 use crate::corpus::Corpus;
+use crate::errors::Result;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -17,10 +18,10 @@ impl CrossHostShape {
 
 /// Lists route shapes (the path-only form, stripped of host) that recur
 /// across multiple hosts. Mirrors Ruby's Corpus#cross_host_shapes.
-pub fn cross_host_shapes(cp: &Corpus, min_hosts: usize) -> Vec<CrossHostShape> {
+pub fn cross_host_shapes(cp: &Corpus, min_hosts: usize) -> Result<Vec<CrossHostShape>> {
     let min = if min_hosts == 0 { 2 } else { min_hosts };
     let mut by_shape: HashMap<String, (Vec<String>, usize)> = HashMap::new();
-    for c in cp.clusters() {
+    for c in cp.clusters()? {
         let entry = by_shape
             .entry(c.shape.clone())
             .or_insert_with(|| (Vec::new(), 0));
@@ -50,5 +51,5 @@ pub fn cross_host_shapes(cp: &Corpus, min_hosts: usize) -> Vec<CrossHostShape> {
             .then(b.observation_count.cmp(&a.observation_count))
             .then(a.shape.cmp(&b.shape))
     });
-    out
+    Ok(out)
 }

@@ -101,36 +101,38 @@ impl Storage for MemoryStorage {
         Ok(())
     }
 
-    fn host_counts(&self) -> HashMap<String, usize> {
-        self.host_counts.clone()
+    fn host_counts(&self) -> Result<HashMap<String, usize>> {
+        Ok(self.host_counts.clone())
     }
-    fn path_length_counts(&self) -> HashMap<usize, usize> {
-        self.path_length_counts.clone()
+    fn path_length_counts(&self) -> Result<HashMap<usize, usize>> {
+        Ok(self.path_length_counts.clone())
     }
-    fn raw_shape_counts(&self) -> HashMap<String, usize> {
-        self.raw_shape_counts.clone()
+    fn raw_shape_counts(&self) -> Result<HashMap<String, usize>> {
+        Ok(self.raw_shape_counts.clone())
     }
-    fn fingerprint_counts(&self) -> HashMap<String, usize> {
-        self.fingerprint_counts.clone()
+    fn fingerprint_counts(&self) -> Result<HashMap<String, usize>> {
+        Ok(self.fingerprint_counts.clone())
     }
-    fn each_position_stats(&self, f: &mut dyn FnMut(&Position, &PositionStats)) {
+    fn each_position_stats(&self, f: &mut dyn FnMut(&Position, &PositionStats)) -> Result<()> {
         for k in &self.position_keys {
             if let Some(v) = self.position_stats.get(k) {
                 f(k, v);
             }
         }
+        Ok(())
     }
-    fn clusters(&self) -> Vec<Cluster> {
-        self.cluster_keys
+    fn clusters(&self) -> Result<Vec<Cluster>> {
+        Ok(self
+            .cluster_keys
             .iter()
             .filter_map(|k| self.clusters.get(k).cloned())
-            .collect()
+            .collect())
     }
-    fn cluster_for(&self, key: &str) -> Option<Cluster> {
-        self.clusters.get(key).cloned()
+    fn cluster_for(&self, key: &str) -> Result<Option<Cluster>> {
+        Ok(self.clusters.get(key).cloned())
     }
-    fn cluster_size(&self) -> usize {
-        self.clusters.len()
+    fn cluster_size(&self) -> Result<usize> {
+        Ok(self.clusters.len())
     }
     fn position_evidence(&self, pos: &Position, value: &str) -> Result<Option<PositionEvidence>> {
         Ok(self
@@ -150,13 +152,14 @@ impl Storage for MemoryStorage {
         self.observed_iris.push(canonical.to_string());
         Ok(())
     }
-    fn each_observed_iri(&self, f: &mut dyn FnMut(&str)) {
+    fn each_observed_iri(&self, f: &mut dyn FnMut(&str)) -> Result<()> {
         for c in &self.observed_iris {
             f(c);
         }
+        Ok(())
     }
-    fn observed_iri_count(&self) -> usize {
-        self.observed_iris.len()
+    fn observed_iri_count(&self) -> Result<usize> {
+        Ok(self.observed_iris.len())
     }
     fn clear_materialized_views(&mut self) -> Result<()> {
         self.host_counts.clear();
@@ -186,13 +189,14 @@ impl Storage for MemoryStorage {
         self.activated_recognizers.push(dump);
         Ok(())
     }
-    fn each_activated_recognizer(&self, f: &mut dyn FnMut(&serde_json::Value)) {
+    fn each_activated_recognizer(&self, f: &mut dyn FnMut(&serde_json::Value)) -> Result<()> {
         for d in &self.activated_recognizers {
             f(d);
         }
+        Ok(())
     }
-    fn activated_recognizer_count(&self) -> usize {
-        self.activated_recognizers.len()
+    fn activated_recognizer_count(&self) -> Result<usize> {
+        Ok(self.activated_recognizers.len())
     }
 
     fn save_to(&mut self, path: &std::path::Path) -> Result<()> {

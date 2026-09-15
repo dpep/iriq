@@ -53,16 +53,24 @@ fn concurrent_observers_against_the_same_corpus_file() {
     let corpus = Corpus::open(&path).unwrap();
     let total = WRITERS * URLS_PER_THREAD;
 
-    assert_eq!(corpus.observed_iri_count(), total);
+    assert_eq!(corpus.observed_iri_count().unwrap(), total);
 
     let expected_hosts: HashMap<String, usize> = (0..WRITERS)
         .map(|i| (format!("c{i}.example.com"), URLS_PER_THREAD))
         .collect();
-    assert_eq!(corpus.host_counts(), expected_hosts);
+    assert_eq!(corpus.host_counts().unwrap(), expected_hosts);
 
-    assert_eq!(corpus.raw_shape_counts().values().sum::<usize>(), total);
     assert_eq!(
-        corpus.clusters().iter().map(|c| c.count).sum::<usize>(),
+        corpus.raw_shape_counts().unwrap().values().sum::<usize>(),
+        total
+    );
+    assert_eq!(
+        corpus
+            .clusters()
+            .unwrap()
+            .iter()
+            .map(|c| c.count)
+            .sum::<usize>(),
         total
     );
     cleanup(&p);

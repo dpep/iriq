@@ -6,7 +6,7 @@ use crate::cluster::ParamSummary;
 use crate::cluster::{placeholder_for, Cluster};
 use crate::clusterer::cluster_key_for_host;
 use crate::cross_host_shape::{cross_host_shapes, CrossHostShape};
-use crate::errors::{Error, ParseError, Result};
+use crate::errors::{Error, Result};
 use crate::event::Event;
 use crate::hints::{derive_hints, SegmentHint};
 use crate::identifier::Identifier;
@@ -99,7 +99,7 @@ impl Corpus {
             host_strategy: HostStrategy::Full,
             storage,
         };
-        cp.reapply_activated_recognizers();
+        cp.reapply_activated_recognizers()?;
         Ok(cp)
     }
 
@@ -145,7 +145,7 @@ impl Corpus {
         self.batch(|c| {
             let mut iris = Vec::new();
             c.storage
-                .each_observed_iri(&mut |iri| iris.push(iri.to_string()));
+                .each_observed_iri(&mut |iri| iris.push(iri.to_string()))?;
             c.storage.clear_materialized_views()?;
             for canonical in iris {
                 c.replay(&parse(&canonical)?)?;
@@ -154,11 +154,11 @@ impl Corpus {
         })
     }
 
-    pub fn observed_iri_count(&self) -> usize {
+    pub fn observed_iri_count(&self) -> Result<usize> {
         self.storage.observed_iri_count()
     }
 
-    pub fn propose_recognizers(&self, opts: ProposalOptions) -> Vec<RecognizerProposal> {
+    pub fn propose_recognizers(&self, opts: ProposalOptions) -> Result<Vec<RecognizerProposal>> {
         propose_recognizers(self.storage.as_ref(), opts)
     }
 
@@ -169,19 +169,19 @@ impl Corpus {
         // become dynamic Custom types, matching Ruby's symbol semantics.
         let ty = segment_type_from_name(&p.suggested_type);
         let dump = SynthesizedRecognizer::from_prefix(p.prefix.clone(), ty).dump();
-        if self.has_activated(&dump) {
+        if self.has_activated(&dump)? {
             return Ok(());
         }
         self.storage.record_activated_recognizer(dump)?;
-        self.reapply_activated_recognizers();
+        self.reapply_activated_recognizers()?;
         self.reinfer()
     }
 
-    fn has_activated(&self, dump: &serde_json::Value) -> bool {
+    fn has_activated(&self, dump: &serde_json::Value) -> Result<bool> {
         let mut found = false;
         self.storage
-            .each_activated_recognizer(&mut |stored| found |= stored == dump);
-        found
+            .each_activated_recognizer(&mut |stored| found |= stored == dump)?;
+        Ok(found)
     }
 
     /// Activate every proposal at or above `confidence_threshold`, returning
@@ -192,7 +192,7 @@ impl Corpus {
         opts: ProposalOptions,
     ) -> Result<Vec<RecognizerProposal>> {
         let mut activated = Vec::new();
-        for p in self.propose_recognizers(opts) {
+        for p in self.propose_recognizers(opts)? {
             if p.confidence < confidence_threshold {
                 continue;
             }
@@ -202,28 +202,29 @@ impl Corpus {
         Ok(activated)
     }
 
-    pub fn activated_recognizer_count(&self) -> usize {
+    pub fn activated_recognizer_count(&self) -> Result<usize> {
         self.storage.activated_recognizer_count()
     }
 
     /// The classifier is a function of the stored activations: the shared
     /// default when there are none, otherwise a private copy holding exactly
     /// the stored set, so a live corpus and its reopened self agree.
-    fn reapply_activated_recognizers(&mut self) {
+    fn reapply_activated_recognizers(&mut self) -> Result<()> {
         let mut recognizers = Vec::new();
         self.storage.each_activated_recognizer(&mut |v| {
             if let Some(r) = SynthesizedRecognizer::from_dump(v) {
                 recognizers.push(r);
             }
-        });
+        })?;
         if recognizers.is_empty() {
-            return;
+            return Ok(());
         }
         let classifier = SegmentClassifier::new();
         for r in recognizers {
             classifier.register_recognizer(Arc::new(r));
         }
         self.classifier = Arc::new(classifier);
+        Ok(())
     }
 
     fn events_for_iri(&self, iri: &Identifier) -> Vec<Event> {
@@ -279,55 +280,54 @@ impl Corpus {
     /// Corpus-informed [`normalize`](crate::normalize). The corpus changes a
     /// shape only at a position or param it has seen at least 5 times; below
     /// that the output is exactly what `normalize` gives.
-    pub fn normalize(&self, input: &str) -> std::result::Result<String, ParseError> {
+    ///
+    /// Fails when `input` doesn't parse or a corpus read fails.
+    pub fn normalize(&self, input: &str) -> Result<String> {
         let iri = parse(input)?;
-        Ok(self.normalize_identifier(&iri, true))
+        self.normalize_identifier(&iri, true)
     }
 
     /// Corpus-informed [`normalize_identifier`](crate::normalize_identifier).
     /// `hints: false` renders bare type placeholders (`{integer}`), and a slot
     /// only the corpus knows is variable renders `{value}`.
-    pub fn normalize_identifier(&self, iri: &Identifier, hints: bool) -> String {
-        let ev: &dyn NormalizationEvidence = self;
-        normalize_identifier_with_evidence(iri, &self.classifier, hints, ev)
+    pub fn normalize_identifier(&self, iri: &Identifier, hints: bool) -> Result<String> {
+        normalize_identifier_with_evidence(iri, &self.classifier, hints, self)
     }
 
-    pub fn explain(&self, input: &str) -> Vec<CorpusEntry> {
-        let iri = match parse(input) {
-            Ok(i) => i,
-            Err(_) => return Vec::new(),
-        };
-        self.annotate_segments(&iri)
+    pub fn explain(&self, input: &str) -> Result<Vec<CorpusEntry>> {
+        let iri = parse(input)?;
+        Ok(self
+            .annotate_segments(&iri)?
             .into_iter()
             .map(|a| CorpusEntry {
                 hint: a.hint,
                 classification: a.classification,
             })
-            .collect()
+            .collect())
     }
 
-    pub fn host_counts(&self) -> HashMap<String, usize> {
+    pub fn host_counts(&self) -> Result<HashMap<String, usize>> {
         self.storage.host_counts()
     }
-    pub fn path_length_counts(&self) -> HashMap<usize, usize> {
+    pub fn path_length_counts(&self) -> Result<HashMap<usize, usize>> {
         self.storage.path_length_counts()
     }
-    pub fn raw_shape_counts(&self) -> HashMap<String, usize> {
+    pub fn raw_shape_counts(&self) -> Result<HashMap<String, usize>> {
         self.storage.raw_shape_counts()
     }
-    pub fn fingerprint_counts(&self) -> HashMap<String, usize> {
+    pub fn fingerprint_counts(&self) -> Result<HashMap<String, usize>> {
         self.storage.fingerprint_counts()
     }
-    pub fn clusters(&self) -> Vec<Cluster> {
+    pub fn clusters(&self) -> Result<Vec<Cluster>> {
         self.storage.clusters()
     }
-    pub fn size(&self) -> usize {
+    pub fn size(&self) -> Result<usize> {
         self.storage.cluster_size()
     }
 
     /// Route shapes (path only, host stripped) that recur across at least
     /// `min_hosts` hosts; `0` means the default of 2.
-    pub fn cross_host_shapes(&self, min_hosts: usize) -> Vec<CrossHostShape> {
+    pub fn cross_host_shapes(&self, min_hosts: usize) -> Result<Vec<CrossHostShape>> {
         cross_host_shapes(self, min_hosts)
     }
 
@@ -382,12 +382,12 @@ impl Corpus {
         }
     }
 
-    pub fn params_for(&self, input: &str) -> Vec<ParamSummary> {
-        let Ok(iri) = parse(input) else {
-            return Vec::new();
-        };
-        let cluster = self.storage.cluster_for(&self.cluster_key_for_iri(&iri));
-        cluster.map(|c| c.param_summary()).unwrap_or_default()
+    /// The params of the cluster `input` falls into; empty when that cluster
+    /// hasn't been observed.
+    pub fn params_for(&self, input: &str) -> Result<Vec<ParamSummary>> {
+        let iri = parse(input)?;
+        let cluster = self.storage.cluster_for(&self.cluster_key_for_iri(&iri))?;
+        Ok(cluster.map(|c| c.param_summary()).unwrap_or_default())
     }
 
     fn cluster_key_for_iri(&self, iri: &Identifier) -> String {
@@ -402,7 +402,7 @@ impl Corpus {
         .key
     }
 
-    fn annotate_segments(&self, iri: &Identifier) -> Vec<Annotated> {
+    fn annotate_segments(&self, iri: &Identifier) -> Result<Vec<Annotated>> {
         let hinted = derive_hints(&iri.path_segments, &self.classifier);
         let keying_host = self.effective_host(&iri.host);
         let mut out = Vec::with_capacity(hinted.len());
@@ -412,15 +412,10 @@ impl Corpus {
             let cls = if entry.variable && !stable_variable_type(entry.ty) {
                 Classification::VariableIdentifier
             } else {
-                // Normalize is infallible for now: a failed read is no evidence.
-                let evidence = self
-                    .storage
-                    .position_evidence(
-                        &Position::path(keying_host.clone(), prefix.clone()),
-                        &entry.value,
-                    )
-                    .ok()
-                    .flatten();
+                let evidence = self.storage.position_evidence(
+                    &Position::path(keying_host.clone(), prefix.clone()),
+                    &entry.value,
+                )?;
                 classify_segment(entry, evidence.as_ref(), &self.classifier)
             };
             out.push(Annotated {
@@ -431,7 +426,7 @@ impl Corpus {
             prefix.push('/');
             prefix.push_str(&placeholder_for(entry));
         }
-        out
+        Ok(out)
     }
 
     fn corpus_token(&self, a: &Annotated, hints: bool) -> String {
@@ -467,24 +462,26 @@ fn placeholder_for_variable(a: &Annotated, hints: bool) -> String {
 }
 
 impl NormalizationEvidence for Corpus {
-    fn render_path(&self, iri: &Identifier, _c: &SegmentClassifier, hints: bool) -> String {
-        let entries = self.annotate_segments(iri);
-        let tokens: Vec<String> = entries
+    type Error = Error;
+
+    fn render_path(&self, iri: &Identifier, _c: &SegmentClassifier, hints: bool) -> Result<String> {
+        let tokens: Vec<String> = self
+            .annotate_segments(iri)?
             .iter()
             .map(|a| self.corpus_token(a, hints))
             .collect();
-        format!("/{}", tokens.join("/"))
+        Ok(format!("/{}", tokens.join("/")))
     }
-    fn render_query(&self, iri: &Identifier, _c: &SegmentClassifier) -> String {
+    fn render_query(&self, iri: &Identifier, _c: &SegmentClassifier) -> Result<String> {
         self.render_query_inner(iri)
     }
 }
 
 impl Corpus {
-    fn render_query_inner(&self, iri: &Identifier) -> String {
+    fn render_query_inner(&self, iri: &Identifier) -> Result<String> {
         let mut keys = iri.query_params.keys();
         if keys.is_empty() {
-            return String::new();
+            return Ok(String::new());
         }
         let cluster_key = self.cluster_key_for_iri(iri);
         keys.sort();
@@ -494,34 +491,31 @@ impl Corpus {
             parts.push(format!(
                 "{}={}",
                 k,
-                self.render_query_param(&cluster_key, &k, v)
+                self.render_query_param(&cluster_key, &k, v)?
             ));
         }
-        parts.join("&")
+        Ok(parts.join("&"))
     }
 
     // A param the cluster has seen MIN_OBSERVATIONS_FOR_INFERENCE times renders
     // with the cluster's type; below that it renders exactly as mechanical
     // normalize would.
-    fn render_query_param(&self, cluster_key: &str, name: &str, value: &str) -> String {
-        // Normalize is infallible for now: a failed read is no evidence.
+    fn render_query_param(&self, cluster_key: &str, name: &str, value: &str) -> Result<String> {
         let stats = self
             .storage
-            .param_stats_for(cluster_key, name)
-            .ok()
-            .flatten()
+            .param_stats_for(cluster_key, name)?
             .filter(|s| s.total >= MIN_OBSERVATIONS_FOR_INFERENCE);
         let Some(stats) = stats else {
-            return render_param(name, value, &self.classifier);
+            return Ok(render_param(name, value, &self.classifier));
         };
         let t = Cluster::param_type_for(name, &stats);
         if let Some(canon) = canonical_form(t, value) {
-            return canon;
+            return Ok(canon);
         }
         if self.classifier.variable(t) {
-            return format!("{{{}}}", display_type(t));
+            return Ok(format!("{{{}}}", display_type(t)));
         }
-        value.to_string()
+        Ok(value.to_string())
     }
 }
 
@@ -719,7 +713,7 @@ mod tests {
             c.activate_proposal(&proposal("tok_", "tok")).unwrap();
         }
         assert_eq!(c.classifier.recognizer_count(), live);
-        assert_eq!(c.activated_recognizer_count(), 1);
+        assert_eq!(c.activated_recognizer_count().unwrap(), 1);
     }
 
     #[test]

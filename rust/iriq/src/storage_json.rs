@@ -77,28 +77,28 @@ impl Storage for JsonStorage {
         self.inner.add_to_cluster(key, host, scheme, shape, iri)
     }
 
-    fn host_counts(&self) -> HashMap<String, usize> {
+    fn host_counts(&self) -> Result<HashMap<String, usize>> {
         self.inner.host_counts()
     }
-    fn path_length_counts(&self) -> HashMap<usize, usize> {
+    fn path_length_counts(&self) -> Result<HashMap<usize, usize>> {
         self.inner.path_length_counts()
     }
-    fn raw_shape_counts(&self) -> HashMap<String, usize> {
+    fn raw_shape_counts(&self) -> Result<HashMap<String, usize>> {
         self.inner.raw_shape_counts()
     }
-    fn fingerprint_counts(&self) -> HashMap<String, usize> {
+    fn fingerprint_counts(&self) -> Result<HashMap<String, usize>> {
         self.inner.fingerprint_counts()
     }
-    fn each_position_stats(&self, f: &mut dyn FnMut(&Position, &PositionStats)) {
-        self.inner.each_position_stats(f);
+    fn each_position_stats(&self, f: &mut dyn FnMut(&Position, &PositionStats)) -> Result<()> {
+        self.inner.each_position_stats(f)
     }
-    fn clusters(&self) -> Vec<Cluster> {
+    fn clusters(&self) -> Result<Vec<Cluster>> {
         self.inner.clusters()
     }
-    fn cluster_for(&self, key: &str) -> Option<Cluster> {
+    fn cluster_for(&self, key: &str) -> Result<Option<Cluster>> {
         self.inner.cluster_for(key)
     }
-    fn cluster_size(&self) -> usize {
+    fn cluster_size(&self) -> Result<usize> {
         self.inner.cluster_size()
     }
     fn position_evidence(&self, pos: &Position, value: &str) -> Result<Option<PositionEvidence>> {
@@ -110,10 +110,10 @@ impl Storage for JsonStorage {
     fn record_observation(&mut self, canonical: &str) -> Result<()> {
         self.inner.record_observation(canonical)
     }
-    fn each_observed_iri(&self, f: &mut dyn FnMut(&str)) {
-        self.inner.each_observed_iri(f);
+    fn each_observed_iri(&self, f: &mut dyn FnMut(&str)) -> Result<()> {
+        self.inner.each_observed_iri(f)
     }
-    fn observed_iri_count(&self) -> usize {
+    fn observed_iri_count(&self) -> Result<usize> {
         self.inner.observed_iri_count()
     }
     fn clear_materialized_views(&mut self) -> Result<()> {
@@ -122,10 +122,10 @@ impl Storage for JsonStorage {
     fn record_activated_recognizer(&mut self, dump: Value) -> Result<()> {
         self.inner.record_activated_recognizer(dump)
     }
-    fn each_activated_recognizer(&self, f: &mut dyn FnMut(&Value)) {
-        self.inner.each_activated_recognizer(f);
+    fn each_activated_recognizer(&self, f: &mut dyn FnMut(&Value)) -> Result<()> {
+        self.inner.each_activated_recognizer(f)
     }
-    fn activated_recognizer_count(&self) -> usize {
+    fn activated_recognizer_count(&self) -> Result<usize> {
         self.inner.activated_recognizer_count()
     }
 

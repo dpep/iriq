@@ -17,7 +17,7 @@ fn sqlite_dedupes_cluster_examples() {
     }
     c.observe("https://foo.com/users/2").unwrap();
 
-    let cluster = &c.clusters()[0];
+    let cluster = &c.clusters().unwrap()[0];
     assert_eq!(cluster.count, 4);
     let examples: Vec<String> = cluster.examples.iter().map(|e| e.canonical()).collect();
     assert_eq!(

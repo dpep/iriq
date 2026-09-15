@@ -7,26 +7,41 @@ use crate::hints::derive_hints;
 use crate::identifier::Identifier;
 use crate::parser::parse;
 use crate::path_shape::PathShape;
+use std::convert::Infallible;
 
-pub trait NormalizationEvidence: Send + Sync {
-    fn render_path(&self, iri: &Identifier, c: &SegmentClassifier, hints: bool) -> String;
-    fn render_query(&self, iri: &Identifier, c: &SegmentClassifier) -> String;
+pub trait NormalizationEvidence {
+    /// What a failed evidence read reports.
+    type Error;
+    fn render_path(
+        &self,
+        iri: &Identifier,
+        c: &SegmentClassifier,
+        hints: bool,
+    ) -> Result<String, Self::Error>;
+    fn render_query(&self, iri: &Identifier, c: &SegmentClassifier) -> Result<String, Self::Error>;
 }
 
 pub struct NullEvidence;
 
 impl NormalizationEvidence for NullEvidence {
-    fn render_path(&self, iri: &Identifier, c: &SegmentClassifier, hints: bool) -> String {
+    type Error = Infallible;
+
+    fn render_path(
+        &self,
+        iri: &Identifier,
+        c: &SegmentClassifier,
+        hints: bool,
+    ) -> Result<String, Infallible> {
         let mut ps = PathShape::new();
         ps.classifier = c;
         ps.hints = hints;
         ps.canonical_dates = true;
         ps.canonical_currencies = true;
-        ps.for_segments(&iri.path_segments)
+        Ok(ps.for_segments(&iri.path_segments))
     }
 
-    fn render_query(&self, iri: &Identifier, c: &SegmentClassifier) -> String {
-        shape_query(iri, c)
+    fn render_query(&self, iri: &Identifier, c: &SegmentClassifier) -> Result<String, Infallible> {
+        Ok(shape_query(iri, c))
     }
 }
 
@@ -55,17 +70,18 @@ pub(crate) fn normalize_identifier_with(
     c: &SegmentClassifier,
     hints: bool,
 ) -> String {
-    normalize_identifier_with_evidence(iri, c, hints, &NullEvidence)
+    let Ok(s) = normalize_identifier_with_evidence(iri, c, hints, &NullEvidence);
+    s
 }
 
-pub fn normalize_identifier_with_evidence(
+pub fn normalize_identifier_with_evidence<E: NormalizationEvidence>(
     iri: &Identifier,
     c: &SegmentClassifier,
     hints: bool,
-    ev: &dyn NormalizationEvidence,
-) -> String {
+    ev: &E,
+) -> Result<String, E::Error> {
     if iri.is_urn() {
-        return normalize_urn(iri, c, hints);
+        return Ok(normalize_urn(iri, c, hints));
     }
     let mut s = String::new();
     if !iri.scheme.is_empty() {
@@ -79,12 +95,12 @@ pub fn normalize_identifier_with_evidence(
         s.push(':');
         s.push_str(&port.to_string());
     }
-    s.push_str(&ev.render_path(iri, c, hints));
+    s.push_str(&ev.render_path(iri, c, hints)?);
     if !iri.query_params.is_empty() {
         s.push('?');
-        s.push_str(&ev.render_query(iri, c));
+        s.push_str(&ev.render_query(iri, c)?);
     }
-    s
+    Ok(s)
 }
 
 fn normalize_urn(iri: &Identifier, c: &SegmentClassifier, hints: bool) -> String {

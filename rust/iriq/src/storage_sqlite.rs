@@ -126,53 +126,47 @@ impl SqliteStorage {
         self.conn.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn position_stats_for(&self, pos: &Position) -> Option<PositionStats> {
-        let c = self.conn();
-        let total: i64 = c
-            .query_row(
-                "SELECT total FROM position_stats WHERE host = ? AND scope = ? AND locator = ?",
-                params![pos.host, pos.scope.as_str(), pos.locator],
-                |r| r.get(0),
-            )
-            .optional()
-            .ok()
-            .flatten()?;
-        let mut ps = PositionStats::new(self.max_values);
-        ps.total = total as usize;
+    /// Run a read, naming the corpus in any failure.
+    fn read<T>(&self, f: impl FnOnce(&Connection) -> rusqlite::Result<T>) -> Result<T> {
+        f(&self.conn()).map_err(|e| Error::sqlite(&self.path, e))
+    }
 
-        {
-            let mut stmt = c
-                .prepare(
+    fn position_stats_for(&self, pos: &Position) -> Result<Option<PositionStats>> {
+        self.read(|c| {
+            let key = params![pos.host, pos.scope.as_str(), pos.locator];
+            let Some(total) = c
+                .prepare_cached(
+                    "SELECT total FROM position_stats WHERE host = ? AND scope = ? AND locator = ?",
+                )?
+                .query_row(key, |r| r.get::<_, i64>(0))
+                .optional()?
+            else {
+                return Ok(None);
+            };
+            let mut ps = PositionStats::new(self.max_values);
+            ps.total = total as usize;
+            ps.value_counts = c
+                .prepare_cached(
                     "SELECT value, count FROM position_values WHERE host = ? AND scope = ? AND locator = ?",
-                )
-                .unwrap();
-            let rows = stmt
-                .query_map(params![pos.host, pos.scope.as_str(), pos.locator], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
-                })
-                .unwrap();
-            for row in rows.flatten() {
-                ps.value_counts.insert(row.0, row.1 as usize);
-            }
-        }
-        {
-            let mut stmt = c
-                .prepare(
+                )?
+                .query_map(key, |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as usize))
+                })?
+                .collect::<rusqlite::Result<_>>()?;
+            ps.type_counts = c
+                .prepare_cached(
                     "SELECT type, count FROM position_types WHERE host = ? AND scope = ? AND locator = ?",
-                )
-                .unwrap();
-            let rows = stmt
-                .query_map(params![pos.host, pos.scope.as_str(), pos.locator], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
-                })
-                .unwrap();
-            for row in rows.flatten() {
-                ps.type_counts
-                    .insert(segment_type_from_name(&row.0), row.1 as usize);
-            }
-        }
-        rebuild_numeric_stats(&mut ps);
-        Some(ps)
+                )?
+                .query_map(key, |r| {
+                    Ok((
+                        segment_type_from_name(&r.get::<_, String>(0)?),
+                        r.get::<_, i64>(1)? as usize,
+                    ))
+                })?
+                .collect::<rusqlite::Result<_>>()?;
+            rebuild_numeric_stats(&mut ps);
+            Ok(Some(ps))
+        })
     }
 }
 
@@ -416,198 +410,69 @@ impl Storage for SqliteStorage {
         Ok(())
     }
 
-    fn host_counts(&self) -> HashMap<String, usize> {
-        counts_hash(&self.conn(), "host_counts", "host")
+    fn host_counts(&self) -> Result<HashMap<String, usize>> {
+        self.read(|c| counts_hash(c, "host_counts", "host"))
     }
-    fn path_length_counts(&self) -> HashMap<usize, usize> {
-        let c = self.conn();
-        let mut out = HashMap::new();
-        let mut stmt = c
-            .prepare("SELECT length, count FROM path_length_counts")
-            .unwrap();
-        let rows = stmt
-            .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))
-            .unwrap();
-        for row in rows.flatten() {
-            out.insert(row.0 as usize, row.1 as usize);
-        }
-        out
+    fn path_length_counts(&self) -> Result<HashMap<usize, usize>> {
+        self.read(|c| {
+            let mut stmt = c.prepare("SELECT length, count FROM path_length_counts")?;
+            let rows = stmt.query_map([], |r| {
+                Ok((r.get::<_, i64>(0)? as usize, r.get::<_, i64>(1)? as usize))
+            })?;
+            rows.collect()
+        })
     }
-    fn raw_shape_counts(&self) -> HashMap<String, usize> {
-        counts_hash(&self.conn(), "raw_shape_counts", "shape")
+    fn raw_shape_counts(&self) -> Result<HashMap<String, usize>> {
+        self.read(|c| counts_hash(c, "raw_shape_counts", "shape"))
     }
-    fn fingerprint_counts(&self) -> HashMap<String, usize> {
-        counts_hash(&self.conn(), "fingerprint_counts", "shape")
+    fn fingerprint_counts(&self) -> Result<HashMap<String, usize>> {
+        self.read(|c| counts_hash(c, "fingerprint_counts", "shape"))
     }
 
-    fn each_position_stats(&self, f: &mut dyn FnMut(&Position, &PositionStats)) {
-        let keys = {
-            let c = self.conn();
-            let mut stmt = c
-                .prepare("SELECT host, scope, locator FROM position_stats ORDER BY ROWID")
-                .unwrap();
-            let rows = stmt
-                .query_map([], |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, String>(2)?,
-                    ))
-                })
-                .unwrap();
-            rows.filter_map(|r| {
-                r.ok().map(|(h, sc, l)| Position {
-                    host: h,
-                    scope: if sc == "query" {
+    fn each_position_stats(&self, f: &mut dyn FnMut(&Position, &PositionStats)) -> Result<()> {
+        let keys: Vec<Position> = self.read(|c| {
+            let mut stmt =
+                c.prepare("SELECT host, scope, locator FROM position_stats ORDER BY ROWID")?;
+            let rows = stmt.query_map([], |r| {
+                Ok(Position {
+                    host: r.get(0)?,
+                    scope: if r.get::<_, String>(1)? == "query" {
                         PositionScope::Query
                     } else {
                         PositionScope::Path
                     },
-                    locator: l,
+                    locator: r.get(2)?,
                 })
-            })
-            .collect::<Vec<_>>()
-        };
+            })?;
+            rows.collect()
+        })?;
         for k in keys {
-            if let Some(stats) = self.position_stats_for(&k) {
+            if let Some(stats) = self.position_stats_for(&k)? {
                 f(&k, &stats);
             }
         }
+        Ok(())
     }
 
-    fn clusters(&self) -> Vec<Cluster> {
-        let keys: Vec<String> = {
-            let c = self.conn();
-            let mut stmt = c.prepare("SELECT key FROM clusters ORDER BY ord").unwrap();
-            let rows = stmt.query_map([], |r| r.get::<_, String>(0)).unwrap();
-            rows.flatten().collect()
-        };
-        keys.iter().filter_map(|k| self.cluster_for(k)).collect()
+    fn clusters(&self) -> Result<Vec<Cluster>> {
+        self.read(|c| {
+            let mut stmt = c.prepare("SELECT key FROM clusters ORDER BY ord")?;
+            let keys = stmt
+                .query_map([], |r| r.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            let mut out = Vec::with_capacity(keys.len());
+            for key in &keys {
+                out.extend(load_cluster(c, key, self.max_values)?);
+            }
+            Ok(out)
+        })
     }
-    fn cluster_for(&self, key: &str) -> Option<Cluster> {
-        let c = self.conn();
-        let row: (String, String, String, i64) = c
-            .query_row(
-                "SELECT host, scheme, shape, count FROM clusters WHERE key = ?",
-                params![key],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-            )
-            .optional()
-            .ok()
-            .flatten()?;
-        let mut cluster = Cluster::new(key.to_string(), row.0, row.1, row.2, self.max_values);
-        cluster.count = row.3 as usize;
-
-        {
-            let mut stmt = c
-                .prepare(
-                    "SELECT canonical FROM cluster_examples WHERE cluster_key = ? ORDER BY position",
-                )
-                .unwrap();
-            let rows = stmt
-                .query_map(params![key], |r| r.get::<_, String>(0))
-                .unwrap();
-            for canon in rows.flatten() {
-                if let Ok(iri) = parse(&canon) {
-                    cluster.register_example_key(iri.canonical());
-                    cluster.examples.push(std::sync::Arc::new(iri));
-                }
-            }
-        }
-
-        {
-            let mut stmt = c
-                .prepare(
-                    "SELECT position, value, count FROM cluster_segments WHERE cluster_key = ? ORDER BY position",
-                )
-                .unwrap();
-            let rows = stmt
-                .query_map(params![key], |r| {
-                    Ok((
-                        r.get::<_, i64>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, i64>(2)?,
-                    ))
-                })
-                .unwrap();
-            for (pos, value, count) in rows.flatten() {
-                let pos = pos as usize;
-                while cluster.segment_counts.len() <= pos {
-                    cluster.segment_counts.push(HashMap::new());
-                }
-                cluster.segment_counts[pos].insert(value, count as usize);
-            }
-        }
-
-        {
-            let mut stmt = c
-                .prepare("SELECT name, total FROM cluster_params WHERE cluster_key = ?")
-                .unwrap();
-            let rows = stmt
-                .query_map(params![key], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
-                })
-                .unwrap();
-            for (name, total) in rows.flatten() {
-                let mut stats = PositionStats::new(self.max_values);
-                stats.total = total as usize;
-                cluster.param_stats.insert(name, stats);
-            }
-        }
-        {
-            let mut stmt = c
-                .prepare(
-                    "SELECT name, value, count FROM cluster_param_values WHERE cluster_key = ?",
-                )
-                .unwrap();
-            let rows = stmt
-                .query_map(params![key], |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, i64>(2)?,
-                    ))
-                })
-                .unwrap();
-            for (name, value, count) in rows.flatten() {
-                if let Some(stats) = cluster.param_stats.get_mut(&name) {
-                    stats.value_counts.insert(value, count as usize);
-                }
-            }
-        }
-        {
-            let mut stmt = c
-                .prepare("SELECT name, type, count FROM cluster_param_types WHERE cluster_key = ?")
-                .unwrap();
-            let rows = stmt
-                .query_map(params![key], |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, i64>(2)?,
-                    ))
-                })
-                .unwrap();
-            for (name, t_str, count) in rows.flatten() {
-                if let Some(stats) = cluster.param_stats.get_mut(&name) {
-                    stats
-                        .type_counts
-                        .insert(segment_type_from_name(&t_str), count as usize);
-                }
-            }
-        }
-        // Recompute numeric for each param.
-        for stats in cluster.param_stats.values_mut() {
-            rebuild_numeric_stats(stats);
-        }
-        Some(cluster)
+    fn cluster_for(&self, key: &str) -> Result<Option<Cluster>> {
+        self.read(|c| load_cluster(c, key, self.max_values))
     }
-    fn cluster_size(&self) -> usize {
-        let n: i64 = self
-            .conn()
-            .query_row("SELECT COUNT(*) FROM clusters", [], |r| r.get(0))
-            .unwrap_or(0);
-        n as usize
+    fn cluster_size(&self) -> Result<usize> {
+        self.read(|c| c.query_row("SELECT COUNT(*) FROM clusters", [], |r| r.get::<_, i64>(0)))
+            .map(|n| n as usize)
     }
 
     fn position_evidence(&self, pos: &Position, value: &str) -> Result<Option<PositionEvidence>> {
@@ -703,25 +568,24 @@ impl Storage for SqliteStorage {
             .map_err(|e| Error::sqlite(&self.path, e))?;
         Ok(())
     }
-    fn each_observed_iri(&self, f: &mut dyn FnMut(&str)) {
-        let iris: Vec<String> = {
-            let c = self.conn();
-            let mut stmt = c
-                .prepare("SELECT canonical FROM observed_iris ORDER BY id")
-                .unwrap();
-            let rows = stmt.query_map([], |r| r.get::<_, String>(0)).unwrap();
-            rows.flatten().collect()
-        };
+    fn each_observed_iri(&self, f: &mut dyn FnMut(&str)) -> Result<()> {
+        let iris: Vec<String> = self.read(|c| {
+            let mut stmt = c.prepare("SELECT canonical FROM observed_iris ORDER BY id")?;
+            let rows = stmt.query_map([], |r| r.get(0))?;
+            rows.collect()
+        })?;
         for iri in &iris {
             f(iri);
         }
+        Ok(())
     }
-    fn observed_iri_count(&self) -> usize {
-        let n: i64 = self
-            .conn()
-            .query_row("SELECT COUNT(*) FROM observed_iris", [], |r| r.get(0))
-            .unwrap_or(0);
-        n as usize
+    fn observed_iri_count(&self) -> Result<usize> {
+        self.read(|c| {
+            c.query_row("SELECT COUNT(*) FROM observed_iris", [], |r| {
+                r.get::<_, i64>(0)
+            })
+        })
+        .map(|n| n as usize)
     }
     fn clear_materialized_views(&mut self) -> Result<()> {
         self.value_counts.clear();
@@ -769,19 +633,14 @@ impl Storage for SqliteStorage {
         .map_err(|e| Error::sqlite(&self.path, e))?;
         Ok(())
     }
-    fn each_activated_recognizer(&self, f: &mut dyn FnMut(&Value)) {
-        let rows: Vec<(String, String, f64)> = {
-            let c = self.conn();
-            let mut stmt = c
-                .prepare(
-                    "SELECT prefix, type, specificity FROM activated_recognizers ORDER BY prefix",
-                )
-                .unwrap();
-            let rows = stmt
-                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-                .unwrap();
-            rows.flatten().collect()
-        };
+    fn each_activated_recognizer(&self, f: &mut dyn FnMut(&Value)) -> Result<()> {
+        let rows: Vec<(String, String, f64)> = self.read(|c| {
+            let mut stmt = c.prepare(
+                "SELECT prefix, type, specificity FROM activated_recognizers ORDER BY prefix",
+            )?;
+            let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+            rows.collect()
+        })?;
         for (prefix, ty, specificity) in rows {
             let mut m = Map::new();
             m.insert("prefix".to_string(), Value::String(prefix));
@@ -792,15 +651,15 @@ impl Storage for SqliteStorage {
             );
             f(&Value::Object(m));
         }
+        Ok(())
     }
-    fn activated_recognizer_count(&self) -> usize {
-        let n: i64 = self
-            .conn()
-            .query_row("SELECT COUNT(*) FROM activated_recognizers", [], |r| {
-                r.get(0)
+    fn activated_recognizer_count(&self) -> Result<usize> {
+        self.read(|c| {
+            c.query_row("SELECT COUNT(*) FROM activated_recognizers", [], |r| {
+                r.get::<_, i64>(0)
             })
-            .unwrap_or(0);
-        n as usize
+        })
+        .map(|n| n as usize)
     }
 
     // A batch inside a batch joins it, as in Ruby. A savepoint per nested
@@ -869,53 +728,148 @@ impl Storage for SqliteStorage {
     }
 }
 
-fn counts_hash(c: &Connection, table: &str, key_col: &str) -> HashMap<String, usize> {
-    let q = format!("SELECT {}, count FROM {}", key_col, table);
-    let mut stmt = c.prepare(&q).unwrap();
-    let rows = stmt
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
-        .unwrap();
-    let mut out = HashMap::new();
-    for r in rows.flatten() {
-        out.insert(r.0, r.1 as usize);
+fn counts_hash(
+    c: &Connection,
+    table: &str,
+    key_col: &str,
+) -> rusqlite::Result<HashMap<String, usize>> {
+    let mut stmt = c.prepare(&format!("SELECT {key_col}, count FROM {table}"))?;
+    let rows = stmt.query_map([], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as usize))
+    })?;
+    rows.collect()
+}
+
+fn load_cluster(c: &Connection, key: &str, max_values: usize) -> rusqlite::Result<Option<Cluster>> {
+    let Some((host, scheme, shape, count)) = c
+        .prepare_cached("SELECT host, scheme, shape, count FROM clusters WHERE key = ?")?
+        .query_row(params![key], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
+        })
+        .optional()?
+    else {
+        return Ok(None);
+    };
+    let mut cluster = Cluster::new(key.to_string(), host, scheme, shape, max_values);
+    cluster.count = count as usize;
+
+    let mut stmt = c.prepare_cached(
+        "SELECT canonical FROM cluster_examples WHERE cluster_key = ? ORDER BY position",
+    )?;
+    for canon in stmt.query_map(params![key], |r| r.get::<_, String>(0))? {
+        // As the JSON loader does, an example that no longer parses is skipped.
+        if let Ok(iri) = parse(&canon?) {
+            cluster.register_example_key(iri.canonical());
+            cluster.examples.push(std::sync::Arc::new(iri));
+        }
     }
-    out
+
+    let mut stmt = c.prepare_cached(
+        "SELECT position, value, count FROM cluster_segments WHERE cluster_key = ? ORDER BY position",
+    )?;
+    let rows = stmt.query_map(params![key], |r| {
+        Ok((
+            r.get::<_, i64>(0)? as usize,
+            r.get::<_, String>(1)?,
+            r.get::<_, i64>(2)? as usize,
+        ))
+    })?;
+    for row in rows {
+        let (pos, value, count) = row?;
+        while cluster.segment_counts.len() <= pos {
+            cluster.segment_counts.push(HashMap::new());
+        }
+        cluster.segment_counts[pos].insert(value, count);
+    }
+
+    let mut stmt =
+        c.prepare_cached("SELECT name, total FROM cluster_params WHERE cluster_key = ?")?;
+    let rows = stmt.query_map(params![key], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as usize))
+    })?;
+    for row in rows {
+        let (name, total) = row?;
+        let mut stats = PositionStats::new(max_values);
+        stats.total = total;
+        cluster.param_stats.insert(name, stats);
+    }
+    let mut stmt = c.prepare_cached(
+        "SELECT name, value, count FROM cluster_param_values WHERE cluster_key = ?",
+    )?;
+    let rows = stmt.query_map(params![key], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, i64>(2)? as usize,
+        ))
+    })?;
+    for row in rows {
+        let (name, value, count) = row?;
+        if let Some(stats) = cluster.param_stats.get_mut(&name) {
+            stats.value_counts.insert(value, count);
+        }
+    }
+    let mut stmt = c.prepare_cached(
+        "SELECT name, type, count FROM cluster_param_types WHERE cluster_key = ?",
+    )?;
+    let rows = stmt.query_map(params![key], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, i64>(2)? as usize,
+        ))
+    })?;
+    for row in rows {
+        let (name, ty, count) = row?;
+        if let Some(stats) = cluster.param_stats.get_mut(&name) {
+            stats.type_counts.insert(segment_type_from_name(&ty), count);
+        }
+    }
+    for stats in cluster.param_stats.values_mut() {
+        rebuild_numeric_stats(stats);
+    }
+    Ok(Some(cluster))
 }
 
 fn mirror_into_memory(src: &SqliteStorage, dst: &mut MemoryStorage) -> Result<()> {
-    for (k, v) in src.host_counts() {
+    for (k, v) in src.host_counts()? {
         for _ in 0..v {
             dst.increment_host(&k)?;
         }
     }
-    for (k, v) in src.path_length_counts() {
+    for (k, v) in src.path_length_counts()? {
         for _ in 0..v {
             dst.increment_path_length(k)?;
         }
     }
-    for (k, v) in src.raw_shape_counts() {
+    for (k, v) in src.raw_shape_counts()? {
         for _ in 0..v {
             dst.increment_raw_shape(&k)?;
         }
     }
-    for (k, v) in src.fingerprint_counts() {
+    for (k, v) in src.fingerprint_counts()? {
         for _ in 0..v {
             dst.increment_fingerprint(&k)?;
         }
     }
     src.each_position_stats(&mut |pos, stats| {
         dst.insert_position_stats(pos.clone(), stats.clone());
-    });
-    for c in src.clusters() {
+    })?;
+    for c in src.clusters()? {
         dst.insert_cluster(c.key.clone(), c);
     }
     let mut observed = Vec::new();
-    src.each_observed_iri(&mut |c| observed.push(c.to_string()));
+    src.each_observed_iri(&mut |c| observed.push(c.to_string()))?;
     for c in &observed {
         dst.record_observation(c)?;
     }
     let mut recognizers = Vec::new();
-    src.each_activated_recognizer(&mut |v| recognizers.push(v.clone()));
+    src.each_activated_recognizer(&mut |v| recognizers.push(v.clone()))?;
     for v in recognizers {
         dst.record_activated_recognizer(v)?;
     }
@@ -941,11 +895,11 @@ mod tests {
         let mut s = SqliteStorage::open(&temp_db("poison"), 0).unwrap();
         s.record_observation("https://x.com/1").unwrap();
         let panicked = catch_unwind(AssertUnwindSafe(|| {
-            s.each_observed_iri(&mut |_| panic!("bug in a callback"));
+            let _ = s.each_observed_iri(&mut |_| panic!("bug in a callback"));
         }));
         assert!(panicked.is_err());
         s.record_observation("https://x.com/2").unwrap();
-        assert_eq!(s.observed_iri_count(), 2);
+        assert_eq!(s.observed_iri_count().unwrap(), 2);
     }
 
     #[test]
@@ -958,8 +912,10 @@ mod tests {
             s.record_activated_recognizer(serde_json::json!({"prefix": "tok_", "type": "tok"}))
                 .unwrap();
             let mut seen = 0;
-            s.each_observed_iri(&mut |_| seen += s.observed_iri_count());
-            s.each_activated_recognizer(&mut |_| seen += s.activated_recognizer_count());
+            s.each_observed_iri(&mut |_| seen += s.observed_iri_count().unwrap())
+                .unwrap();
+            s.each_activated_recognizer(&mut |_| seen += s.activated_recognizer_count().unwrap())
+                .unwrap();
             tx.send(seen).unwrap();
         });
         let seen = rx
@@ -984,7 +940,7 @@ mod tests {
         let err = corpus.observe("https://x.com/users/1").unwrap_err();
         let cause = std::error::Error::source(&err).unwrap().to_string();
         assert!(cause.contains("simulated write failure"), "{cause}");
-        assert_eq!(corpus.observed_iri_count(), 0);
+        assert_eq!(corpus.observed_iri_count().unwrap(), 0);
     }
 
     #[test]
@@ -1020,7 +976,7 @@ mod tests {
         s.observe_position(&pos, &"1".repeat(400), SegmentType::Integer)
             .unwrap();
 
-        let stats = s.position_stats_for(&pos).unwrap();
+        let stats = s.position_stats_for(&pos).unwrap().unwrap();
         assert_eq!(stats.total, 2);
         assert_eq!(
             (stats.numeric_count, stats.numeric_min, stats.numeric_max),
@@ -1041,8 +997,12 @@ mod tests {
             s.add_to_cluster(&iri.host, &iri.host, "https", "/{id}", &iri)
                 .unwrap();
         }
-        let listed: Vec<(String, usize)> =
-            s.clusters().into_iter().map(|c| (c.key, c.count)).collect();
+        let listed: Vec<(String, usize)> = s
+            .clusters()
+            .unwrap()
+            .into_iter()
+            .map(|c| (c.key, c.count))
+            .collect();
         assert_eq!(
             listed,
             [

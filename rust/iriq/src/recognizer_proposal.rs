@@ -1,4 +1,5 @@
 use crate::classifier::SegmentType;
+use crate::errors::Result;
 use crate::position::Position;
 use crate::position_stats::PositionStats;
 use crate::storage::Storage;
@@ -69,7 +70,7 @@ struct Accumulator {
 pub fn propose_recognizers(
     storage: &dyn Storage,
     opts: ProposalOptions,
-) -> Vec<RecognizerProposal> {
+) -> Result<Vec<RecognizerProposal>> {
     let opts = with_defaults(opts);
     let mut per_prefix: HashMap<String, Accumulator> = HashMap::new();
 
@@ -99,7 +100,7 @@ pub fn propose_recognizers(
             acc.matches.push(value.clone());
         }
     };
-    storage.each_position_stats(&mut visitor);
+    storage.each_position_stats(&mut visitor)?;
 
     let mut prefixes: Vec<String> = per_prefix.keys().cloned().collect();
     prefixes.sort();
@@ -142,7 +143,7 @@ pub fn propose_recognizers(
             .unwrap_or(std::cmp::Ordering::Equal)
             .then(a.prefix.cmp(&b.prefix))
     });
-    out
+    Ok(out)
 }
 
 /// A proposal never takes a name iriq already means something by (a built-in
@@ -182,7 +183,7 @@ mod tests {
                 .observe_position(&pos, &format!("{prefix}Ab{i:03}x"), SegmentType::OpaqueId)
                 .unwrap();
         }
-        propose_recognizers(&storage, ProposalOptions::default())
+        propose_recognizers(&storage, ProposalOptions::default()).unwrap()
     }
 
     #[test]

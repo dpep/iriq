@@ -9,7 +9,8 @@ use std::path::Path;
 
 /// Persistence layer behind a Corpus. Phase-2 ships Memory, JSON, and
 /// SQLite (optional via feature). Backends update materialized views and
-/// own the source-IRI log used by Reinfer. Every write reports failure.
+/// own the source-IRI log used by Reinfer. Every read and write reports
+/// failure: a read that fails must never look like a corpus with no evidence.
 pub trait Storage: Send + Sync {
     fn max_values(&self) -> usize;
 
@@ -27,14 +28,14 @@ pub trait Storage: Send + Sync {
         iri: &Identifier,
     ) -> Result<()>;
 
-    fn host_counts(&self) -> HashMap<String, usize>;
-    fn path_length_counts(&self) -> HashMap<usize, usize>;
-    fn raw_shape_counts(&self) -> HashMap<String, usize>;
-    fn fingerprint_counts(&self) -> HashMap<String, usize>;
-    fn each_position_stats(&self, f: &mut dyn FnMut(&Position, &PositionStats));
-    fn clusters(&self) -> Vec<Cluster>;
-    fn cluster_for(&self, key: &str) -> Option<Cluster>;
-    fn cluster_size(&self) -> usize;
+    fn host_counts(&self) -> Result<HashMap<String, usize>>;
+    fn path_length_counts(&self) -> Result<HashMap<usize, usize>>;
+    fn raw_shape_counts(&self) -> Result<HashMap<String, usize>>;
+    fn fingerprint_counts(&self) -> Result<HashMap<String, usize>>;
+    fn each_position_stats(&self, f: &mut dyn FnMut(&Position, &PositionStats)) -> Result<()>;
+    fn clusters(&self) -> Result<Vec<Cluster>>;
+    fn cluster_for(&self, key: &str) -> Result<Option<Cluster>>;
+    fn cluster_size(&self) -> Result<usize>;
     /// What classifying `value` at `pos` reads, without materializing every
     /// value tracked there.
     fn position_evidence(&self, pos: &Position, value: &str) -> Result<Option<PositionEvidence>>;
@@ -43,13 +44,13 @@ pub trait Storage: Send + Sync {
     fn param_stats_for(&self, cluster_key: &str, name: &str) -> Result<Option<PositionStats>>;
 
     fn record_observation(&mut self, canonical: &str) -> Result<()>;
-    fn each_observed_iri(&self, f: &mut dyn FnMut(&str));
-    fn observed_iri_count(&self) -> usize;
+    fn each_observed_iri(&self, f: &mut dyn FnMut(&str)) -> Result<()>;
+    fn observed_iri_count(&self) -> Result<usize>;
     fn clear_materialized_views(&mut self) -> Result<()>;
 
     fn record_activated_recognizer(&mut self, dump: serde_json::Value) -> Result<()>;
-    fn each_activated_recognizer(&self, f: &mut dyn FnMut(&serde_json::Value));
-    fn activated_recognizer_count(&self) -> usize;
+    fn each_activated_recognizer(&self, f: &mut dyn FnMut(&serde_json::Value)) -> Result<()>;
+    fn activated_recognizer_count(&self) -> Result<usize>;
 
     /// One backend transaction around many writes. SQLite turns
     /// O(observations) commits into one; Memory + JSON are no-ops.
@@ -215,7 +216,8 @@ mod tests {
                     if at == p {
                         stats = Some(st.clone());
                     }
-                });
+                })
+                .unwrap();
                 // Tracked, dropped at the cap, and never seen.
                 for value in ["a", "7", huge.as_str(), "zzz"] {
                     let full = stats
@@ -228,6 +230,7 @@ mod tests {
             for (key, name) in [("k", "page"), ("k", "tab"), ("k", "nope"), ("nope", "page")] {
                 let full = s
                     .cluster_for(key)
+                    .unwrap()
                     .and_then(|c| c.param_stats.get(name).cloned());
                 let narrow = s.param_stats_for(key, name).unwrap();
                 assert_eq!(narrow, full, "{backend}: param {name:?} in {key:?}");
