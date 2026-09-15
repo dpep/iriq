@@ -19,24 +19,34 @@ module Iriq
         s
       end
 
+      # Refuses (Iriq::CorpusError) anything that isn't a corpus dump, so a
+      # mistyped --corpus path can't overwrite an unrelated JSON file: it must
+      # be an object with at least one corpus key, or `{}`.
       def load!(path)
         data = File.read(path)
         return self if data.empty?
 
-        load_dump!(JSON.parse(data))
+        dump = begin
+          JSON.parse(data)
+        rescue JSON::ParserError
+          raise CorpusError, "#{path} is not valid JSON; refusing to use it as a corpus"
+        end
+        unless dump.is_a?(Hash) && (dump.empty? || dump.keys.intersect?(DUMP_KEYS))
+          raise CorpusError, "#{path} is not an iriq corpus (no recognized keys); refusing to use it"
+        end
+
+        load_dump!(dump)
         @path = path
         self
       end
 
-      # save writes atomically (tmp + rename). Defaults to the path passed at
-      # open(); pass an explicit path to write elsewhere.
+      # save writes atomically (unique tmp + rename). Defaults to the path
+      # passed at open(); pass an explicit path to write elsewhere.
       def save(path = nil)
         target = path || @path
         raise ArgumentError, "no path provided" unless target
 
-        tmp = "#{target}.tmp"
-        File.write(tmp, JSON.generate(to_dump))
-        File.rename(tmp, target)
+        Storage.write_atomically(target, JSON.generate(to_dump))
       end
     end
   end

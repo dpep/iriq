@@ -582,9 +582,7 @@ module Iriq
     private
 
     def write_json_dump(path)
-      tmp = "#{path}.tmp"
-      File.write(tmp, JSON.generate(memory_view.to_dump))
-      File.rename(tmp, path)
+      Storage.write_atomically(path, JSON.generate(memory_view.to_dump))
     end
 
     # Materialize a Memory snapshot of the current state — used by dump for

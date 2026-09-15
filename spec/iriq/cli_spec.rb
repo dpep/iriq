@@ -740,6 +740,87 @@ describe Iriq::CLI do
     end
   end
 
+  describe "input handling" do
+    around do |example|
+      Dir.mktmpdir("iriq-input") do |dir|
+        @dir = dir
+        example.run
+      end
+    end
+
+    def json_error
+      JSON.parse(stderr.string)["error"]
+    end
+
+    describe "positional files" do
+      it "reads a bare filename (no ./) as a file, including with --stats" do
+        File.write(File.join(@dir, "urls.txt"), "https://foo.com/users/1\nhttps://foo.com/users/2\n")
+        Dir.chdir(@dir) { expect(run("-n", "urls.txt")).to eq(0) }
+        expect(stdout.string.lines.map(&:chomp)).to eq(["https://foo.com/users/{user_id}"] * 2)
+
+        stdout.truncate(stdout.rewind)
+        Dir.chdir(@dir) { expect(run("urls.txt", "--stats")).to eq(0) }
+        expect(stdout.string).to include("observations: 2")
+      end
+
+      it "reads an existing file even when its name looks like a host" do
+        File.write(File.join(@dir, "foo.com"), "https://bar.com/users/9\n")
+        Dir.chdir(@dir) { expect(run("-n", "foo.com")).to eq(0) }
+        expect(stdout.string.strip).to eq("https://bar.com/users/{user_id}")
+      end
+
+      it "always treats an argument containing :// as an IRI" do
+        FileUtils.mkdir_p(File.join(@dir, "https:/foo.com"))
+        File.write(File.join(@dir, "https:/foo.com/x"), "https://bar.com/users/9\n")
+        Dir.chdir(@dir) { expect(run("-n", "https://foo.com/x")).to eq(0) }
+        expect(stdout.string.strip).to eq("https://foo.com/x")
+      end
+    end
+
+    describe "missing files" do
+      it "says so when a path-like argument doesn't exist" do
+        expect(run("./nope.txt")).to eq(1)
+        expect(stderr.string).to eq("iriq: no such file: ./nope.txt\n")
+
+        stderr.truncate(stderr.rewind)
+        expect(run("-n", "/nope/x.log")).to eq(1)
+        expect(stderr.string).to eq("iriq: no such file: /nope/x.log\n")
+      end
+
+      it "says so for a missing cluster file" do
+        expect(run("cluster", "./nope.txt")).to eq(1)
+        expect(stderr.string).to eq("iriq: no such file: ./nope.txt\n")
+      end
+
+      it "uses a file_not_found envelope under --json" do
+        expect(run("--json", "./nope.txt")).to eq(1)
+        expect(json_error).to eq("code" => "file_not_found", "message" => "no such file: ./nope.txt")
+      end
+    end
+
+    describe "invalid UTF-8" do
+      let(:bad) { "https://foo.com/users/1\nhttps://foo.com/\xFF/x\n".b }
+
+      it "reports it cleanly on stdin, streaming or not" do
+        stdin.string = bad
+        expect(run("-n")).to eq(1)
+        expect(stderr.string).to eq("iriq: stream did not contain valid UTF-8\n")
+
+        stderr.truncate(stderr.rewind)
+        stdin.string = bad
+        expect(run).to eq(1)
+        expect(stderr.string).to eq("iriq: stream did not contain valid UTF-8\n")
+      end
+
+      it "reports it cleanly for a file argument, with an invalid_utf8 envelope under --json" do
+        path = File.join(@dir, "bad.log")
+        File.binwrite(path, bad)
+        expect(run("--json", "cluster", path)).to eq(1)
+        expect(json_error).to eq("code" => "invalid_utf8", "message" => "stream did not contain valid UTF-8")
+      end
+    end
+  end
+
   describe "cluster" do
     it "clusters identifiers from stdin" do
       stdin.string = <<~LINES

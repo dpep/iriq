@@ -124,11 +124,10 @@ module Iriq
       explicit_cluster = (args.first == "cluster")
       args.shift if explicit_cluster
 
-      # Auto-detect: a positional argument that isn't parseable as an IRI
-      # but IS an existing file gets treated as a file to extract from. This
-      # is what makes `iriq ./access.log` and `iriq /var/log/foo.log` Just
-      # Work without a separate --extract flag.
-      positional_is_file = args.first && File.file?(args.first) && !parseable_iri?(args.first)
+      # A positional that names an existing file is read as a file, so
+      # `iriq access.log` works without ./ (it also parses as a host). An
+      # argument containing "://" is always an IRI.
+      positional_is_file = args.first && !args.first.include?("://") && File.file?(args.first)
 
       batch_mode = explicit_cluster || positional_is_file ||
                    (args.empty? && piped_stdin?)
@@ -138,6 +137,11 @@ module Iriq
       # path so `--reset --corpus other.db` and `IRIQ_CORPUS=… --reset` Just Work.
       if opts[:reset]
         return cmd_reset(opts)
+      end
+
+      # Before any corpus is opened, so a typo doesn't create one.
+      if (missing = missing_input_file(args.first, explicit_cluster))
+        raise InputError.new("file_not_found", "no such file: #{missing}")
       end
 
       return print_usage(stdout, 0) if args.empty? && !batch_mode && !opts[:reinfer] && !opts[:propose] && !opts[:cross_host_shapes]
@@ -165,6 +169,20 @@ module Iriq
       emit_error("parse_error", e.message, 2, human: "iriq: parse error: #{e.message}")
     rescue OptionParser::ParseError => e
       emit_error("option_error", e.message, 1)
+    rescue InputError => e
+      emit_error(e.code, e.message, 1)
+    rescue Iriq::CorpusError => e
+      emit_error("corpus_error", e.message, 1)
+    end
+
+    # Input iriq can't read. `code` is the JSON error envelope's code.
+    class InputError < Iriq::Error
+      attr_reader :code
+
+      def initialize(code, message)
+        super(message)
+        @code = code
+      end
     end
 
     def parseable_iri?(input)
@@ -175,6 +193,15 @@ module Iriq
     end
 
     private
+
+    # The argument iriq would have read as a file but can't find: anything
+    # after `cluster`, or a /, ./, ../ path that isn't an IRI.
+    def missing_input_file(arg, explicit_cluster)
+      return nil if arg.nil? || arg == "-" || File.file?(arg)
+      return arg if explicit_cluster
+
+      arg if arg.start_with?("/", "./", "../") && !parseable_iri?(arg)
+    end
 
     def parse_options(argv)
       opts = {
@@ -381,7 +408,7 @@ module Iriq
         return 0
       end
 
-      iris = extract_text(read_text(args.first), opts)
+      iris = extract_text(utf8!(read_text(args.first)), opts)
       corpus.batch { iris.each { |iri| corpus.observe(iri) } }
 
       if opts[:stats]
@@ -402,7 +429,7 @@ module Iriq
     # (URL_CHAR_CLASS excludes whitespace) and `extract` does not dedup.
     def lazy_iris(path, opts)
       extractor = Extractor.new(scheme_less: opts[:scheme_less])
-      input_lines(path).lazy.flat_map { |line| extractor.extract(line) }
+      input_lines(path).lazy.flat_map { |line| extractor.extract(utf8!(line)) }
     end
 
     def input_lines(path)
@@ -411,6 +438,15 @@ module Iriq
       else
         File.foreach(path)
       end
+    end
+
+    # Input is UTF-8 regardless of locale; anything else is an error, not a
+    # backtrace. Message matches the Rust CLI's io::Error text.
+    def utf8!(text)
+      text = text.dup.force_encoding(Encoding::UTF_8)
+      raise InputError.new("invalid_utf8", "stream did not contain valid UTF-8") unless text.valid_encoding?
+
+      text
     end
 
     # Emit the requested sections (parse/normalize/explain) for each extracted
