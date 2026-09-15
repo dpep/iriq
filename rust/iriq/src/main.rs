@@ -477,12 +477,9 @@ fn parse_options(argv: &[String]) -> Result<(Vec<String>, Opts), String> {
                 let (name, val) = (&a[..eq], &a[eq + 1..]);
                 match name {
                     "--corpus" => opts.corpus = val.to_string(),
-                    // Ruby's OptionParser reports the whole `--host=bogus`
-                    // token for the = form (vs. the block's message for the
-                    // space form below) — mirror that quirk for parity.
                     "--host" => {
-                        opts.host_strategy = parse_host_strategy(val)
-                            .map_err(|_| format!("invalid argument: {}", a))?
+                        opts.host_strategy =
+                            parse_host_strategy(val).ok_or_else(|| host_error(a))?
                     }
                     "--activate-above" => {
                         opts.activate_above = val
@@ -551,11 +548,9 @@ fn parse_options(argv: &[String]) -> Result<(Vec<String>, Opts), String> {
             }
             "--host" => {
                 i += 1;
-                // Ruby's OptionParser prefixes the raised InvalidArgument
-                // message with "invalid argument: --host " — mirror it.
+                let v = argv.get(i).ok_or("--host requires a value")?;
                 opts.host_strategy =
-                    parse_host_strategy(argv.get(i).ok_or("--host requires a value")?.as_str())
-                        .map_err(|e| format!("invalid argument: --host {}", e))?;
+                    parse_host_strategy(v).ok_or_else(|| host_error(&format!("--host {v}")))?;
             }
             "--min-hosts" => {
                 i += 1;
@@ -611,16 +606,19 @@ fn parse_options(argv: &[String]) -> Result<(Vec<String>, Opts), String> {
     Ok((args, opts))
 }
 
-fn parse_host_strategy(v: &str) -> Result<HostStrategy, String> {
+fn parse_host_strategy(v: &str) -> Option<HostStrategy> {
     match v.to_lowercase().as_str() {
-        "full" => Ok(HostStrategy::Full),
-        "registrable" | "reg" => Ok(HostStrategy::Registrable),
-        "none" => Ok(HostStrategy::None),
-        _ => Err(format!(
-            "--host: expected full|registrable|reg|none, got {:?}",
-            v
-        )),
+        "full" => Some(HostStrategy::Full),
+        "registrable" | "reg" => Some(HostStrategy::Registrable),
+        "none" => Some(HostStrategy::None),
+        _ => None,
     }
+}
+
+// Ruby's OptionParser names the argument as the user wrote it (`--host bogus`
+// or `--host=bogus`), then the accepted modes.
+fn host_error(given: &str) -> String {
+    format!("invalid argument: {given} (expected full|registrable|reg|none)")
 }
 
 // ── Summary mode ────────────────────────────────────────────────────────────
@@ -927,12 +925,13 @@ fn cmd_batch<R: Read, W: Write, E: Write>(
     extractor.scheme_less = opts.scheme_less;
     let iris = extractor.extract(&text);
 
-    // Feed observations into the corpus when present.
-    let mut owned_corpus = if corpus.is_none() {
-        Some(Corpus::new())
-    } else {
-        None
-    };
+    // Feed observations into the corpus when present, else a throwaway one
+    // keyed the way --host asks.
+    let mut owned_corpus = corpus.is_none().then(|| {
+        let mut c = Corpus::new();
+        c.set_host_strategy(opts.host_strategy);
+        c
+    });
     let working: &mut Corpus = match (corpus, &mut owned_corpus) {
         (Some(c), _) => c,
         (None, Some(c)) => c,

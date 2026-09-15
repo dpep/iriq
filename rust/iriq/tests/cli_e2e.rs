@@ -222,6 +222,30 @@ fn host_registrable_collapses_subdomains() {
     let _ = std::fs::remove_file(&cp);
 }
 
+#[test]
+fn host_applies_to_the_throwaway_no_corpus_cluster() {
+    let out = run(
+        &["-C", "--host", "reg", "cluster"],
+        "https://api.foo.com/users/1\nhttps://app.foo.com/users/2\n",
+    );
+    assert!(out.starts_with("[2] foo.com  /users/{user_id}"), "{out}");
+}
+
+#[test]
+fn host_rejects_an_unknown_mode_naming_it_as_given() {
+    for (args, given) in [
+        (["--host", "bogus"].as_slice(), "--host bogus"),
+        (["--host=bogus"].as_slice(), "--host=bogus"),
+    ] {
+        let (_, err, ok) = run_full(args, "");
+        assert!(!ok);
+        assert_eq!(
+            err,
+            format!("iriq: invalid argument: {given} (expected full|registrable|reg|none)\n")
+        );
+    }
+}
+
 // ── corpus subcommands ───────────────────────────────────────────────────────
 
 #[test]
