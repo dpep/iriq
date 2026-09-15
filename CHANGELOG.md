@@ -61,6 +61,10 @@
 - **Bugfix (Rust, SQLite): an observation that failed part-way stayed half-recorded.** A write failing mid-observation (a full disk, a lock timeout) left the counts it had already bumped in a `.db` corpus, so its views no longer matched its source log until `--reinfer`. Each observation is now one transaction, as in Ruby, and a failure keeps none of it. Library consumers: a `Corpus::batch` inside another `batch` (including `observe` inside `batch`) joins the outer one, so only the outermost commits or rolls back. An observation's error swallowed inside a batch keeps its writes.
 <!-- /lane: perf -->
 
+<!-- lane: port -->
+- **Ruby: `-n`/`-p`/`-c`/`-e` on piped input now print each URL the way single-input mode does.** Rule, for both runtimes: each extracted URL is observed, then rendered from the corpus as it stands at that moment. With `-C` there is no corpus, so output is mechanical. Before, Ruby always rendered piped `-n` mechanically, even with a corpus, and piped `-e` printed only the `# URL` header with no trace (`[]` under `--json`). What changes for Ruby users: with a warm corpus, piped `-n` now shows the corpus's shapes, just like `iriq -n URL`. With a cold corpus, a slot stays literal until it has been seen 5 times.
+<!-- /lane: port -->
+
 ###  0.34.0  (2026-08-12)
 - **Rust: SQLite is now an optional (default-on) feature.** `cargo install iriq`, the Homebrew formula, and the CLI are unchanged — `default = ["sqlite"]`. Library consumers who only need parsing, extraction, or normalization can now take `iriq = { version = "0.34", default-features = false }` and skip the bundled C SQLite build entirely (`rusqlite` is the crate's only non-Rust dependency). Without the feature, `open_storage` rejects `.db`/`.sqlite`/`.sqlite3` paths with a clear `Unsupported` error and the CLI's auto-default corpus becomes `default.json` instead of `default.db`; Memory and JSON backends are unaffected. No behavior change with default features, so Ruby parity and the shared schema are untouched. CI now gates the no-default-features build (test + clippy) so the configuration can't rot.
 

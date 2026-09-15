@@ -439,6 +439,39 @@ describe Iriq::CLI do
         expect(run("-n")).to eq(0)
         expect(stdout.string).to eq("")
       end
+
+      it "-e prints the explain trace per IRI, human and JSON" do
+        stdin.string = "see https://foo.com/users/1"
+        expect(run("-e")).to eq(0)
+        expect(stdout.string).to start_with("# https://foo.com/users/1\nhttps://foo.com/users/{user_id}\n\npath:\n")
+
+        stdout.truncate(stdout.rewind)
+        stdin.string = "see https://foo.com/users/1"
+        expect(run("-e", "--json")).to eq(0)
+        expect(JSON.parse(stdout.string).map { |t| t["normalized"] }).to eq(["https://foo.com/users/{user_id}"])
+      end
+
+      describe "with a corpus" do
+        let(:dir)   { Dir.mktmpdir("iriq-pipe-corpus") }
+        let(:names) { %w[alice bob carol dave erin frank gina] }
+        after { FileUtils.remove_entry(dir) }
+
+        before { stdin.string = names.map { |n| "https://foo.com/users/#{n}/profile\n" }.join }
+
+        it "renders each IRI from the corpus as it stands once that IRI is observed" do
+          expect(run("-n", "--corpus", File.join(dir, "c.json"))).to eq(0)
+          # Below the evidence threshold a line prints exactly as -C would.
+          expect(stdout.string.lines.map(&:chomp)).to eq(
+            names.first(4).map { |n| "https://foo.com/users/#{n}/profile" } +
+            ["https://foo.com/users/{user}/profile"] * 3,
+          )
+        end
+
+        it "is mechanical with -C (no throwaway corpus)" do
+          expect(run("-n", "-C")).to eq(0)
+          expect(stdout.string.lines.map(&:chomp)).to eq(names.map { |n| "https://foo.com/users/#{n}/profile" })
+        end
+      end
     end
 
     it "auto-switches to clusters when input is large (>= LARGE_BATCH_THRESHOLD IRIs)" do

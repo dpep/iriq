@@ -255,6 +255,19 @@ fresh_corpus_pair "corpus -n -N keeps hints off" "" .db -n -N "https://foo.com/u
 fresh_corpus_pair "corpus first observation matches -C" "" .db -n "https://shop.com/pricing/usd?currency=eur&phone=unknown"
 fresh_corpus_pair "corpus first observation slug/version match -C" "" .db -n "https://foo.com/api/v1/posts/abc-123"
 
+# Pipe-mode sections observe each IRI, then render it from the corpus as it
+# stands: on a cold corpus the first lines print as -C would, and a slot turns
+# into a placeholder only once it has the evidence.
+cold_names=(alice bob carol dave eve frank grace heidi ivan judy ken leo mary ned olive peg quinn rose sam tom uma vic wade xena yara zoe)
+cold_stream=""
+for n in "${cold_names[@]}"; do cold_stream+="https://foo.com/users/$n/profile"$'\n'; done
+fresh_corpus_pair "pipe -n cold corpus renders as it goes" "$cold_stream" .db -n
+fresh_corpus_pair "pipe -n -N cold corpus"                 "$cold_stream" .json -n -N
+# Pipe -e prints each IRI's trace, as single-input -e does.
+run_pair "pipe -e explain"      "see https://foo.com/users/1 and https://shop.com/pricing/usd" -e
+run_pair "pipe -e --json"       "see https://foo.com/users/1 and https://shop.com/pricing/usd" -e --json
+run_pair "pipe -ne --ndjson"    "see https://foo.com/users/1" -ne --ndjson
+
 # Numeric params too long to be finite: excluded from min/max/avg, no crash,
 # and the JSON corpus still saves.
 huge=$(printf '1%.0s' {1..400})

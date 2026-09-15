@@ -375,9 +375,7 @@ module Iriq
       data = {}
       data[:parse]     = identifier_hash(iri) if sections.include?(:parse)
       data[:canonical] = iri.canonical         if sections.include?(:canonical)
-      if sections.include?(:normalize)
-        data[:normalize] = corpus ? corpus.normalize(iri, hints: opts[:hints]) : Normalizer.normalize_identifier(iri, hints: opts[:hints])
-      end
+      data[:normalize] = normalize_section(iri, opts, corpus) if sections.include?(:normalize)
       if sections.include?(:explain)
         data[:explain] = Trace.for(iri, hints: opts[:hints])
       end
@@ -396,18 +394,18 @@ module Iriq
     # of URLs (one per line) and a file of prose with URLs both work. The
     # corpus is ephemeral unless --corpus was given.
     def cmd_batch(args, opts, corpus, explicit_cluster: false)
-      corpus ||= Corpus.new(host_strategy: opts[:host_strategy])
-
-      # Per-IRI sections (-n/-p/-c/-e) are independent line to line, so we
-      # stream: read input lazily, extract per line, and emit each IRI as it
-      # arrives (flushed for live `tail -f | iriq -n` pipelines). The aggregate
-      # views below — stats, clusters, the deduped URL list — need the whole
-      # input, so they slurp.
+      # Per-IRI sections (-n/-p/-c/-e) stream: read input lazily, extract per
+      # line, and emit each IRI as it arrives (flushed for live
+      # `tail -f | iriq -n` pipelines). Each IRI renders as single-input would,
+      # so with -C there is no corpus, not a throwaway one. The aggregate views
+      # below — stats, clusters, the deduped URL list — need the whole input,
+      # so they slurp.
       if opts[:sections].any?
         emit_per_iri_sections(lazy_iris(args.first, opts), opts, corpus)
         return 0
       end
 
+      corpus ||= Corpus.new(host_strategy: opts[:host_strategy])
       iris = extract_text(utf8!(read_text(args.first)), opts)
       corpus.batch { iris.each { |iri| corpus.observe(iri) } }
 
@@ -449,8 +447,9 @@ module Iriq
       text
     end
 
-    # Emit the requested sections (parse/normalize/explain) for each extracted
-    # IRI, observing each into `corpus` as it passes. `iris` may be a lazy
+    # Emit the requested sections (parse/canonical/normalize/explain) for each
+    # extracted IRI, observing each into `corpus` (when there is one) and then
+    # rendering it from the corpus as it now stands. `iris` may be a lazy
     # enumerator; human and NDJSON output stream (flushed per IRI) while a single
     # JSON array must be materialized. -n alone is the cleanest case: one line
     # per URL.
@@ -460,14 +459,14 @@ module Iriq
       # A wrapping JSON array can't be emitted incrementally — collect it
       # (force the lazy enumerator to a real Array so emit_json sees an array).
       if opts[:json] && !opts[:ndjson]
-        payloads = iris.map { |iri| corpus.observe(iri); section_payload(iri, sections, opts) }.to_a
+        payloads = iris.map { |iri| corpus&.observe(iri); section_payload(iri, sections, opts, corpus) }.to_a
         out = sections.size == 1 ? payloads.map(&:values).flatten(1) : payloads
         return emit_json(out, opts)
       end
 
       iris.each_with_index do |iri, i|
-        corpus.observe(iri)
-        p = section_payload(iri, sections, opts)
+        corpus&.observe(iri)
+        p = section_payload(iri, sections, opts, corpus)
         if opts[:ndjson]
           items = sections.size == 1 ? p.values : [p]
           items.each { |item| stdout.puts JSON.generate(item) }
@@ -483,6 +482,7 @@ module Iriq
             when :parse     then emit_parse_human(p[:parse])
             when :canonical then stdout.puts p[:canonical]
             when :normalize then stdout.puts p[:normalize]
+            when :explain   then emit_explain_human(p[:explain])
             end
           end
         end
@@ -490,12 +490,19 @@ module Iriq
       end
     end
 
-    def section_payload(iri, sections, opts)
+    # Key order is fixed (parse, canonical, normalize, explain) whatever the
+    # flag order, matching cmd_summary's multi-section JSON.
+    def section_payload(iri, sections, opts, corpus)
       data = {}
-      data[:parse]     = identifier_hash(iri)                                       if sections.include?(:parse)
-      data[:canonical] = iri.canonical                                              if sections.include?(:canonical)
-      data[:normalize] = Normalizer.normalize_identifier(iri, hints: opts[:hints])  if sections.include?(:normalize)
+      data[:parse]     = identifier_hash(iri)                  if sections.include?(:parse)
+      data[:canonical] = iri.canonical                         if sections.include?(:canonical)
+      data[:normalize] = normalize_section(iri, opts, corpus)  if sections.include?(:normalize)
+      data[:explain]   = Trace.for(iri, hints: opts[:hints])   if sections.include?(:explain)
       data
+    end
+
+    def normalize_section(iri, opts, corpus)
+      corpus ? corpus.normalize(iri, hints: opts[:hints]) : Normalizer.normalize_identifier(iri, hints: opts[:hints])
     end
 
     def extract_text(text, opts)
