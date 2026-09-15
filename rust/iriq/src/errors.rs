@@ -80,7 +80,6 @@ impl Error {
         }
     }
 
-    #[cfg(not(feature = "sqlite"))]
     pub(crate) fn unsupported(path: &Path, reason: impl Into<String>) -> Self {
         Error::Unsupported {
             path: path.to_path_buf(),

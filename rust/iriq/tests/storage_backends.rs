@@ -149,6 +149,44 @@ fn a_panic_inside_batch_rolls_back_and_later_writes_persist() {
 
 #[test]
 #[cfg(feature = "sqlite")]
+fn saving_to_another_spelling_of_the_live_path_flushes_in_place() {
+    let dir = temp_path("alias_dir");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let live = dir.join("c.db");
+    let alias = dir.join(".").join("c.db");
+
+    let mut c = Corpus::open(&live).unwrap();
+    c.observe("https://x.com/users/1").unwrap();
+    c.save(&alias).unwrap();
+    c.close().unwrap();
+    drop(c);
+
+    let data = std::fs::read(&live).unwrap();
+    assert!(
+        data.starts_with(b"SQLite format 3\0"),
+        "live corpus overwritten with JSON"
+    );
+    assert_eq!(Corpus::open(&live).unwrap().observed_iri_count(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn exporting_to_a_sqlite_path_is_refused() {
+    let target = temp_path("export.db");
+    cleanup(&target);
+
+    let mut c = Corpus::new();
+    c.observe("https://x.com/users/1").unwrap();
+    let err = c
+        .save(&target)
+        .expect_err("a JSON export under a SQLite extension");
+    assert!(matches!(err, iriq::Error::Unsupported { .. }), "{err:?}");
+    assert!(!target.exists(), "wrote an unopenable file");
+}
+
+#[test]
+#[cfg(feature = "sqlite")]
 fn sqlite_resave_to_same_path_is_idempotent() {
     let p = temp_path("resave.db");
     cleanup(&p);

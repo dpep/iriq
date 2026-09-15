@@ -2,7 +2,7 @@ use crate::classifier::{canonical_date, segment_type_from_name, SegmentClassifie
 use crate::cluster::ParamSummary;
 use crate::cluster::{placeholder_for, Cluster};
 use crate::clusterer::cluster_key_for_host;
-use crate::errors::{ParseError, Result};
+use crate::errors::{Error, ParseError, Result};
 use crate::event::Event;
 use crate::hints::{derive_hints, SegmentHint};
 use crate::identifier::Identifier;
@@ -13,11 +13,11 @@ use crate::position_stats::{PositionStats, DEFAULT_MAX_VALUES_PER_POSITION};
 use crate::recognizer_proposal::{propose_recognizers, ProposalOptions, RecognizerProposal};
 use crate::registrable_domain::registrable_domain;
 use crate::shape::{Shape, ShapeRenderOptions};
-use crate::storage::{open_storage, Storage};
+use crate::storage::{is_sqlite_path, open_storage, Storage};
 use crate::storage_memory::MemoryStorage;
 use crate::synthesized_recognizer::SynthesizedRecognizer;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -319,14 +319,25 @@ impl Corpus {
             .position_stats_for(&Position::path(host, prefix))
     }
 
+    /// Persist the corpus. Saving to the corpus's own file (however it is
+    /// spelled) flushes it in place; any other path receives a JSON export,
+    /// so a SQLite extension there is refused rather than written unopenable.
     pub fn save(&mut self, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
-        let backend = self.storage.path().unwrap_or(Path::new(""));
-        if path.as_os_str().is_empty() || path.as_os_str() == backend.as_os_str() {
-            self.storage.flush()
-        } else {
-            self.storage.save_to(path)
+        let is_live = self
+            .storage
+            .path()
+            .is_some_and(|live| resolve(live) == resolve(path));
+        if path.as_os_str().is_empty() || is_live {
+            return self.storage.flush();
         }
+        if is_sqlite_path(path) {
+            return Err(Error::unsupported(
+                path,
+                "a corpus exports as JSON; use a .json path",
+            ));
+        }
+        self.storage.save_to(path)
     }
 
     pub fn close(&mut self) -> Result<()> {
@@ -581,6 +592,25 @@ fn popular_outlier(stats: &PositionStats, value: &str) -> bool {
     }
     let baseline = 1.0 / (stats.cardinality() as f64);
     stats.value_fraction(value) >= POPULAR_BASELINE_MULTIPLE * baseline
+}
+
+/// The real location a path names, so two spellings of one file compare
+/// equal. A file that doesn't exist yet resolves through its directory.
+fn resolve(path: &Path) -> PathBuf {
+    if let Ok(real) = std::fs::canonicalize(path) {
+        return real;
+    }
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+        return path.to_path_buf();
+    };
+    let dir = if dir.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        dir
+    };
+    std::fs::canonicalize(dir)
+        .map(|d| d.join(name))
+        .unwrap_or_else(|_| path.to_path_buf())
 }
 
 fn apply_event(e: Event, s: &mut dyn Storage) -> Result<()> {
