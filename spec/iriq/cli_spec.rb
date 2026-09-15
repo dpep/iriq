@@ -496,6 +496,12 @@ describe Iriq::CLI do
       end
     end
 
+    it "applies to the throwaway -C corpus too" do
+      stdin.string = "https://api.foo.com/users/1\nhttps://app.foo.com/users/2\n"
+      expect(run("-C", "--host", "reg", "cluster")).to eq(0)
+      expect(stdout.string).to start_with("[2] foo.com  /users/{user_id}")
+    end
+
     it "rejects unknown values, naming the argument once plus the accepted modes" do
       expect(run("--host", "bogus", "foo.com/x")).to eq(1)
       expect(stderr.string).to eq("iriq: invalid argument: --host bogus (expected full|registrable|reg|none)\n")

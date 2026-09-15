@@ -396,7 +396,7 @@ module Iriq
     # of URLs (one per line) and a file of prose with URLs both work. The
     # corpus is ephemeral unless --corpus was given.
     def cmd_batch(args, opts, corpus, explicit_cluster: false)
-      corpus ||= Corpus.new
+      corpus ||= Corpus.new(host_strategy: opts[:host_strategy])
 
       # Per-IRI sections (-n/-p/-c/-e) are independent line to line, so we
       # stream: read input lazily, extract per line, and emit each IRI as it
