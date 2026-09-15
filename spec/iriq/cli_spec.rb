@@ -910,6 +910,36 @@ describe Iriq::CLI do
       end
     end
 
+    describe "unreadable input" do
+      it "reports the OS error for a file argument, with a read_error envelope under --json" do
+        path = File.join(@dir, "secret.log")
+        File.write(path, "https://foo.com/users/1\n")
+        File.chmod(0o000, path)
+        skip "file permissions aren't enforced for this user" if File.readable?(path)
+
+        expect(run(path)).to eq(1)
+        expect(stderr.string).to eq("iriq: Permission denied (os error 13)\n")
+
+        stderr.truncate(stderr.rewind)
+        expect(run("-n", path)).to eq(1)
+        expect(stderr.string).to eq("iriq: Permission denied (os error 13)\n")
+
+        stderr.truncate(stderr.rewind)
+        expect(run("--json", "cluster", path)).to eq(1)
+        expect(json_error).to eq("code" => "read_error", "message" => "Permission denied (os error 13)")
+      end
+
+      it "reports a failed read of stdin, streaming or not" do
+        File.open(@dir) do |directory|
+          [[], ["-n"]].each do |args|
+            err = StringIO.new
+            cli = described_class.new(stdin: directory, stdout: StringIO.new, stderr: err)
+            expect(cli.run(args)).to eq(1)
+            expect(err.string).to eq("iriq: Is a directory (os error 21)\n")
+          end
+        end
+      end
+    end
   end
 
   describe "cluster" do

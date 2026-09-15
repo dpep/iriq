@@ -444,12 +444,25 @@ module Iriq
       input_lines(path).lazy.flat_map { |line| extractor.extract(utf8!(line)) }
     end
 
+    # Yields input lines as they arrive. Only the reads are guarded, so a
+    # failure in the caller's block isn't mistaken for a read error.
     def input_lines(path)
-      if path.nil? || path == "-"
-        stdin.each_line
-      else
-        File.foreach(path)
+      return enum_for(:input_lines, path) unless block_given?
+
+      io = path.nil? || path == "-" ? stdin : read_guard { File.open(path) }
+      while (line = read_guard { io.gets })
+        yield line
       end
+    ensure
+      io.close if io && !io.equal?(stdin)
+    end
+
+    # Input iriq can't read is the OS error in the Rust CLI's words,
+    # `iriq: Permission denied (os error 13)`, code read_error.
+    def read_guard
+      yield
+    rescue SystemCallError => e
+      raise InputError.new("read_error", Iriq.os_error_message(e))
     end
 
     # Input is UTF-8 regardless of locale; anything else is an error, not a
@@ -711,11 +724,7 @@ module Iriq
     end
 
     def read_text(path)
-      if path.nil? || path == "-"
-        stdin.read
-      else
-        File.read(path)
-      end
+      read_guard { path.nil? || path == "-" ? stdin.read : File.read(path) }
     end
 
     # Compact identifier hash for parse output (both JSON and human). Drops

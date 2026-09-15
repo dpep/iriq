@@ -308,6 +308,34 @@ run_pair "invalid utf-8 stdin -n"        "$bad_utf8" -C -n
 run_pair "invalid utf-8 stdin url list"  "$bad_utf8" -C
 run_pair "invalid utf-8 stdin json"      "$bad_utf8" -C --json -n
 
+# Input that can't be read is the OS error in io::Error's words. A file iriq
+# may not read (skipped where permissions aren't enforced, e.g. root), and
+# stdin that is a directory.
+printf 'https://foo.com/users/1\n' > "$corpus_dir/noread.txt"
+chmod 000 "$corpus_dir/noread.txt"
+if [[ ! -r "$corpus_dir/noread.txt" ]]; then
+  run_pair "unreadable file arg"      "" -C "$corpus_dir/noread.txt"
+  run_pair "unreadable file arg -n"   "" -C -n "$corpus_dir/noread.txt"
+  run_pair "unreadable file arg json" "" -C --json cluster "$corpus_dir/noread.txt"
+fi
+dir_stdin_pair() {
+  local label="$1"
+  shift
+  local ruby_out rust_out
+  ruby_out=$( (cd "$REPO_ROOT" && $RUBY "$@" < "$corpus_dir") 2>&1 || true )
+  rust_out=$( "$RUST_BIN" "$@" < "$corpus_dir" 2>&1 || true )
+  if [[ "$ruby_out" == "$rust_out" ]]; then
+    pass_count=$((pass_count + 1))
+  else
+    fail_count=$((fail_count + 1))
+    echo
+    echo "MISMATCH: $label"
+    diff <(echo "$ruby_out") <(echo "$rust_out") | sed 's/^/    /' || true
+  fi
+}
+dir_stdin_pair "stdin is a directory"         -C
+dir_stdin_pair "stdin is a directory -n json" -C -n --json
+
 # Corpus files iriq refuses: a JSON object with no corpus keys (left
 # untouched), and a SQLite corpus from a newer schema.
 printf '{"foo": 1}' > "$corpus_dir/notes.json"
