@@ -235,6 +235,13 @@ fn host_downcases_with_full_unicode_case_mapping() {
 }
 
 #[test]
+fn host_downcase_has_no_final_sigma_rule() {
+    // Ruby's String#downcase maps each char independently: a word-final Σ is σ, not ς.
+    assert_eq!(parse("https://ΑΣ-x.com/users/1").unwrap().host, "ασ-x.com");
+    assert_eq!(parse("https://ΟΔΟΣ/x").unwrap().host, "οδοσ");
+}
+
+#[test]
 fn unicode_whitespace_is_not_stripped_from_input() {
     // Ruby String#strip is ASCII-only, so a leading U+3000 blocks the parse.
     assert!(parse("\u{3000}https://foo.com/x").is_err());

@@ -105,8 +105,15 @@ fn parse_authority_url(
         .captures(remainder)
         .or_else(|| AUTH_RE.captures(remainder))
         .ok_or_else(|| ParseError::new(format!("cannot parse authority from {:?}", original)))?;
-    // Ruby downcases with full Unicode case mapping, not just ASCII.
-    let host = caps.name("host").unwrap().as_str().to_lowercase();
+    // Ruby downcases with full Unicode case mapping, not just ASCII, but per
+    // char: str::to_lowercase's final-sigma rule would turn "ΑΣ-x" into "ας-x".
+    let host: String = caps
+        .name("host")
+        .unwrap()
+        .as_str()
+        .chars()
+        .flat_map(char::to_lowercase)
+        .collect();
     // Ruby's port.to_i is arbitrary-precision, so any digit run is accepted
     // (":0" and ":99999" included). u64 covers every realistic case;
     // KNOWN-GAP: a 20+-digit port would overflow here where Ruby accepts it.
