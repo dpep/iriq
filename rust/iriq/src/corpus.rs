@@ -164,16 +164,21 @@ impl Corpus {
         // become dynamic Custom types, matching Ruby's symbol semantics.
         let ty = segment_type_from_name(&p.suggested_type);
         let r = SynthesizedRecognizer::from_prefix(p.prefix.clone(), ty);
-        self.ensure_per_corpus_classifier();
-        self.classifier
-            .register_recognizer(Arc::new(SynthesizedRecognizer {
-                prefix: r.prefix.clone(),
-                ty: r.ty,
-                specificity: r.specificity,
-            }));
-        self.storage.record_activated_recognizer(r.dump())?;
+        let dump = r.dump();
+        if self.has_activated(&dump) {
+            return Ok(r);
+        }
+        self.storage.record_activated_recognizer(dump)?;
+        self.reapply_activated_recognizers();
         self.reinfer()?;
         Ok(r)
+    }
+
+    fn has_activated(&self, dump: &serde_json::Value) -> bool {
+        let mut found = false;
+        self.storage
+            .each_activated_recognizer(&mut |stored| found |= stored == dump);
+        found
     }
 
     pub fn activate_proposals_above(
@@ -196,26 +201,24 @@ impl Corpus {
         self.storage.activated_recognizer_count()
     }
 
-    fn ensure_per_corpus_classifier(&mut self) {
-        if Arc::ptr_eq(&self.classifier, &DEFAULT_CLASSIFIER_ARC) {
-            self.classifier = Arc::new(SegmentClassifier::new());
-        }
-    }
-
+    /// The classifier is a function of the stored activations: the shared
+    /// default when there are none, otherwise a private copy holding exactly
+    /// the stored set, so a live corpus and its reopened self agree.
     fn reapply_activated_recognizers(&mut self) {
-        if self.storage.activated_recognizer_count() == 0 {
-            return;
-        }
-        self.ensure_per_corpus_classifier();
-        let mut recos = Vec::new();
+        let mut recognizers = Vec::new();
         self.storage.each_activated_recognizer(&mut |v| {
             if let Some(r) = SynthesizedRecognizer::from_dump(v) {
-                recos.push(r);
+                recognizers.push(r);
             }
         });
-        for r in recos {
-            self.classifier.register_recognizer(Arc::new(r));
+        if recognizers.is_empty() {
+            return;
         }
+        let classifier = SegmentClassifier::new();
+        for r in recognizers {
+            classifier.register_recognizer(Arc::new(r));
+        }
+        self.classifier = Arc::new(classifier);
     }
 
     fn events_for_iri(&self, iri: &Identifier) -> Vec<Event> {
@@ -641,5 +644,55 @@ static DEFAULT_CLASSIFIER_ARC: Lazy<Arc<SegmentClassifier>> =
 impl Default for Corpus {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn proposal(prefix: &str, ty: &str) -> RecognizerProposal {
+        RecognizerProposal {
+            prefix: prefix.into(),
+            suggested_type: ty.into(),
+            positions: vec![],
+            hosts: vec![],
+            coverage: 1.0,
+            confidence: 1.0,
+            observation_count: 0,
+            sample_values: vec![],
+            strategy: "manual".into(),
+        }
+    }
+
+    #[test]
+    fn reactivating_a_recognizer_changes_nothing() {
+        let mut c = Corpus::new();
+        c.observe("https://x.com/t/tok_abc1").unwrap();
+        c.activate_proposal(&proposal("tok_", "tok")).unwrap();
+        let live = c.classifier.recognizer_count();
+        for _ in 0..3 {
+            c.activate_proposal(&proposal("tok_", "tok")).unwrap();
+        }
+        assert_eq!(c.classifier.recognizer_count(), live);
+        assert_eq!(c.activated_recognizer_count(), 1);
+    }
+
+    #[test]
+    fn activation_stays_inside_its_corpus() {
+        let url = "https://x.com/items/tok_Ab12Cd";
+        let untouched = Corpus::new();
+        let corpus_before = untouched.normalize(url).unwrap();
+        let free_before = crate::normalize(url).unwrap();
+
+        let mut activated = Corpus::new();
+        activated
+            .activate_proposal(&proposal("tok_", "tok"))
+            .unwrap();
+        assert_ne!(activated.normalize(url).unwrap(), corpus_before);
+
+        assert_eq!(untouched.normalize(url).unwrap(), corpus_before);
+        assert_eq!(Corpus::new().normalize(url).unwrap(), corpus_before);
+        assert_eq!(crate::normalize(url).unwrap(), free_before);
     }
 }
