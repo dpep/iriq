@@ -107,7 +107,10 @@ impl SqliteStorage {
             }
         }
         enable_wal(&conn, path)?;
-        conn.execute_batch("PRAGMA synchronous = NORMAL;")
+        // Up to 64MB of pages (a ceiling, not an allocation): an ingest that
+        // commits a turn at a time re-reads the pages it wrote last turn, and
+        // SQLite's default 2MB cache turns that into disk reads.
+        conn.execute_batch("PRAGMA synchronous = NORMAL; PRAGMA cache_size = -64000;")
             .map_err(rs_err)?;
         conn.execute_batch(SCHEMA).map_err(rs_err)?;
 

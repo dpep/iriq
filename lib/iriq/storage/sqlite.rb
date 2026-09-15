@@ -175,6 +175,10 @@ module Iriq
         @db.busy_handler_timeout = LOCK_WAIT * 1000
         enable_wal!
         @db.execute("PRAGMA synchronous = NORMAL")
+        # Up to 64MB of pages (a ceiling, not an allocation): an ingest that
+        # commits a turn at a time re-reads the pages it wrote last turn, and
+        # SQLite's default 2MB cache turns that into disk reads.
+        @db.execute("PRAGMA cache_size = -64000")
         @db.execute("PRAGMA foreign_keys = ON")
         @in_batch       = false
         @in_transaction = false
