@@ -42,6 +42,8 @@ module Iriq
       tmp = "#{path}.#{Process.pid}.#{Storage.next_temp_seq}.tmp"
       File.write(tmp, contents)
       File.rename(tmp, path)
+    rescue SystemCallError => e
+      raise CorpusError, "corpus #{path}: #{Iriq.os_error_message(e)}"
     ensure
       File.delete(tmp) if tmp && File.exist?(tmp)
     end

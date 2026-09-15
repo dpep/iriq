@@ -304,6 +304,31 @@ describe Iriq::Storage do
       expect { Iriq::Corpus.open(broken) }.to raise_error(Iriq::CorpusError, "corpus #{broken}: not valid JSON")
     end
 
+    it "reports a SQLite file it can't open as a CorpusError, not a SQLite exception" do
+      garbage = File.join(@dir, "garbage.db")
+      File.write(garbage, "not a sqlite database " * 20)
+      expect { Iriq::Corpus.open(garbage) }
+        .to raise_error(Iriq::CorpusError, "corpus #{garbage}: file is not a database")
+
+      directory = File.join(@dir, "dir.db")
+      Dir.mkdir(directory)
+      expect { Iriq::Corpus.open(directory) }
+        .to raise_error(Iriq::CorpusError, "corpus #{directory}: unable to open database file")
+    end
+
+    it "reports a JSON corpus it can't read or write as a CorpusError, in the OS's words" do
+      directory = File.join(@dir, "dir.json")
+      Dir.mkdir(directory)
+      expect { Iriq::Corpus.open(directory) }
+        .to raise_error(Iriq::CorpusError, "corpus #{directory}: Is a directory (os error 21)")
+
+      unwritable = File.join(@dir, "missing", "c.json")
+      corpus = Iriq::Corpus.open(unwritable)
+      corpus.observe("https://foo.com/x")
+      expect { corpus.save }
+        .to raise_error(Iriq::CorpusError, "corpus #{unwritable}: No such file or directory (os error 2)")
+    end
+
     it "treats {} as an empty corpus" do
       path = File.join(@dir, "empty.json")
       File.write(path, "{}")

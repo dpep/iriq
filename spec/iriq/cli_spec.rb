@@ -683,6 +683,17 @@ describe Iriq::CLI do
       expect(run("--corpus", path, "-n", "https://x.com/users/2")).to eq(1)
       expect(stderr.string).to eq("iriq: corpus #{path}: attempt to write a readonly database\n")
     end
+
+    it "reports a corpus directory it can't create the same way, before announcing a corpus" do
+      File.chmod(0o555, dir)
+      skip "file permissions aren't enforced for this user" if File.writable?(dir)
+      path = File.join(dir, "sub", "c.db")
+
+      expect(run("--corpus", path, "-n", "https://x.com/users/1")).to eq(1)
+      expect(stderr.string).to eq("iriq: corpus #{path}: Permission denied (os error 13)\n")
+    ensure
+      File.chmod(0o755, dir)
+    end
   end
 
   describe "corpus commands" do
@@ -898,6 +909,7 @@ describe Iriq::CLI do
         expect(json_error).to eq("code" => "invalid_utf8", "message" => "stream did not contain valid UTF-8")
       end
     end
+
   end
 
   describe "cluster" do

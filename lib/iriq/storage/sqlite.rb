@@ -128,6 +128,15 @@ module Iriq
       def self.open(path, classifier: SegmentClassifier::DEFAULT,
                           max_values_per_position: PositionStats::DEFAULT_MAX_VALUES)
         new(path: path, classifier: classifier, max_values_per_position: max_values_per_position).tap(&:setup!)
+      rescue SQLite3::Exception => e
+        raise corpus_error(path, e)
+      end
+
+      # A failure SQLite reports (not a database, can't open, read-only, full
+      # disk) reads like every other corpus failure: `corpus PATH: cause`. The
+      # gem appends the failing SQL to its message; the cause is the part before.
+      def self.corpus_error(path, e)
+        CorpusError.new("corpus #{path}: #{e.message.split(":\n", 2).first}")
       end
 
       def initialize(path:, classifier: SegmentClassifier::DEFAULT,
@@ -210,10 +219,10 @@ module Iriq
         end
       end
 
-      # A write SQLite refuses (read-only file, full disk) reads like every
-      # other corpus failure: `corpus PATH: cause`. Anything else passes through.
+      # SQLite failures inside a transaction become CorpusErrors; anything else
+      # passes through.
       def corpus_error(e)
-        e.is_a?(SQLite3::Exception) ? CorpusError.new("corpus #{@path}: #{e.message}") : e
+        e.is_a?(SQLite3::Exception) ? Sqlite.corpus_error(@path, e) : e
       end
 
       # Saving is automatic — incremental UPSERTs hit disk on commit. flush

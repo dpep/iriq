@@ -271,7 +271,11 @@ module Iriq
 
     def load_corpus(path, host_strategy: :full, announce_create: false)
       if announce_create && !File.exist?(path)
-        FileUtils.mkdir_p(File.dirname(path))
+        begin
+          FileUtils.mkdir_p(File.dirname(path))
+        rescue SystemCallError => e
+          raise CorpusError, "corpus #{path}: #{Iriq.os_error_message(e)}"
+        end
         stderr.puts "iriq: created corpus at #{path} (disable with --no-corpus or IRIQ_NO_CORPUS=1)"
       end
       Corpus.open(path, host_strategy: host_strategy)
