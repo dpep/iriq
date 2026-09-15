@@ -185,6 +185,55 @@ fn exporting_to_a_sqlite_path_is_refused() {
     assert!(!target.exists(), "wrote an unopenable file");
 }
 
+// ── non-finite numbers across a reopen ───────────────────────────────────────
+
+/// A 400-digit value overflows f64 to infinity: it counts as an observation
+/// but must stay out of min/max/avg, live and after the corpus is reloaded.
+fn observe_one_and_huge(c: &mut Corpus) {
+    c.observe("https://inf.com/p?v=1").unwrap();
+    c.observe(&format!("https://inf.com/p?v={}", "1".repeat(400)))
+        .unwrap();
+}
+
+fn v_range(c: &Corpus) -> (f64, f64, f64) {
+    let rows = c.params_for("https://inf.com/p?v=1");
+    let v = rows
+        .iter()
+        .find(|p| p.name == "v")
+        .expect("a `v` param row");
+    (v.min, v.max, v.avg)
+}
+
+#[test]
+fn a_reopened_json_corpus_keeps_infinite_values_out_of_ranges() {
+    let p = temp_path("nonfinite.json");
+    cleanup(&p);
+
+    let mut c = Corpus::open(&p).unwrap();
+    observe_one_and_huge(&mut c);
+    c.save(&p).unwrap();
+    drop(c);
+
+    assert_eq!(v_range(&Corpus::open(&p).unwrap()), (1.0, 1.0, 1.0));
+    cleanup(&p);
+}
+
+#[test]
+#[cfg(feature = "sqlite")]
+fn a_reopened_sqlite_corpus_keeps_infinite_values_out_of_ranges() {
+    let p = temp_path("nonfinite.db");
+    cleanup(&p);
+
+    {
+        let mut c = Corpus::open(&p).unwrap();
+        observe_one_and_huge(&mut c);
+        c.close().unwrap();
+    }
+
+    assert_eq!(v_range(&Corpus::open(&p).unwrap()), (1.0, 1.0, 1.0));
+    cleanup(&p);
+}
+
 // ── JSON backend ─────────────────────────────────────────────────────────────
 
 #[test]

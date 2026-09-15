@@ -14,6 +14,7 @@ use crate::parser::parse;
 use crate::position::{Position, PositionScope};
 use crate::position_stats::{PositionStats, DEFAULT_MAX_VALUES_PER_POSITION};
 use crate::storage::Storage;
+use crate::storage_json::rebuild_numeric_stats;
 use crate::storage_memory::MemoryStorage;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{Map, Value};
@@ -405,34 +406,7 @@ impl Storage for SqliteStorage {
                     .insert(segment_type_from_name(&row.0), row.1 as usize);
             }
         }
-        // Recompute numeric stats from value_counts × types — same approach
-        // as JSON load, same caveat (cap-trimmed values are lost).
-        if ps
-            .type_counts
-            .get(&SegmentType::Integer)
-            .copied()
-            .unwrap_or(0)
-            + ps.type_counts
-                .get(&SegmentType::Float)
-                .copied()
-                .unwrap_or(0)
-            > 0
-        {
-            for (v, n) in &ps.value_counts {
-                if let Ok(num) = v.parse::<f64>() {
-                    for _ in 0..*n {
-                        if ps.numeric_count == 0 || num < ps.numeric_min {
-                            ps.numeric_min = num;
-                        }
-                        if ps.numeric_count == 0 || num > ps.numeric_max {
-                            ps.numeric_max = num;
-                        }
-                        ps.numeric_count += 1;
-                        ps.numeric_sum += num;
-                    }
-                }
-            }
-        }
+        rebuild_numeric_stats(&mut ps);
         Some(ps)
     }
 
@@ -594,33 +568,7 @@ impl Storage for SqliteStorage {
         }
         // Recompute numeric for each param.
         for stats in cluster.param_stats.values_mut() {
-            if stats
-                .type_counts
-                .get(&SegmentType::Integer)
-                .copied()
-                .unwrap_or(0)
-                + stats
-                    .type_counts
-                    .get(&SegmentType::Float)
-                    .copied()
-                    .unwrap_or(0)
-                > 0
-            {
-                for (v, n) in &stats.value_counts.clone() {
-                    if let Ok(num) = v.parse::<f64>() {
-                        for _ in 0..*n {
-                            if stats.numeric_count == 0 || num < stats.numeric_min {
-                                stats.numeric_min = num;
-                            }
-                            if stats.numeric_count == 0 || num > stats.numeric_max {
-                                stats.numeric_max = num;
-                            }
-                            stats.numeric_count += 1;
-                            stats.numeric_sum += num;
-                        }
-                    }
-                }
-            }
+            rebuild_numeric_stats(stats);
         }
         Some(cluster)
     }
@@ -915,5 +863,21 @@ mod tests {
         assert!(matches!(err, Error::Unsupported { .. }), "{err:?}");
         assert!(err.to_string().contains("newer"), "{err}");
         assert_eq!(stored_version(&conn), (SCHEMA_VERSION + 1).to_string());
+    }
+
+    #[test]
+    fn reloaded_position_stats_keep_infinite_values_out_of_the_range() {
+        let mut s = SqliteStorage::open(&temp_db("nonfinite"), 0).unwrap();
+        let pos = Position::path("inf.com", "/p");
+        s.observe_position(&pos, "1", SegmentType::Integer).unwrap();
+        s.observe_position(&pos, &"1".repeat(400), SegmentType::Integer)
+            .unwrap();
+
+        let stats = s.position_stats_for(&pos).unwrap();
+        assert_eq!(stats.total, 2);
+        assert_eq!(
+            (stats.numeric_count, stats.numeric_min, stats.numeric_max),
+            (1, 1.0, 1.0)
+        );
     }
 }

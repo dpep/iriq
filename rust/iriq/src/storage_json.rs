@@ -497,38 +497,35 @@ fn parse_position_stats(obj: &Map<String, Value>) -> PositionStats {
             }
         }
     }
-    // Recompute numeric stats from value_counts to keep type-promotion
-    // logic working post-load. Iterates value_counts × types.
-    // (Lossy with cap: numeric_sum may drift if values were dropped at
-    // the cap — same caveat the Go side has.)
-    for (v, n) in &ps.value_counts {
-        if let Ok(num) = v.parse::<f64>() {
-            // Only count as numeric if integer / float type was tracked.
-            let was_numeric = ps
-                .type_counts
-                .get(&SegmentType::Integer)
-                .copied()
-                .unwrap_or(0)
-                > 0
-                || ps
-                    .type_counts
-                    .get(&SegmentType::Float)
-                    .copied()
-                    .unwrap_or(0)
-                    > 0;
-            if was_numeric {
-                for _ in 0..*n {
-                    if ps.numeric_count == 0 || num < ps.numeric_min {
-                        ps.numeric_min = num;
-                    }
-                    if ps.numeric_count == 0 || num > ps.numeric_max {
-                        ps.numeric_max = num;
-                    }
-                    ps.numeric_count += 1;
-                    ps.numeric_sum += num;
-                }
+    rebuild_numeric_stats(&mut ps);
+    ps
+}
+
+/// Rebuild a reloaded position's numeric range from its value counts, by the
+/// rule `PositionStats::observe` applies live: only integer/float positions
+/// have a range, and a value that overflows to ±inf counts as an observation
+/// but never enters min/max/avg. Lossy at the value cap: values dropped there
+/// are gone from the range too.
+pub(crate) fn rebuild_numeric_stats(stats: &mut PositionStats) {
+    let numeric = [SegmentType::Integer, SegmentType::Float]
+        .iter()
+        .any(|t| stats.type_counts.get(t).is_some_and(|&n| n > 0));
+    if !numeric {
+        return;
+    }
+    for (value, &count) in &stats.value_counts {
+        let Some(num) = value.parse::<f64>().ok().filter(|n| n.is_finite()) else {
+            continue;
+        };
+        for _ in 0..count {
+            if stats.numeric_count == 0 || num < stats.numeric_min {
+                stats.numeric_min = num;
             }
+            if stats.numeric_count == 0 || num > stats.numeric_max {
+                stats.numeric_max = num;
+            }
+            stats.numeric_count += 1;
+            stats.numeric_sum += num;
         }
     }
-    ps
 }
