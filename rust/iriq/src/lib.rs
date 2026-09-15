@@ -1,54 +1,5 @@
-//! # iriq — IRI/URL extraction, normalization, shape clustering
-//!
-//! iriq finds the *shape* of a URL — the route template behind it. Erase the
-//! parts that vary, keep the parts that don't: `/users/123` → `/users/{user_id}`.
-//!
-//! (An IRI is just a URL — the internationalized superset of URI/URL that also
-//! allows non-ASCII characters. If you know URLs, you know IRIs.)
-//!
-//! ## Quick start
-//!
-//! ```
-//! use iriq::{parse, normalize, Extractor};
-//!
-//! // Parse + normalize.
-//! let iri = parse("https://Foo.com:443/users/123").unwrap();
-//! assert_eq!(iri.host, "foo.com");
-//! assert_eq!(iri.port, None); // default port stripped
-//! assert_eq!(normalize("https://foo.com/users/123").unwrap(),
-//!            "https://foo.com/users/{user_id}");
-//!
-//! // Pull IRIs out of free text.
-//! let urls = Extractor::new().extract_strings(
-//!     "Visit https://foo.com today, also hit foo.com/users."
-//! );
-//! assert_eq!(urls.len(), 2);
-//! ```
-//!
-//! ## Streaming clustering with a corpus
-//!
-//! ```no_run
-//! use iriq::Corpus;
-//!
-//! // Persisted to SQLite (.db / .sqlite / .sqlite3).
-//! let mut corpus = Corpus::open("c.db").unwrap();
-//! for url in &["https://foo.com/users/1",
-//!              "https://foo.com/users/2",
-//!              "https://foo.com/users/3"] {
-//!     corpus.observe(url).unwrap();
-//! }
-//! corpus.save("c.db").unwrap();
-//! ```
-//!
-//! Corpora persist to SQLite out of the box (bundled `rusqlite`, WAL,
-//! concurrent observers) — no system dependency. That backend lives behind
-//! the default-on `sqlite` feature; `default-features = false` drops the
-//! bundled C build for consumers who only need parsing, extraction, or
-//! normalization, leaving the Memory and JSON backends.
-//!
-//! See the [project README](https://github.com/dpep/iriq) for the
-//! conceptual overview and the CHANGELOG for version history.
-
+// The crate docs are the README, so its samples compile and run as doctests.
+#![doc = include_str!("../README.md")]
 // docs.rs builds on nightly with `--cfg docsrs`, where `doc(cfg)` labels the
 // SQLite-only items; stable builds never see this.
 #![cfg_attr(docsrs, feature(doc_cfg))]
