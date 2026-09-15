@@ -149,6 +149,41 @@ fn a_panic_inside_batch_rolls_back_and_later_writes_persist() {
 
 #[test]
 #[cfg(feature = "sqlite")]
+fn an_observation_failing_part_way_leaves_nothing_behind() {
+    let p = temp_path("partial_observe.db");
+    cleanup(&p);
+    let mut c = Corpus::open(&p).unwrap();
+    // The source-log insert is the last write an observation makes.
+    rusqlite::Connection::open(&p)
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER no_bad BEFORE INSERT ON observed_iris WHEN NEW.canonical LIKE '%/bad/%' \
+             BEGIN SELECT RAISE(ABORT, 'simulated write failure'); END;",
+        )
+        .unwrap();
+
+    c.observe("https://x.com/u/1").unwrap();
+    assert!(c.observe("https://bad.com/bad/2").is_err());
+    // Inside a batch the observation joins the batch, which rolls back whole.
+    let batched = c.batch(|c| {
+        c.observe("https://y.com/u/3")?;
+        c.observe("https://y.com/bad/4")
+    });
+    assert!(batched.is_err());
+    drop(c);
+
+    let reopened = Corpus::open(&p).unwrap();
+    assert_eq!(reopened.observed_iri_count(), 1);
+    assert_eq!(
+        reopened.host_counts(),
+        std::collections::HashMap::from([("x.com".to_string(), 1)])
+    );
+    assert_eq!(reopened.raw_shape_counts().values().sum::<usize>(), 1);
+    cleanup(&p);
+}
+
+#[test]
+#[cfg(feature = "sqlite")]
 fn saving_to_another_spelling_of_the_live_path_flushes_in_place() {
     let dir = temp_path("alias_dir");
     let _ = std::fs::remove_dir_all(&dir);

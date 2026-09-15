@@ -119,9 +119,13 @@ impl Corpus {
         self.observe_iri(&iri)
     }
 
+    /// One transaction on SQLite, so a failure part-way leaves none of the
+    /// observation behind. Inside `batch` it joins the batch's transaction.
     pub fn observe_iri(&mut self, iri: &Identifier) -> Result<()> {
-        self.replay(iri)?;
-        self.storage.record_observation(&iri.canonical())
+        self.batch(|c| {
+            c.replay(iri)?;
+            c.storage.record_observation(&iri.canonical())
+        })
     }
 
     /// Same as `observe` but used during `reinfer` — doesn't record the
@@ -344,7 +348,8 @@ impl Corpus {
     /// Run `f` as one backend transaction. On SQLite it commits when `f`
     /// returns `Ok`, and rolls back when `f` returns `Err` or panics (the
     /// panic then continues); Memory and JSON corpora apply each write as it
-    /// happens.
+    /// happens. A batch opened inside a batch joins it: only the outermost
+    /// commits or rolls back, so a failure `f` swallows keeps its writes.
     pub fn batch<T>(&mut self, f: impl FnOnce(&mut Corpus) -> Result<T>) -> Result<T> {
         self.storage.batch_begin()?;
         // Unwind safety: the rollback below is what restores consistency.

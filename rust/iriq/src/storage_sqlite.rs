@@ -29,7 +29,8 @@ pub struct SqliteStorage {
     conn: Mutex<Connection>,
     max_values: usize,
     path: PathBuf,
-    in_batch: bool,
+    /// Batches open on this connection; the first is the transaction.
+    depth: usize,
     /// Tracked values per position, counted inside a batch so each new value
     /// needn't re-count them. Exact only while this connection holds the
     /// write lock and, across batches, while `counts_version` still matches.
@@ -113,7 +114,7 @@ impl SqliteStorage {
             conn: Mutex::new(conn),
             max_values,
             path: path.to_path_buf(),
-            in_batch: false,
+            depth: 0,
             value_counts: HashMap::new(),
             counts_version: None,
         })
@@ -287,7 +288,7 @@ impl Storage for SqliteStorage {
             .and_then(|mut s| s.execute(params![pos.host, scope, pos.locator, value]))
             .map_err(err)?;
         if updated == 0 {
-            let remembered = self.value_counts.get(pos).filter(|_| self.in_batch);
+            let remembered = self.value_counts.get(pos).filter(|_| self.depth > 0);
             let mut card = match remembered {
                 Some(&n) => n,
                 None => c
@@ -309,7 +310,7 @@ impl Storage for SqliteStorage {
                 .map_err(err)?;
                 card += 1;
             }
-            if self.in_batch {
+            if self.depth > 0 {
                 self.value_counts.insert(pos.clone(), card);
             }
         }
@@ -802,7 +803,14 @@ impl Storage for SqliteStorage {
         n as usize
     }
 
+    // A batch inside a batch joins it, as in Ruby. A savepoint per nested
+    // batch would let it roll back alone, but costs a statement journal per
+    // observation on every batched ingest.
     fn batch_begin(&mut self) -> Result<()> {
+        if self.depth > 0 {
+            self.depth += 1;
+            return Ok(());
+        }
         let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         c.execute_batch("BEGIN IMMEDIATE")
             .map_err(|e| Error::sqlite(&self.path, e))?;
@@ -815,11 +823,14 @@ impl Storage for SqliteStorage {
             self.value_counts.clear();
         }
         self.counts_version = version;
-        self.in_batch = true;
+        self.depth = 1;
         Ok(())
     }
     fn batch_commit(&mut self) -> Result<()> {
-        self.in_batch = false;
+        self.depth -= 1;
+        if self.depth > 0 {
+            return Ok(());
+        }
         let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         let committed = c.execute_batch("COMMIT");
         if committed.is_err() {
@@ -828,7 +839,10 @@ impl Storage for SqliteStorage {
         committed.map_err(|e| Error::sqlite(&self.path, e))
     }
     fn batch_rollback(&mut self) -> Result<()> {
-        self.in_batch = false;
+        self.depth -= 1;
+        if self.depth > 0 {
+            return Ok(());
+        }
         self.value_counts.clear();
         let c = self.conn.get_mut().unwrap_or_else(PoisonError::into_inner);
         c.execute_batch("ROLLBACK")
