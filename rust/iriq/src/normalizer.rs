@@ -128,29 +128,29 @@ fn shape_query(iri: &Identifier, c: &SegmentClassifier) -> String {
     keys.sort();
     let mut parts: Vec<String> = Vec::with_capacity(keys.len());
     for k in keys {
-        let v = iri.query_params.get(&k).unwrap_or("").to_string();
-        let mut t = c.classify(&v);
-        if let Some(h) = param_name_hint(&k, t) {
-            t = h;
-        }
-        let shaped = if t == SegmentType::Date {
-            if let Some(canon) = canonical_date(&v) {
-                canon
-            } else {
-                format!("{{{}}}", display_type(t))
-            }
-        } else if t == SegmentType::Currency {
-            if let Some(canon) = canonical_currency(&v) {
-                canon
-            } else {
-                format!("{{{}}}", display_type(t))
-            }
-        } else if c.variable(t) {
-            format!("{{{}}}", display_type(t))
-        } else {
-            v.clone()
-        };
-        parts.push(format!("{}={}", k, shaped));
+        let v = iri.query_params.get(&k).unwrap_or("");
+        parts.push(format!("{}={}", k, render_param(&k, v, c)));
     }
     parts.join("&")
+}
+
+/// One param's mechanical rendering. A corpus renders a param it lacks
+/// evidence on through this, so the two paths can't drift.
+pub(crate) fn render_param(name: &str, value: &str, c: &SegmentClassifier) -> String {
+    let mut t = c.classify(value);
+    if let Some(h) = param_name_hint(name, t) {
+        t = h;
+    }
+    let canon = match t {
+        SegmentType::Date => canonical_date(value),
+        SegmentType::Currency => canonical_currency(value),
+        _ => None,
+    };
+    match canon {
+        Some(canon) => canon,
+        None if matches!(t, SegmentType::Date | SegmentType::Currency) || c.variable(t) => {
+            format!("{{{}}}", display_type(t))
+        }
+        None => value.to_string(),
+    }
 }

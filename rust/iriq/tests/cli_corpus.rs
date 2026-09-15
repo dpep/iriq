@@ -75,8 +75,8 @@ fn cli_pipe_normalize_renders_from_the_corpus_so_far() {
         .collect();
     let out = run(&["-n", "--corpus", cp], &urls);
 
-    // Pinned at today's collapse point; a minimum-evidence rule for shape
-    // changes would move it.
+    // Until the slot has 5 observations it prints as -C would; the fifth
+    // distinct name is the first with evidence that the slot is variable.
     let expected: String = NAMES
         .iter()
         .enumerate()

@@ -288,3 +288,38 @@ fn fixture_param_summary() {
         }
     }
 }
+
+// ─── Corpus-informed normalize (evidence gate, -N with a corpus) ────────────
+
+#[derive(Deserialize)]
+struct CorpusNormalizeCase {
+    observe: Vec<String>,
+    input: String,
+    hints: bool,
+    output: String,
+}
+
+#[derive(Deserialize)]
+struct CorpusNormalizeFx {
+    cases: Vec<CorpusNormalizeCase>,
+}
+
+#[test]
+fn fixture_corpus_normalize() {
+    let fx: CorpusNormalizeFx = load("corpus_normalize.json");
+    for case in &fx.cases {
+        let mut c = Corpus::new();
+        for u in &case.observe {
+            c.observe(u).unwrap();
+        }
+        let iri = parse(&case.input).unwrap();
+        assert_eq!(
+            c.normalize_identifier(&iri, case.hints),
+            case.output,
+            "{:?} hints={} after {} observations",
+            case.input,
+            case.hints,
+            case.observe.len()
+        );
+    }
+}

@@ -1,5 +1,6 @@
 use crate::classifier::{
-    canonical_date, display_type, segment_type_from_name, SegmentClassifier, SegmentType,
+    canonical_currency, canonical_date, display_type, segment_type_from_name, SegmentClassifier,
+    SegmentType,
 };
 use crate::cluster::ParamSummary;
 use crate::cluster::{placeholder_for, Cluster};
@@ -9,7 +10,7 @@ use crate::errors::{Error, ParseError, Result};
 use crate::event::Event;
 use crate::hints::{derive_hints, SegmentHint};
 use crate::identifier::Identifier;
-use crate::normalizer::{normalize_identifier_with_evidence, NormalizationEvidence};
+use crate::normalizer::{normalize_identifier_with_evidence, render_param, NormalizationEvidence};
 use crate::parser::parse;
 use crate::position::Position;
 use crate::position_stats::DEFAULT_MAX_VALUES_PER_POSITION;
@@ -271,14 +272,20 @@ impl Corpus {
         events
     }
 
+    /// Corpus-informed [`normalize`](crate::normalize). The corpus changes a
+    /// shape only at a position or param it has seen at least 5 times; below
+    /// that the output is exactly what `normalize` gives.
     pub fn normalize(&self, input: &str) -> std::result::Result<String, ParseError> {
         let iri = parse(input)?;
-        Ok(self.normalize_identifier(&iri))
+        Ok(self.normalize_identifier(&iri, true))
     }
 
-    pub fn normalize_identifier(&self, iri: &Identifier) -> String {
+    /// Corpus-informed [`normalize_identifier`](crate::normalize_identifier).
+    /// `hints: false` renders bare type placeholders (`{integer}`), and a slot
+    /// only the corpus knows is variable renders `{value}`.
+    pub fn normalize_identifier(&self, iri: &Identifier, hints: bool) -> String {
         let ev: &dyn NormalizationEvidence = self;
-        normalize_identifier_with_evidence(iri, &self.classifier, true, ev)
+        normalize_identifier_with_evidence(iri, &self.classifier, hints, ev)
     }
 
     pub fn explain(&self, input: &str) -> Vec<CorpusEntry> {
@@ -423,45 +430,45 @@ impl Corpus {
         out
     }
 
-    fn corpus_token(&self, a: &Annotated) -> String {
+    fn corpus_token(&self, a: &Annotated, hints: bool) -> String {
+        if let Some(canon) = canonical_form(a.hint.ty, &a.hint.value) {
+            return canon;
+        }
         match a.classification {
             Classification::VariableIdentifier | Classification::CorpusInferredVariable => {
-                self.placeholder_for_variable(a)
+                placeholder_for_variable(a, hints)
             }
             _ => a.hint.value.clone(),
         }
     }
+}
 
-    fn placeholder_for_variable(&self, a: &Annotated) -> String {
-        if a.hint.ty == SegmentType::Date {
-            if let Some(canon) = canonical_date(&a.hint.value) {
-                return canon;
-            }
+fn placeholder_for_variable(a: &Annotated, hints: bool) -> String {
+    if a.hint.variable {
+        if hints && !a.hint.hint.is_empty() {
+            return format!("{{{}}}", a.hint.hint);
         }
-        if a.hint.variable {
-            if !a.hint.hint.is_empty() {
-                return format!("{{{}}}", a.hint.hint);
-            }
-            return format!("{{{}}}", display_type(a.hint.ty));
-        }
-        let mut last_literal = String::new();
-        for part in a.prefix.split('/') {
-            if part.is_empty() || part.starts_with('{') {
-                continue;
-            }
-            last_literal = part.to_string();
-        }
-        if !last_literal.is_empty() {
-            return format!("{{{}}}", crate::inflector::singularize(&last_literal));
-        }
-        "{value}".to_string()
+        return format!("{{{}}}", display_type(a.hint.ty));
+    }
+    // Corpus-inferred: the classifier said literal, so there's no type to
+    // show; with hints, name it after the prefix's last literal segment.
+    let last_literal = a
+        .prefix
+        .split('/')
+        .rfind(|part| !part.is_empty() && !part.starts_with('{'));
+    match last_literal {
+        Some(part) if hints => format!("{{{}}}", crate::inflector::singularize(part)),
+        _ => "{value}".to_string(),
     }
 }
 
 impl NormalizationEvidence for Corpus {
-    fn render_path(&self, iri: &Identifier, _c: &SegmentClassifier, _hints: bool) -> String {
+    fn render_path(&self, iri: &Identifier, _c: &SegmentClassifier, hints: bool) -> String {
         let entries = self.annotate_segments(iri);
-        let tokens: Vec<String> = entries.iter().map(|a| self.corpus_token(a)).collect();
+        let tokens: Vec<String> = entries
+            .iter()
+            .map(|a| self.corpus_token(a, hints))
+            .collect();
         format!("/{}", tokens.join("/"))
     }
     fn render_query(&self, iri: &Identifier, _c: &SegmentClassifier) -> String {
@@ -479,38 +486,48 @@ impl Corpus {
         keys.sort();
         let mut parts = Vec::with_capacity(keys.len());
         for k in keys {
-            let v = iri.query_params.get(&k).unwrap_or("").to_string();
-            let t = self.inferred_param_type(&cluster_key, &k, &v);
-            parts.push(format!("{}={}", k, self.render_param_value(&v, t)));
+            let v = iri.query_params.get(&k).unwrap_or("");
+            parts.push(format!(
+                "{}={}",
+                k,
+                self.render_query_param(&cluster_key, &k, v)
+            ));
         }
         parts.join("&")
     }
 
-    fn inferred_param_type(&self, cluster_key: &str, name: &str, value: &str) -> SegmentType {
+    // A param the cluster has seen MIN_OBSERVATIONS_FOR_INFERENCE times renders
+    // with the cluster's type; below that it renders exactly as mechanical
+    // normalize would.
+    fn render_query_param(&self, cluster_key: &str, name: &str, value: &str) -> String {
         // Normalize is infallible for now: a failed read is no evidence.
-        if let Some(s) = self
+        let stats = self
             .storage
             .param_stats_for(cluster_key, name)
             .ok()
             .flatten()
-        {
-            if s.total >= MIN_OBSERVATIONS_FOR_INFERENCE {
-                return Cluster::param_type_for(name, &s);
-            }
-        }
-        self.classifier.classify(value)
-    }
-
-    fn render_param_value(&self, value: &str, t: SegmentType) -> String {
-        if t == SegmentType::Date {
-            if let Some(canon) = canonical_date(value) {
-                return canon;
-            }
+            .filter(|s| s.total >= MIN_OBSERVATIONS_FOR_INFERENCE);
+        let Some(stats) = stats else {
+            return render_param(name, value, &self.classifier);
+        };
+        let t = Cluster::param_type_for(name, &stats);
+        if let Some(canon) = canonical_form(t, value) {
+            return canon;
         }
         if self.classifier.variable(t) {
             return format!("{{{}}}", display_type(t));
         }
         value.to_string()
+    }
+}
+
+/// Dates and currencies print in canonical form (ISO date, upper-case code)
+/// rather than as a placeholder, as mechanical normalize does.
+fn canonical_form(t: SegmentType, value: &str) -> Option<String> {
+    match t {
+        SegmentType::Date => canonical_date(value),
+        SegmentType::Currency => canonical_currency(value),
+        _ => None,
     }
 }
 
@@ -560,8 +577,11 @@ fn classify_segment(
     let enough_data = total >= MIN_OBSERVATIONS_FOR_INFERENCE;
     let value_frac = stats.value_fraction();
 
+    // A dominant value keeps a stable-variable type (`v1`, `usd`) literal, but
+    // only with enough observations to call anything dominant: one sample is
+    // always 100%.
     if entry.variable {
-        if value_frac >= STABLE_LITERAL_THRESHOLD {
+        if enough_data && value_frac >= STABLE_LITERAL_THRESHOLD {
             return Classification::StableLiteral;
         }
         return Classification::VariableIdentifier;

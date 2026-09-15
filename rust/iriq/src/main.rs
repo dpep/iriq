@@ -724,7 +724,7 @@ fn cmd_summary<W: Write, E: Write>(
 // high-cardinality literal slot collapsing to a placeholder).
 fn normalize_section(iri: &Identifier, opts: &Opts, corpus: Option<&Corpus>) -> String {
     match corpus {
-        Some(c) => c.normalize_identifier(iri),
+        Some(c) => c.normalize_identifier(iri, opts.hints),
         None => normalize_identifier(iri, opts.hints),
     }
 }
