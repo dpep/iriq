@@ -694,6 +694,18 @@ describe Iriq::CLI do
     ensure
       File.chmod(0o755, dir)
     end
+
+    it "doesn't announce a corpus it failed to open (dir exists but is read-only)" do
+      File.chmod(0o555, dir)
+      skip "file permissions aren't enforced for this user" if File.writable?(dir)
+      path = File.join(dir, "c.db")
+
+      expect(run("--corpus", path, "-n", "https://x.com/users/1")).to eq(1)
+      expect(stderr.string).not_to include("created corpus")
+      expect(stderr.string).to eq("iriq: corpus #{path}: unable to open database file\n")
+    ensure
+      File.chmod(0o755, dir)
+    end
   end
 
   describe "corpus commands" do

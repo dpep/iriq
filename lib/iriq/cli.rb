@@ -270,15 +270,19 @@ module Iriq
     end
 
     def load_corpus(path, host_strategy: :full, announce_create: false)
-      if announce_create && !File.exist?(path)
+      creating = announce_create && !File.exist?(path)
+      if creating
         begin
           FileUtils.mkdir_p(File.dirname(path))
         rescue SystemCallError => e
           raise CorpusError, "corpus #{path}: #{Iriq.os_error_message(e)}"
         end
-        stderr.puts "iriq: created corpus at #{path} (disable with --no-corpus or IRIQ_NO_CORPUS=1)"
       end
-      Corpus.open(path, host_strategy: host_strategy)
+      corpus = Corpus.open(path, host_strategy: host_strategy)
+      # Only announce once the corpus actually exists — mkdir_p can succeed
+      # (e.g. the dir is there but read-only) while the open still fails.
+      stderr.puts "iriq: created corpus at #{path} (disable with --no-corpus or IRIQ_NO_CORPUS=1)" if creating
+      corpus
     end
 
     # Resolve the corpus file the CLI should use. Precedence:

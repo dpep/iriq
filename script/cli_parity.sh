@@ -367,6 +367,18 @@ if [[ ! -w "$corpus_dir/ro.db" ]]; then
   run_pair "read-only sqlite corpus json" "" --json --corpus "$corpus_dir/ro.db" -n "https://x.com/users/2"
 fi
 
+# A .db path whose directory exists but is read-only: mkdir_p is a no-op (the
+# dir is already there), so the failure surfaces from the open itself. Ruby
+# must not announce a corpus it never actually opened. Skipped where
+# permissions aren't enforced (root).
+mkdir -p "$corpus_dir/readonly"
+chmod 555 "$corpus_dir/readonly"
+if [[ ! -w "$corpus_dir/readonly" ]]; then
+  run_pair "unopenable db in read-only dir"      "" --corpus "$corpus_dir/readonly/c.db" -n "https://x.com/users/1"
+  run_pair "unopenable db in read-only dir json" "" --json --corpus "$corpus_dir/readonly/c.db" -n "https://x.com/users/1"
+fi
+chmod 755 "$corpus_dir/readonly"
+
 corpus_pair() {
   local label="$1" ext="$2"
   local ruby_path="$corpus_dir/ruby$ext"
