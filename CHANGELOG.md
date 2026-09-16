@@ -1,4 +1,4 @@
-###  Unreleased
+###  0.35.1  (2026-09-15)
 
 #### What you must do
 
