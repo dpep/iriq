@@ -15,7 +15,7 @@ ENV["XDG_DATA_HOME"] = Dir.mktmpdir("iriq-spec-data")
 at_exit { FileUtils.remove_entry(ENV["XDG_DATA_HOME"], true) }
 
 SimpleCov.start do
-  add_filter "/spec/"
+  skip "/spec/"
 end
 
 if ENV["CI"] == "true" || ENV["CODECOV_TOKEN"]

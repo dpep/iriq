@@ -62,7 +62,7 @@ DEPENDENCIES
   iriq!
   rspec (>= 3.10)
   rspec-debugging
-  simplecov (>= 0.22)
+  simplecov (>= 1)
   sqlite3 (>= 1.6)
 
 CHECKSUMS
