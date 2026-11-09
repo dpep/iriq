@@ -17,6 +17,6 @@ Gem::Specification.new do |s|
   s.add_development_dependency 'debug', '>= 1'
   s.add_development_dependency 'rspec', '>= 3.10'
   s.add_development_dependency 'rspec-debugging'
-  s.add_development_dependency 'simplecov', '>= 0.22'
+  s.add_development_dependency 'simplecov', '>= 1'
   s.add_development_dependency 'sqlite3', '>= 1.6'
 end
